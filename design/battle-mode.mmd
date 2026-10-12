@@ -1,24 +1,26 @@
 %% Design document; runtime: src/pet_battle.h
 flowchart TB
-  cafe["咖啡厅模式"]
+  cafe["咖啡厅模式<br/>速度 = 战斗的 1/3；不跳跃"]
   any["任意战斗状态<br/>拖拽 > 连击退场 > 关窗结算 > 技能"]
   death["退场：Vital_Death × 1"]
-  retreat["Vital_Retreat × 1<br/>上升到屏幕外"]
-  victory_start["胜利：Victory_Start × 1"]
-  victory_end["Victory_End × 3"]
+  retreat["Vital_Retreat × 1<br/>当前朝向 +180°，上升到屏幕外"]
+  victory_start["胜利：Victory_Start × 1<br/>强制面向屏幕"]
+  victory_end["Victory_End × 3<br/>全过程面向屏幕"]
   skill["技能：Exs × 1<br/>结束恢复原状态和播放进度"]
   pickup["被拖拽<br/>Formation_Pickup 循环"]
-  normal["初始 / 松开拖拽 / 胜利后<br/>Normal_Idle（未选姿态）"]
-  move["随机移动：Move_Ing<br/>有输入 0.6–1.2s；无输入 2–4s<br/>速度 ×2.5，随角色大小变化"]
+  normal["初始 / 松开拖拽 / 胜利后<br/>默认可用姿态_Idle（Normal 优先）"]
+  move["随机移动：Move_Ing<br/>有输入：先远离鼠标，距离 ×50%<br/>末段曲线转向鼠标，接脚部减速<br/>战斗速度 2.376 × 缩放"]
   jump["提前起跳：Move_Jump × 1<br/>交界处为动作中点；移动不中断"]
-  move_end["结束移动<br/>Move_End_Normal / Stand / Kneel<br/>只选完整可用姿态；有输入时朝向鼠标"]
-  idle["姿态_Idle<br/>Normal / Stand / Kneel"]
+  move_end["结束移动：Move_End_姿态（若有）<br/>按停止动作脚部采样减速，站稳后无位移<br/>移动末段曲线转向，停止朝向不突变"]
+  idle["姿态_Idle"]
   callsign["指挥：朝向鼠标<br/>姿态_Callsign × 1<br/>缺少时使用 Normal_Callsign"]
-  attack_start["准备攻击<br/>姿态_Attack_Start × 1"]
+  attack_start["准备攻击<br/>姿态_Attack_Start（缺少则跳过）"]
   attack_delay["攻击空闲<br/>姿态_Attack_Delay 循环"]
   attack["攻击<br/>姿态_Attack_Ing × 1"]
-  attack_end["攻击结束<br/>姿态_Attack_End × 1"]
-  reload["换弹<br/>姿态_Reload / Attack_Reload × 1"]
+  attack_end["攻击结束<br/>姿态_Attack_End（缺少则跳过）"]
+  reload["攻击换弹<br/>姿态_Attack_Reload × 1<br/>期间忽略键盘，不缓存攻击"]
+  follow["跟随鼠标（两模式）<br/>Walk：最近 / 最远距离可调<br/>身位按本体宽度；屏幕范围优先"]
+  dock["停靠单屏<br/>使用行走动作；固定 Idle 范围<br/>停稳后恢复 Idle"]
   cafe -->|"选择战斗模式；模型具备战斗动作"| normal
   any -->|"拖拽：强制打断（最高优先级）"| pickup
   pickup -->|"松开 / 取消拖拽"| normal
@@ -28,30 +30,50 @@ flowchart TB
   any -->|"关闭其他应用的顶层窗口"| victory_start
   victory_start -->|"播放结束"| victory_end
   victory_end -->|"完整播放三次结束"| normal
-  any -->|"普通状态持续输入：每 30s 有 5% 概率"| skill
+  any -->|"每 continued_input 秒尝试 EX 触发概率"| skill
   skill -->|"恢复被打断的状态、动作时间和剩余行走"| any
-  normal -->|"持续输入 3s 或无输入等待 10–30s"| move
+  normal -->|"持续输入 ≥ continued_input 或无输入 ≥ input_idle；满足走动间隔"| move
   normal -->|"无触发：循环 Idle"| normal
-  move -->|"预测可跨越屏幕 / 窗口边界；仅有 Jump 的模型"| jump
+  move -->|"预测可跨越屏幕 / 实际可见窗口边界；仅有 Jump 的模型"| jump
   jump -->|"落地且尚有路程：保持原方向、速度"| move
   jump -->|"落地后：走完 / 关闭走动"| move_end
   move -->|"走完 / 关闭走动 / 不可通行的桌面外边缘"| move_end
   move_end -->|"结束动作播放完成"| idle
   idle -->|"无触发：循环 Idle"| idle
-  idle -->|"持续输入 3s 或无输入等待 10–30s"| move
-  idle -->|"鼠标点击：10% 概率"| callsign
-  normal -->|"鼠标点击：10% 概率（若有动作）"| callsign
+  idle -->|"持续输入 ≥ continued_input 或无输入 ≥ input_idle；满足走动间隔"| move
+  idle -->|"鼠标点击：随机一个角色，点击指挥概率（默认 10%）"| callsign
+  normal -->|"鼠标点击：随机一个角色，点击指挥概率（默认 10%）"| callsign
   callsign -->|"完成：已选择姿态"| idle
   callsign -->|"完成：未选择姿态"| normal
   idle -->|"键盘输入"| attack_start
-  attack_start -->|"准备动作播放结束"| attack_delay
-  attack_delay -->|"连续键盘输入 3s"| attack
+  attack_start -->|"准备结束，执行首次按键攻击"| attack
+  attack_delay -->|"按下键盘，无需持续 3s"| attack
   attack -->|"攻击动作播放结束"| attack_delay
-  attack_delay -->|"无键盘输入 10s（鼠标不重置计时）"| attack_end
-  attack_end -->|"播放结束"| idle
-  attack_delay -->|"句号 / 回车 / 分号 / 问号键（若有换弹动作）"| reload
+  attack_delay -->|"无键盘输入 ≥ keyboard_idle（默认 10s；鼠标不重置）"| attack_end
+  attack_end -->|"播放结束，无换弹请求"| idle
+  attack_delay -->|"无键盘输入 ≥ keyboard_idle（默认 10s；鼠标不重置）"| attack_end
   reload -->|"播放结束"| idle
+  normal -->|"按下键盘，准备并执行一次攻击"| attack_start
+  attack_end -->|"收尾完成或缺少 End；有换弹请求"| reload
+  normal -->|"按键且缺少 Start：直接攻击"| attack
+  idle -->|"按键且缺少 Start：直接攻击"| attack
+  cafe -->|"三连击：模型有战斗动作时切换；只控制被点击角色"| normal
+  cafe -->|"开启跟随且允许移动：立即启动，不等待散步条件"| follow
+  normal -->|"开启跟随：立即按距离规划"| follow
+  idle -->|"开启跟随：立即按距离规划；Idle 不持续转向鼠标"| follow
+  follow -->|"到达距离；战斗恢复原空闲姿态"| normal
+  follow -->|"到达距离；咖啡厅恢复 Idle"| cafe
+  normal -->|"Idle 范围跨屏；一次固定目标停靠"| dock
+  idle -->|"Idle 范围跨屏；一次固定目标停靠"| dock
+  cafe -->|"Idle 范围跨屏；一次固定目标停靠"| dock
+  dock -->|"战斗恢复原空闲姿态；无 Walk 时一次放置"| idle
+  dock -->|"咖啡厅恢复 Idle"| cafe
+  follow -->|"按键打断（战斗）；Jump 时排队到落地"| attack_start
+  follow -->|"仅战斗：预测屏幕 / 可见窗口交界；有 Jump 且落点可达"| jump
+  jump -->|"跟随 Jump 落地：只播放一次，保持移动；重新规划鼠标目标"| follow
+  follow -->|"拖拽即时打断"| pickup
+  dock -->|"拖拽即时打断"| pickup
   classDef base fill:#e9f7ff,stroke:#1eaee6,color:#253951;
   classDef exit fill:#fff1f0,stroke:#e67e75,color:#253951;
-  class cafe,any,victory_start,victory_end,skill,pickup,normal,move,jump,move_end,idle,callsign,attack_start,attack_delay,attack,attack_end,reload base;
+  class cafe,any,victory_start,victory_end,skill,pickup,normal,move,jump,move_end,idle,callsign,attack_start,attack_delay,attack,attack_end,reload,follow,dock base;
   class death,retreat exit;

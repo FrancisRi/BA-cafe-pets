@@ -1,6 +1,6 @@
 param([int]$Jobs=4,[switch]$SkipBuild)
 $ErrorActionPreference='Stop'
-$root=Split-Path $PSScriptRoot -Parent
+$root=$PSScriptRoot
 $project=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'CMakeLists.txt') -Raw
 if($project -notmatch 'project\(ba_cafe_lite_native VERSION (\d+\.\d+\.\d+)'){throw 'Cannot read native release version'}
 $version=$Matches[1]
@@ -84,4 +84,6 @@ foreach($file in @($output,$zip)){
 }
 Copy-Item -LiteralPath (Join-Path $stage 'README.txt') -Destination (Join-Path $dist ('ba_cafe_lite-'+$version+'-README.txt'))
 Copy-Item -LiteralPath (Join-Path $stage 'release.json') -Destination (Join-Path $dist ('ba_cafe_lite-'+$version+'-release.json'))
-[pscustomobject]@{EXE=$output;EXEMiB=[math]::Round((Get-Item $output).Length/1MB,2);ZIP=$zip;ZIPMiB=[math]::Round((Get-Item $zip).Length/1MB,2);ExpandedMiB=[math]::Round($expanded/1MB,2);Artifacts=$work}
+$entry=Join-Path $root 'ba_cafe_lite.exe'
+Copy-Item -LiteralPath $output -Destination $entry -Force
+[pscustomobject]@{EXE=$output;RootEXE=$entry;EXEMiB=[math]::Round((Get-Item $output).Length/1MB,2);ZIP=$zip;ZIPMiB=[math]::Round((Get-Item $zip).Length/1MB,2);ExpandedMiB=[math]::Round($expanded/1MB,2);Artifacts=$work}
