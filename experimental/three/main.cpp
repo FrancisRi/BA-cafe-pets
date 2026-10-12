@@ -1,0 +1,882 @@
+#define CloseWindow Win32CloseWindow
+#define ShowCursor Win32ShowCursor
+#define Rectangle Win32Rectangle
+#include <windows.h>
+#include <windowsx.h>
+#include <commdlg.h>
+#include <shellapi.h>
+#include <shlwapi.h>
+#include <dcomp.h>
+#include <WebView2.h>
+#undef CloseWindow
+#undef ShowCursor
+#undef Rectangle
+#undef DrawText
+#undef DrawTextEx
+#undef LoadImage
+#undef PlaySound
+#include "raylib.h"
+#include "rlgl.h"
+#include "pet_behavior.h"
+#include "pet_battle.h"
+#include "pet_ground.h"
+#include "pet_battle_input.h"
+#include "pet_settings.h"
+#include "stop_turn.h"
+#include "foot_stop.h"
+#include "desktop_geometry.h"
+#include "directed_walk.h"
+#include "desktop_path.h"
+#include "window_boundaries.h"
+#include "input_activity.h"
+#include "cafe_attention.h"
+#include <behaviortree_cpp/contrib/json.hpp>
+#include <atomic>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <functional>
+#include <memory>
+#include <cstdio>
+#include <climits>
+#include <map>
+
+using Json = nlohmann::json;
+#include "three_preferences.h"
+#include "scene_state.h"
+double preciseSeconds() {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+template<class T> const IID& uuid();
+#include "webview_uuids.h" // GUIDs extracted from the official SDK, also usable with MinGW.
+template<class T> void release(T*& value) { if(value) { value->Release(); value=nullptr; } }
+template<class I, class... Args> struct Callback final : I {
+    std::atomic<ULONG> refs{1}; std::function<HRESULT(Args...)> fn;
+    explicit Callback(std::function<HRESULT(Args...)> f):fn(std::move(f)){}
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void** out) override {
+        if(!out)return E_POINTER;*out=nullptr;
+        if(IsEqualIID(id,IID_IUnknown)||IsEqualIID(id,uuid<I>())){*out=static_cast<I*>(this);AddRef();return S_OK;}
+        return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return ++refs; }
+    ULONG STDMETHODCALLTYPE Release() override { auto n=--refs;if(!n)delete this;return n; }
+    HRESULT STDMETHODCALLTYPE Invoke(Args... args) override {
+        try{return fn(args...);}catch(const std::exception& e){std::fprintf(stderr,"COM callback: %s\n",e.what());return E_FAIL;}
+    }
+};
+std::wstring wide(const std::string& s) {
+    const int n=MultiByteToWideChar(CP_UTF8,0,s.data(),static_cast<int>(s.size()),nullptr,0);
+    std::wstring out(n,L' ');if(n)MultiByteToWideChar(CP_UTF8,0,s.data(),static_cast<int>(s.size()),out.data(),n);return out;
+}
+std::string utf8(const std::wstring& s) {
+    const int n=WideCharToMultiByte(CP_UTF8,0,s.data(),static_cast<int>(s.size()),nullptr,0,nullptr,nullptr);
+    std::string out(n,' ');if(n)WideCharToMultiByte(CP_UTF8,0,s.data(),static_cast<int>(s.size()),out.data(),n,nullptr,nullptr);return out;
+}
+std::string xmlEscape(std::string s) {
+    std::string out;for(char c:s){if(c=='&')out+="&amp;";else if(c=='\"')out+="&quot;";else if(c=='<')out+="&lt;";else out+=c;}return out;
+}
+void replaceAll(std::string& text,const std::string& from,const std::string& to) {
+    size_t p=0;while((p=text.find(from,p))!=std::string::npos){text.replace(p,from.size(),to);p+=to.size();}
+}
+void check(HRESULT result,const char* operation) {
+    if(FAILED(result)){char text[160];std::snprintf(text,sizeof(text),"%s failed (0x%08lX)",operation,static_cast<unsigned long>(result));throw std::runtime_error(text);}
+}
+#include "web_settings.h"
+
+struct App {
+    static constexpr int Size=480;
+    HWND window{},inputWindow{}; std::filesystem::path directory,dataDirectory,model,pendingModel,snapshot;
+    std::filesystem::path storage() const {return dataDirectory.empty()?directory:dataDirectory;}
+    std::string reviewClip,initialMode;double reviewTime=0,runSeconds=0;
+    bool review=false,fixedPose=false,sampleSpecified=false,done=false,loaded=false,frameReady=false,capturing=false;
+    bool smooth=true;
+    bool grouped=false,displayed=true,modelSpecified=false;std::string actorId;
+    std::shared_ptr<bool> alive=std::make_shared<bool>(true);
+    std::function<void()> menuRequest,closeRequest,loadedCallback,destroyedCallback,tickCallback,settingsChanged,syncRequest,followRequest,depthRequest;
+    std::function<float(float,double)> avoidHeading;
+    std::function<bool(float,double)> clearJump;
+    pet::BattleInput sharedEvents{};
+    double cafeClickStart=-10;int cafeClicks=0;
+    HMODULE loader{};ICoreWebView2Environment* environment{};ICoreWebView2Controller* controller{};
+    ICoreWebView2CompositionController* composition{};ICoreWebView2* browser{};ICoreWebView2_3* browser3{};
+    IDCompositionDevice* device{};IDCompositionTarget* target{};IDCompositionVisual* visual{};
+    pet::Playback state;std::unique_ptr<pet::Behavior> behavior;std::unique_ptr<PetSettings> settings;
+    std::unique_ptr<pet::Battle> battle;BattleDesktopInput battleInput;
+    bool battleMode=false;
+    PetGround ground;PetJourney journey;RECT work{};float primaryHeight=1,eyeHeight=1.7f,yaw=0,zoom=1;
+    POINT down{},previous{};bool left=false,right=false,dragged=false,wasDragging=false,click=false,dragStarted=false;
+    bool lookHotkey=false,quitHotkey=false;uint64_t walkGeneration=0;
+    ULONGLONG started=0,readyAt=0;int exitCode=0;
+    double lastTick=0,lastPost=0;HANDLE motionTimer{};
+    std::function<double()> idleInputSeconds=[](){LASTINPUTINFO input{sizeof(input),0};return GetLastInputInfo(&input)?static_cast<DWORD>(GetTickCount()-input.dwTime)/1000.0:0.0;};
+    Vector3 motionVelocity{};double motionRemaining=0;
+    uint64_t retreatLogged=UINT64_MAX;
+    uint64_t victoryLogged=UINT64_MAX,maskRevision=0;
+    StopTurn stopTurn;VisibleWindowEdges visibleWindows;
+    std::map<int,FootStopProfile> footStops;
+    FootStopProfile fallbackStop;
+    DesktopGeometry geometry;DirectedWalk directed;ThreePreferences preferences;CafeAttention cafeAttention;
+    std::unique_ptr<WebSettings> webSettings;
+    bool placementNeeded=true,settingsOnLoad=false,menuHintVisible=false;uint64_t placementGeneration=UINT64_MAX;
+    double interactionUntil=0,followPlanAt=0;
+    std::optional<Vector2> blockedCursor;
+    std::optional<float> restFacing;
+    pet::BattleInput deferredInput{};bool deferredCafeClick=false;
+    std::string settingsError;
+    int windowWidth=Size,windowHeight=Size,cafeIdle=-1,cafeWalk=-1,cafeJump=-1;
+    POINT windowPosition{LONG_MIN,LONG_MIN};
+
+    void post(const Json& value){if(browser){const auto text=wide(value.dump());browser->PostWebMessageAsJson(text.c_str());}}
+    const FootStopProfile& stopProfile(int clip) const {
+        const int source=clip>=0?state.clips[clip].modelIndex:-1;
+        const auto found=footStops.find(source);return found==footStops.end()?fallbackStop:found->second;
+    }
+    uint64_t displayGeneration() const {return state.generation*100000+directed.serial*2+(directed.active?1:0)+cafeAttention.serial*1000000000ULL;}
+    void applyPreferences(){
+        state.walkIntervalOverride=preferences.moveInterval;state.walkTimeJitter=preferences.walkTimeJitter/100;state.walkDistanceJitter=preferences.walkDistanceJitter/100;
+        state.walkDurationOverride=geometry.bodyWidth*preferences.moveBodies/0.792;
+        state.attentionProbabilityOverride=1; // Legacy BT chance is disabled in this host; cafe tracking uses its toggle.
+        if(battle){battle->configuredTimers=true;battle->activeWalkDistanceScale=0.5;battle->activeWalkAway=true;battle->bufferReloadRequests=true;battle->walkTimeJitter=state.walkTimeJitter;battle->walkDistanceJitter=state.walkDistanceJitter;battle->setMoveInterval(preferences.moveInterval);
+            battle->moveSeconds=geometry.bodyWidth*preferences.moveBodies/(0.792*3);
+            battle->callsignProbability=preferences.clickProbability/100;battle->skillProbability=preferences.skillProbability/100;battle->keyboardIdleSeconds=preferences.keyboardIdle;}
+    }
+    Json settingsSnapshot() const {
+        auto value=preferences.json();value.update({{"walking",state.walkEnabled},{"look",state.trackingEnabled},{"outline",state.outlineEnabled},
+            {"mode",battleMode?"battle":"cafe"},{"idleSeconds",state.inactivityThreshold()},{"activeSeconds",state.activeSecondsOverride.value_or(30)}});
+        return {{"type","settings"},{"name",utf8(settings->title)},{"value",value},{"battleAvailable",settings->battleAvailable},
+            {"canFollow",battleMode?battle&&battle->clips.move>=0:cafeWalk>=0},{"busy",settings->importBusy},{"percent",settings->importPercent},
+            {"detail",utf8(settings->progressDetail)},{"error",settingsError}};
+    }
+    void syncSettings(){if(syncRequest)syncRequest();else if(webSettings)webSettings->sync();}
+    void dismissMenuHint(){
+        menuHintVisible=false;
+        if(!WritePrivateProfileStringW(L"UI",L"MenuHintDismissed",L"1",settings->ini.c_str()))
+            state.log("WARNING: Cannot persist menu hint dismissal");
+        presentState(true);
+    }
+    void stopLocomotion(){
+        directed.cancel();cafeAttention.reset();restFacing.reset();stopTurn.reset();journey.route.clear();
+        state.walking=false;state.walkRemaining=0;
+        state.returnRequested=state.returningHome=state.returnArrived=false;
+        motionVelocity={};motionRemaining=0;
+    }
+    void stopBlocked(){
+        stopLocomotion();
+        POINT cursor{};GetCursorPos(&cursor);blockedCursor=Vector2{float(cursor.x),float(cursor.y)};
+        placementNeeded=false;state.resetCooldown();
+        if(battleMode&&battle)battle->stopMovement();
+        else if(behavior&&cafeIdle>=0){behavior->halt();state.start(cafeIdle,true);}
+        placementGeneration=state.generation;
+        state.log("MOVEMENT blocked: destination abandoned");
+    }
+    void setZoom(float value){
+        const auto anchor=ground.position;const float facing=yaw;
+        const bool moving=state.walking||directed.active||state.returningHome;
+        if(moving){stopLocomotion();if(battleMode&&battle)battle->stopMovement();
+            else if(behavior&&cafeIdle>=0){behavior->halt();state.start(cafeIdle,true);}}
+        motionVelocity={};motionRemaining=0;blockedCursor.reset();
+        zoom=std::clamp(value,0.45f,1.65f);ground.modelZoom=zoom;++maskRevision;
+        yaw=facing;state.resetCooldown();geometry.yaw=yaw;
+        ground.position=anchor;
+        const auto foot=ground.screen(anchor),target=geometry.idleFoot(ground,zoom);
+        if(std::hypot(target.x-foot.x,target.y-foot.y)>1)ground.position=ground.floorAt(target);
+        geometry.measure(ground,zoom);placementNeeded=false;placementGeneration=state.generation;
+        interactionUntil=preciseSeconds()+0.5;presentState(true);
+        if(settingsChanged)settingsChanged();
+    }
+    bool moveGround(float heading,float distance){
+        const float steered=avoidHeading?avoidHeading(heading,distance):heading;
+        if(!std::isfinite(steered))return false;
+        if(std::abs(std::remainder(steered-heading,360.0f))>0.01f){yaw=steered;state.walkYaw=steered;stopTurn.reset();}
+        if(!DesktopPath::stepAllowed(ground,steered,distance))return false;
+        ground.position=ground.step(steered,distance);return true;
+    }
+    std::pair<double,double> brakeRange() const {
+        double minimum=INFINITY,maximum=0;
+        if(battle)for(const auto& p:battle->clips.poses){const auto& profile=stopProfile(p.moveEnd);const double d=profile.distanceAt(profile.stopTime)*zoom;minimum=std::min(minimum,d);maximum=std::max(maximum,d);}
+        return {std::isfinite(minimum)?minimum:0,maximum};
+    }
+    double activeTurnLead() const {return battle&&battle->activeInputMove?std::min(StopTurn::LeadSeconds,battle->moveDuration*0.35):StopTurn::LeadSeconds;}
+    double earliestFootPlant() const {
+        double result=INFINITY;if(battle)for(const auto& pose:battle->clips.poses)result=std::min(result,stopProfile(pose.moveEnd).stopTime);
+        return std::isfinite(result)?result:pet::Battle::StopFallbackSeconds;
+    }
+    bool activeCurveFits(float heading,float desired,double lead,double turnSeconds) const {
+        if(!battle)return false;
+        for(const auto& pose:battle->clips.poses){
+            auto preview=ground;const auto& profile=stopProfile(pose.moveEnd);StopTurn turn;turn.begin(heading,desired,turnSeconds);
+            const double seconds=lead+profile.stopTime;double time=0;
+            while(time<seconds-1e-9){const double next=std::min(seconds,time+1.0/60);
+                const double straight=std::max(0.0,std::min(next,lead)-std::min(time,lead));
+                const double braking=profile.distanceAt(std::max(0.0,next-lead))-profile.distanceAt(std::max(0.0,time-lead));
+                const float distance=float(straight*0.792*zoom*3+braking*zoom);
+                const float angle=float(turn.advance(next-time));if(!DesktopPath::stepAllowed(preview,angle,distance))return false;
+                preview.position=preview.step(angle,distance);time=next;
+            }
+            if(DesktopPath::restingMonitor(preview,geometry,zoom,preview.position)<0||!DesktopPath::covered(ground,preview.position))return false;
+        }return true;
+    }
+    bool canStartWalk(double heading,double requested){
+        if(!loaded)return ground.canWalk(float(heading),float(requested));
+        double distance=requested,minimum=0,maximum=0;
+        if(!battleMode&&smooth){distance=std::max(0.0,requested-0.792*zoom*(pet::Battle::StopFallbackSeconds*0.25+0.02));maximum=requested-distance;}
+        if(battleMode&&battle){const double seconds=battle->moveSeconds.value_or(4)*(state.inputActive?battle->activeWalkDistanceScale:1)*(1+state.walkDistanceJitter);
+            distance=std::max(distance,0.792*zoom*3*seconds);const auto brakes=brakeRange();minimum=brakes.first;maximum=brakes.second;}
+        if(!DesktopPath::trip(ground,geometry,zoom,float(heading),distance,minimum,maximum))return false;
+        if(battleMode&&battle&&battle->activeWalkAway&&state.inputActive&&state.lookTarget&&battle->moveDuration>0){
+            const double lead=std::min(StopTurn::LeadSeconds,battle->moveDuration*0.35);
+            const auto saved=ground.position;ground.position=ground.step(float(heading),float(std::max(0.0,distance-0.792*zoom*3*lead)));
+            const bool safe=activeCurveFits(float(heading),float(state.lookYaw),lead,lead+earliestFootPlant());ground.position=saved;
+            if(!safe)return false;
+        }
+        return !clearJump||clearJump(float(heading),distance+maximum);
+    }
+    bool beginDirected(Vector3 target,bool following){
+        const double dx=target.x-ground.position.x,dz=target.z-ground.position.z,remaining=std::hypot(dx,dz);
+        const float heading=std::atan2(dx,dz)*RAD2DEG;
+        if(!DesktopPath::trip(ground,geometry,zoom,heading,remaining))return false;
+        directed.begin(target,following,state.generation,yaw);directed.crossing=DesktopPath::crossing(ground,geometry,zoom,target);return true;
+    }
+    void settingsMessage(const Json& message){
+        if(message.value("type","")=="drag"){ReleaseCapture();SendMessageW(webSettings->window,WM_NCLBUTTONDOWN,HTCAPTION,0);return;}
+        const auto type=message.value("type",std::string{});
+        if(type=="ready"){syncSettings();state.log("SETTINGS web ready");return;}
+        if(type=="close"){webSettings->hide();return;}
+        if(type=="exit"){DestroyWindow(window);return;}
+        if(type=="import"){
+            wchar_t path[32768]{};OPENFILENAMEW dialog{sizeof(dialog)};dialog.hwndOwner=webSettings->window;dialog.lpstrFilter=L"GLB 模型\0*.glb\0\0";dialog.lpstrFile=path;dialog.nMaxFile=32768;dialog.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR;
+            if(GetOpenFileNameW(&dialog))requestModel(path);return;
+        }
+        if(type!="save")return;
+        const auto& value=message.at("value");auto candidate=preferences;
+        bool valid=candidate.apply(value);
+        for(const char* key:{"walking","look"})valid&=value.contains(key)&&value[key].is_boolean();
+        for(const char* key:{"idleSeconds","activeSeconds"})valid&=value.contains(key)&&value[key].is_number()&&std::isfinite(value[key].get<double>())&&value[key].get<double>()>=1&&value[key].get<double>()<=3600;
+        const auto mode=value.value("mode",std::string{});valid&=mode=="cafe"||(mode=="battle"&&settings->battleAvailable);
+        if(!valid){settingsError="设置值超出允许范围，未保存";syncSettings();return;}
+        const bool startFollow=!preferences.follow&&candidate.follow;
+        if(candidate.cafeLookMode!=preferences.cafeLookMode)cafeAttention.pause();
+        preferences=candidate;if(startFollow){blockedCursor.reset();followPlanAt=0;interactionUntil=0;}state.walkEnabled=value["walking"];state.trackingEnabled=value["look"];state.outlineEnabled=preferences.outlineMode!=0;
+        state.idleSecondsOverride=value["idleSeconds"];state.activeSecondsOverride=value["activeSeconds"];
+        if((mode=="battle")!=battleMode)selectMode(mode=="battle",false);
+        if(!directed.jumping)directed.cancel();restFacing.reset();placementNeeded=true;state.resetCooldown();applyPreferences();settings->save();preferences.save(settings->ini);
+        settingsError.clear();syncSettings();state.log("SETTINGS saved: follow="+std::to_string(preferences.follow)+" interval="+std::to_string(preferences.moveInterval));
+        if(settingsChanged)settingsChanged();
+    }
+    void showSettings(){if(menuRequest){menuRequest();return;}if(!environment)return;webSettings->show(window,environment,directory);settings->window=webSettings->window;}
+    void refreshDisplays(){
+        std::vector<RECT> areas;EnumDisplayMonitors(nullptr,nullptr,[](HMONITOR m,HDC,LPRECT,LPARAM p)->BOOL{
+            MONITORINFO i{sizeof(i),{},{},0};if(GetMonitorInfoW(m,&i))reinterpret_cast<std::vector<RECT>*>(p)->push_back(i.rcWork);return TRUE;
+        },reinterpret_cast<LPARAM>(&areas));
+        if(areas.empty())throw std::runtime_error("No desktop monitor");work=areas.front();
+        if(primaryHeight<=1)primaryHeight=static_cast<float>(work.bottom-work.top);
+        for(const auto& a:areas){work.left=std::min(work.left,a.left);work.top=std::min(work.top,a.top);work.right=std::max(work.right,a.right);work.bottom=std::max(work.bottom,a.bottom);}
+        ground.width=work.right-work.left;ground.height=work.bottom-work.top;
+        const float scale=ground.height/primaryHeight;ground.camera.position={0,29.789228f*scale,140.147298f*scale};
+        // Keep raylib's unprojection as precise as the Three.js camera. Its
+        // default 0.01 near plane loses precision at our ~143-unit distance.
+        rlSetClipPlanes(PetGround::NearPlane,PetGround::FarPlane*std::max(1.0f,scale));
+        ground.monitors.clear();for(const auto& a:areas)ground.monitors.push_back({float(a.left-work.left),float(a.top-work.top),float(a.right-work.left),float(a.bottom-work.top)});
+    }
+    void progress(int percent,const std::wstring& label){
+        settings->importPercent=percent;settings->progressTitle=L"直接加载 GLB";settings->progressDetail=label;
+        syncSettings();
+    }
+    void requestModel(const std::filesystem::path& file){
+        if(!std::filesystem::is_regular_file(file))throw std::runtime_error("Model file does not exist");
+        pendingModel=std::filesystem::absolute(file);done=false;settingsError.clear();settings->importBusy=true;settings->importStarted=GetTickCount64();progress(0,L"读取模型文件");
+        // Serve just the selected GLB through the native WebView resource callback.
+        // Folder mappings are fixed before navigation; changing them after page
+        // load is unreliable and would expose the whole imported file's folder.
+        post({{"type","load"},{"url","https://model.pet.local/model/source.glb?v="+std::to_string(GetTickCount64())},{"name",utf8(pendingModel.stem().wstring())}});
+        std::printf("LOAD original GLB: %s\n",utf8(pendingModel.wstring()).c_str());std::fflush(stdout);
+    }
+    bool selectMode(bool enabled,bool persist=false){
+        if(!behavior || !battle)return false;
+        if(enabled && !battle->clips.supported()){
+            state.log("MODE battle unavailable: "+battle->clips.missing);return false;
+        }
+        const auto anchor=ground.position;const float facing=yaw;
+        behavior->halt();stopLocomotion();blockedCursor.reset();placementNeeded=false;
+        deferredInput={};deferredCafeClick=false;
+        state.pendingClick=false;state.dragging=false;state.trackingCursor=false;
+        state.returnRequested=state.returningHome=state.returnArrived=false;
+        state.resetCooldown();
+        battleMode=enabled;settings->battleMode=enabled;battleInput.pollKeyboard=true;if(!grouped)battleInput.enable(enabled);
+        if(enabled)battle->start();else if(!fixedPose){const bool walk=state.walkEnabled,look=state.trackingEnabled;state.walkEnabled=state.trackingEnabled=false;behavior->tick(0);state.walkEnabled=walk;state.trackingEnabled=look;}
+        ground.position=anchor;yaw=facing;placementGeneration=state.generation;interactionUntil=preciseSeconds()+0.5;
+        if(persist)settings->save();
+        syncSettings();
+        state.log(std::string("MODE ")+(enabled?"battle":"cafe")+"; battle supported="+(battle->clips.supported()?"1":"0"));
+        return true;
+    }
+    void initializeBehavior(const Json& message){
+        if(!grouped)battleInput.enable(false);battle.reset();behavior.reset();state.clips.clear();state.active=false;state.current=-1;
+        for(const auto& c:message.at("clips")){
+            const double duration=c.at("duration").get<double>();
+            if(std::isfinite(duration)&&duration>0)state.clips.push_back({c.at("name").get<std::string>(),duration,c.at("index").get<int>()});
+        }
+        if(state.clips.empty())throw std::runtime_error("No usable animation clips");
+        const auto& catalog=message.at("catalog");
+        auto index=[&](const Json& object,const char* role) {
+            const int source=object.value(role,-1);
+            for(size_t i=0;i<state.clips.size();++i)if(state.clips[i].modelIndex==source)return static_cast<int>(i);
+            return -1;
+        };
+        auto name=[&](const char* role) {const int i=index(catalog.at("cafe"),role);return i<0?std::string{}:state.clips[i].name;};
+        const auto idle=name("idle"),walk=name("walk"),reaction=name("reaction"),pickup=name("pickup");
+        cafeIdle=index(catalog.at("cafe"),"idle");cafeWalk=index(catalog.at("cafe"),"walk");
+        if(idle.empty())throw std::runtime_error("No usable default clip");
+        for(const auto& warning:catalog.at("warnings"))state.log("ANIMATION mapping: "+warning.get<std::string>());
+        for(const auto& note:catalog.value("notes",Json::array()))state.log("ANIMATION selection: "+note.get<std::string>());
+        pet::BattleClips mapped(state);mapped.poses.clear();
+        const auto& combat=catalog.at("battle");
+        for(const auto& item:combat.at("poses")) {
+            pet::BattleClips::Pose p; p.name=item.at("name").get<std::string>();
+            p.idle=index(item,"idle");p.start=index(item,"start");p.delay=index(item,"delay");p.attack=index(item,"attack");
+            p.end=index(item,"end");p.reload=index(item,"reload");p.callsign=index(item,"callsign");p.moveEnd=index(item,"moveEnd");
+            if(p.idle>=0 && p.attack>=0)mapped.poses.push_back(p);
+        }
+        mapped.move=index(combat,"move");mapped.jump=index(combat,"jump");mapped.pickup=index(combat,"pickup");
+        cafeJump=mapped.jump;
+        mapped.skill=index(combat,"skill");mapped.death=index(combat,"death");mapped.retreat=index(combat,"retreat");
+        mapped.victoryStart=index(combat,"victoryStart");mapped.victoryEnd=index(combat,"victoryEnd");
+        mapped.missing=mapped.poses.empty()?"No posture with Idle + Attack keywords":"";
+        footStops.clear();
+        for(const auto& item:message.value("stopProfiles",Json::array())){
+            const int source=item.value("clip",-1);FootStopProfile profile;
+            auto clip=std::find_if(state.clips.begin(),state.clips.end(),[&](const auto& c){return c.modelIndex==source;});
+            const double seconds=item.value("stopTime",0.0);
+            if(clip!=state.clips.end()&&seconds<=clip->duration&&profile.initialize(seconds,item.at("speeds").get<std::vector<double>>())){
+                footStops[source]=profile;
+                state.log("BRAKE feet: "+clip->name+" plant="+std::to_string(seconds)+"s distance="+std::to_string(profile.distanceAt(seconds))
+                    +" old="+std::to_string(1.98*clip->duration*0.75));
+            }
+        }
+        for(const auto& p:mapped.poses)if(p.moveEnd<0||!footStops.count(state.clips[p.moveEnd].modelIndex))
+            state.log("BRAKE fallback: "+p.name+"; no reliable planted-foot sample, 0.28s stop");
+        state.log("ANIMATION cafe: idle="+idle+" walk="+walk);
+        for(const auto& p:mapped.poses)state.log("ANIMATION posture="+p.name+" attack="+state.clips[p.attack].name+
+            " start="+std::to_string(p.start)+" end="+std::to_string(p.end)+" moveEnd="+std::to_string(p.moveEnd));
+        std::ifstream file(directory/"behavior/template.bt.xml");std::string xml((std::istreambuf_iterator<char>(file)),{});
+        const auto removeBlock=[&](const std::string& first,const std::string& last){const auto start=xml.find(first);if(start!=std::string::npos){const auto end=xml.find(last,start);if(end!=std::string::npos)xml.erase(start,end+last.size()-start);}};
+        if(reaction.empty())removeBlock("<Sequence name=\"Click reaction\">","</Sequence>");
+        if(walk.empty()){removeBlock("<ReturnHome ","/>");removeBlock("<ReactiveSequence name=\"Only wander when user is inactive\">","</ReactiveSequence>");}
+        replaceAll(xml,"clip=\"Cafe_Idle\"","clip=\""+xmlEscape(idle)+"\"");
+        replaceAll(xml,"clip=\"Formation_Pickup\"","clip=\""+xmlEscape(pickup)+"\"");
+        if(!walk.empty())replaceAll(xml,"clip=\"Cafe_Walk\"","clip=\""+xmlEscape(walk)+"\"");
+        if(!reaction.empty())replaceAll(xml,"clip=\"Cafe_Reaction\"","clip=\""+xmlEscape(reaction)+"\"");
+        const auto tree=storage()/"behavior"/(pendingModel.stem().wstring()+L".bt.xml");
+        std::ofstream(storage()/"behavior"/(pendingModel.stem().wstring()+L".animations.json"))
+            << Json{{"source",utf8(pendingModel.wstring())},{"clips",message.at("clips")},{"catalog",catalog},{"stopProfiles",message.value("stopProfiles",Json::array())}}.dump(2);
+        if(!std::filesystem::exists(tree))std::ofstream(tree)<<xml;
+        behavior=std::make_unique<pet::Behavior>(state,tree);behavior->start(idle);
+        battle=std::make_unique<pet::Battle>(state,mapped);settings->battleAvailable=battle->clips.supported();
+        battle->attackOnKeyPress=true;
+        battle->bufferKeyPress=true;
+        battle->ignoreReloadKeyboard=true;
+        battle->endBeforeReload=true;battle->smoothStops=smooth;
+        applyPreferences();
+        wchar_t savedMode[24]{};GetPrivateProfileStringW(L"Behavior",L"Mode",L"Cafe",savedMode,24,settings->ini.c_str());
+        const bool requested=initialMode=="battle" || (initialMode.empty() && std::wcscmp(savedMode,L"Battle")==0);
+        if(!fixedPose && initialMode=="battle" && !settings->battleAvailable)throw std::runtime_error("Model has no battle animations: "+battle->clips.missing);
+        selectMode(!fixedPose && requested && settings->battleAvailable);
+        if(fixedPose){const auto selected=reviewClip.empty()?idle:reviewClip;state.start(state.find(selected),true);state.time=reviewTime;}
+        model=pendingModel;loaded=true;frameReady=false;readyAt=GetTickCount64();journey.route.clear();yaw=0;stopTurn.reset();
+        directed.cancel();restFacing.reset();geometry=DesktopGeometry{};
+        const auto& spatial=message.at("spatial");
+        auto box=[&](const Json& values,Vector3& low,Vector3& high){if(!values.is_array()||values.size()!=6)throw std::runtime_error("Invalid spatial bounds");for(const auto& v:values)if(!v.is_number()||!std::isfinite(v.get<float>())||std::abs(v.get<float>())>100)throw std::runtime_error("Invalid model envelope");low={values[0],values[1],values[2]};high={values[3],values[4],values[5]};};
+        box(spatial.at("idle"),geometry.minimum,geometry.maximum);box(spatial.at("envelope"),geometry.renderMinimum,geometry.renderMaximum);
+        auto radial=[](Vector3& low,Vector3& high){const float radius=std::hypot(std::max(std::abs(low.x),std::abs(high.x)),std::max(std::abs(low.z),std::abs(high.z)));low.x=low.z=-radius;high.x=high.z=radius;};
+        radial(geometry.minimum,geometry.maximum);radial(geometry.renderMinimum,geometry.renderMaximum);
+        geometry.bodyWidth=spatial.at("bodyWidth");ground.measuredBounds=true;geometry.prepareViewport(ground,zoom);
+        state.log("FOLLOW body unit="+std::to_string(geometry.bodyWidth)+" source="+spatial.value("bodyWidthSource",std::string{"unknown"}));
+        geometry.place(ground,ground.screen(ground.position),zoom);placementNeeded=true;placementGeneration=UINT64_MAX;applyPreferences();
+        eyeHeight=message.value("eyeHeight",1.7f);settings->title=model.stem().wstring();settings->importBusy=false;progress(100,L"原始模型加载完成，无 Blender 转换");
+        if(!review&&!grouped){const std::wstring text=L"[Model]\nPath="+model.wstring()+L"\n";std::ofstream out(storage()/"active-model.ini",std::ios::binary);const unsigned char bom[]{0xff,0xfe};out.write(reinterpret_cast<const char*>(bom),2);out.write(reinterpret_cast<const char*>(text.data()),text.size()*sizeof(wchar_t));}
+        std::printf("READY %s: %zu clips, %d skins, %d mesh hulls, %d ms\n",utf8(model.stem().wstring()).c_str(),state.clips.size(),message.value("skins",0),message.value("outlineMeshes",0),message.value("elapsedMs",0));std::fflush(stdout);
+        std::printf("CAFE tree: %s\n",utf8(tree.wstring()).c_str());std::fflush(stdout);
+        if(loadedCallback)loadedCallback();
+        if(settingsOnLoad){settingsOnLoad=false;showSettings();}
+    }
+    void applyRegion(const Json& message){
+        const auto& spans=message.at("spans");
+        if(message.value("width",0)!=windowWidth||message.value("height",0)!=windowHeight||message.value("generation",uint64_t(0))!=displayGeneration()||message.value("maskRevision",uint64_t(0))!=maskRevision)return;
+        if(left||right||!loaded||!spans.is_array()||spans.empty()||spans.size()%3||spans.size()>300000)return;
+        const size_t count=spans.size()/3,bytes=sizeof(RGNDATAHEADER)+count*sizeof(RECT);
+        std::vector<unsigned char> storage(bytes);auto* data=reinterpret_cast<RGNDATA*>(storage.data());
+        data->rdh={sizeof(RGNDATAHEADER),RDH_RECTANGLES,static_cast<DWORD>(count),static_cast<DWORD>(count*sizeof(RECT)),{0,0,windowWidth,windowHeight}};
+        auto* rects=reinterpret_cast<RECT*>(data->Buffer);
+        for(size_t i=0;i<count;i++){const int y=spans[i*3],x=spans[i*3+1],end=spans[i*3+2];if(y<0||y>=windowHeight||x<0||end>windowWidth||end<=x)return;rects[i]={x,y,end,y+1};}
+        // The asynchronous alpha mask only controls an invisible input window.
+        // Never crop the animated DirectComposition surface with an older pose.
+        HRGN region=ExtCreateRegion(nullptr,static_cast<DWORD>(bytes),data);if(region&&!SetWindowRgn(inputWindow,region,FALSE))DeleteObject(region);
+    }
+    void receive(const Json& message){
+        const auto type=message.value("type",std::string{});
+        if(type=="boot"){std::printf("Three.js revision %s\n",message.value("three",std::string{}).c_str());requestModel(model);}
+        else if(type=="loaded"){
+            try{initializeBehavior(message);}catch(const std::exception& e){
+                loaded=false;done=true;settingsError=e.what();post({{"type","suspend"}});
+                receive({{"type","loadFailed"},{"message",settingsError}});
+            }
+        }
+        else if(type=="progress")progress(message.value("percent",0),wide(message.value("detail",std::string{})));
+        else if(type=="mask")applyRegion(message);
+        else if(type=="frameReady")frameReady=true;
+        else if(type=="stats"){
+            std::printf("RENDER %d FPS, state %d Hz, frame p95 %.1f ms, JS %.2f ms, alpha %.2f ms (%d Hz), %d calls\n",
+                message.value("fps",0),message.value("stateHz",0),message.value("frameP95",0.0),message.value("cpuMs",0.0),
+                message.value("maskMs",0.0),message.value("maskHz",0),message.value("drawCalls",0));std::fflush(stdout);
+        }
+        else if(type=="error"||type=="loadFailed"){
+            const auto text=message.value("message",std::string{});std::fprintf(stderr,"THREE %s: %s\n",type.c_str(),text.c_str());std::fflush(stderr);
+            if(type=="loadFailed"&&!loaded)done=true;settingsError=text;
+            settings->importBusy=false;settings->progressTitle=L"加载失败";settings->progressDetail=wide(text);settings->importPercent=0;
+            syncSettings();
+            if(review){exitCode=1;DestroyWindow(window);}else if(!loaded)MessageBoxW(window,wide(text).c_str(),L"Three.js 模型加载",MB_ICONERROR);
+        }
+    }
+    void capture(){
+        if(capturing||snapshot.empty()||!browser)return;capturing=true;
+        IStream* stream=nullptr;check(SHCreateStreamOnFileEx(snapshot.c_str(),STGM_CREATE|STGM_WRITE|STGM_SHARE_EXCLUSIVE,FILE_ATTRIBUTE_NORMAL,TRUE,nullptr,&stream),"Create snapshot");
+        auto* cb=new Callback<ICoreWebView2CapturePreviewCompletedHandler,HRESULT>([this,stream](HRESULT result){
+            stream->Commit(STGC_DEFAULT);stream->Release();exitCode=FAILED(result)?1:0;
+            std::printf("CAPTURE result 0x%08lX\n",static_cast<unsigned long>(result));std::fflush(stdout);DestroyWindow(window);return S_OK;
+        });
+        const auto result=browser->CapturePreview(COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG,stream,cb);cb->Release();
+        if(FAILED(result)){stream->Release();check(result,"Capture preview");}
+    }
+    void tick(){
+        const auto now=GetTickCount64();const double preciseNow=preciseSeconds();
+        const double elapsed=std::max(0.0,preciseNow-lastTick);
+        const float dt=static_cast<float>(std::min(elapsed,0.1));lastTick=preciseNow;
+        const auto before=ground.position;motionVelocity={};motionRemaining=0;
+        int endingClip=-1;double endingFrom=0,endingTo=0;
+        if(!settings->importSource.empty()){const auto file=settings->importSource;settings->importSource.clear();requestModel(file);}
+        if(review&&(fixedPose||runSeconds>0||!snapshot.empty())&&now-started>25000){std::fprintf(stderr,"Preview timed out\n");exitCode=1;DestroyWindow(window);return;}
+        if(!loaded||!behavior||!displayed)return;
+        if(settings->modeRequest){selectMode(*settings->modeRequest,true);settings->modeRequest.reset();}
+        if(runSeconds>0&&now-readyAt>=runSeconds*1000){std::printf("PROFILE completed %.1f seconds\n",runSeconds);DestroyWindow(window);return;}
+        ground.modelZoom=zoom;state.movementScale=zoom*(battleMode?3.0:1.0);geometry.measure(ground,zoom);
+        const double idle=idleInputSeconds();
+        if(!fixedPose){
+            if(observeDebouncedInput(state,idle,elapsed,preferences.inputGrace) && !battleMode&&!preferences.follow&&!directed.active){state.trackingCursor=false;state.returnRequested=state.walkEnabled&&!journey.route.empty();if(!state.returnRequested)yaw=0;}
+            if(!state.inputActive&&directed.active&&directed.following&&!directed.jumping&&!directed.crossing){directed.cancel();cafeAttention.pause();restFacing.reset();}
+            POINT cursor{};GetCursorPos(&cursor);const Vector2 pixel{float(cursor.x-work.left),float(cursor.y-work.top)};
+            const auto goal=battleMode&&state.inputActive?ground.planeAt(pixel,1.15f*zoom):ground.floorAt(ground.clampFoot(pixel));const float dx=goal.x-ground.position.x,dz=goal.z-ground.position.z;
+            state.cursorTarget=dx*dx+dz*dz>0.04f;state.cursorYaw=std::atan2(dx,dz)*RAD2DEG;
+            float lookYaw=0;state.lookTarget=ground.faceCursor(pixel,eyeHeight*zoom,lookYaw);state.lookYaw=lookYaw;
+            const bool dragging=left&&dragged,front=click||dragStarted||wasDragging!=dragging;
+            if(!battleMode&&click){
+                if(preciseNow-cafeClickStart>1.2){cafeClicks=0;cafeClickStart=preciseNow;}
+                if(++cafeClicks>=3){cafeClicks=0;if(settings->battleAvailable){selectMode(true,!review);state.log("CAFE triple click -> battle");syncSettings();if(settingsChanged)settingsChanged();click=false;}}
+            }
+            if((front&&!directed.jumping)||dragging||right){blockedCursor.reset();cafeAttention.pause();directed.cancel();deferredInput={};deferredCafeClick=false;restFacing.reset();interactionUntil=preciseNow+2;placementNeeded=true;}
+            if(front&&!directed.jumping)yaw=0;if(front||dragging||right||!state.walkEnabled){journey.route.clear();state.returnRequested=false;}
+            if(battleMode){
+                auto events=grouped?sharedEvents:battleInput.take(click,dragging,false);events.petClick=click;events.dragging=dragging;
+                if(directed.jumping){
+                    deferredInput.keyPressed|=events.keyPressed;deferredInput.reload|=events.reload;
+                    deferredInput.mouseClick|=events.mouseClick;deferredInput.windowClosed|=events.windowClosed;
+                    events.keyPressed=events.reload=events.mouseClick=events.windowClosed=false;
+                }else{
+                    events.keyPressed|=deferredInput.keyPressed;events.reload|=deferredInput.reload;
+                    events.mouseClick|=deferredInput.mouseClick;events.windowClosed|=deferredInput.windowClosed;deferredInput={};
+                }
+                const auto phaseBefore=battle->phase;
+                const int clipBefore=state.current;const double remainingBefore=state.walkRemaining;const bool loopBefore=state.loop;
+                const double turnLead=activeTurnLead();
+                const bool turnPhase=phaseBefore==pet::Battle::Phase::Moving||phaseBefore==pet::Battle::Phase::MoveEnd;
+                if(!turnPhase||front||dragging||right)stopTurn.reset();
+                double stoppingDistance=0;
+                for(const auto& pose:battle->clips.poses){const auto& profile=stopProfile(pose.moveEnd);stoppingDistance=std::max(stoppingDistance,profile.distanceAt(profile.stopTime));}
+                const double stoppingTravel=stoppingDistance*zoom+state.walkSpeed*state.movementScale*StopTurn::LeadSeconds;
+                if(smooth&&phaseBefore==pet::Battle::Phase::Moving&&state.walkRemaining<=turnLead+dt&&!front&&!dragging&&!right){
+                    const auto brakes=brakeRange();const double speed=state.walkSpeed*state.movementScale;
+                    if(!DesktopPath::trip(ground,geometry,zoom,yaw,speed*state.walkRemaining,brakes.first,brakes.second)){
+                        // Finish crossing in the same Moving state, before Move_End/Idle.
+                        for(int extra=1;extra<=30;++extra)if(DesktopPath::trip(ground,geometry,zoom,yaw,speed*(state.walkRemaining+extra*0.1),brakes.first,brakes.second)){
+                            state.walkRemaining+=extra*0.1;stopTurn.reset();state.log("BOUNDARY continue through to one-screen stop");break;}
+                    }
+                }
+                if(smooth && phaseBefore==pet::Battle::Phase::Moving && !DesktopPath::stepAllowed(ground,yaw,stoppingTravel))
+                    state.walkRemaining=std::min(state.walkRemaining,StopTurn::LeadSeconds);
+                if(phaseBefore==pet::Battle::Phase::Moving&&!stopTurn.active&&!front&&!dragging&&!right
+                    &&(state.walkRemaining<=turnLead||!state.walkEnabled)) {
+                    const double lead=std::max(0.0,std::min(state.walkRemaining,turnLead));const auto brakes=brakeRange();
+                    const bool activeRetreat=battle->activeInputMove;
+                    const double turnSeconds=activeRetreat?std::max(0.008,lead+earliestFootPlant()):state.walkRemaining>0?std::min(state.walkRemaining,turnLead):0.18;
+                    const bool curveSafe=activeRetreat?activeCurveFits(yaw,lookYaw,lead,turnSeconds)
+                        :DesktopPath::turnFits(ground,geometry,zoom,yaw,lookYaw,lead,state.walkSpeed*state.movementScale,brakes.first,brakes.second);
+                    const double desired=(activeRetreat||state.inputActive&&state.trackingEnabled)&&state.lookTarget&&curveSafe?lookYaw:yaw;
+                    stopTurn.begin(yaw,desired,turnSeconds);
+                    state.log("MOTION stop turn: from="+std::to_string(yaw)+" target="+std::to_string(stopTurn.target));
+                }
+                if(turnPhase&&stopTurn.active&&!state.settingsOpen) {
+                    state.walkYaw=stopTurn.advance(dt);yaw=float(std::remainder(stopTurn.yaw,360.0));
+                } else if(phaseBefore==pet::Battle::Phase::Moving)state.walkYaw=yaw;
+                battleInput.planJump(events,*battle,state,ground,float(state.walkYaw),work.left,work.top,[&](float maximum){
+                    return visibleWindows.distance(ground,float(state.walkYaw),maximum,work.left,work.top,window);
+                });
+                if(events.boundary&&clearJump&&battle->clips.jump>=0&&!clearJump(float(state.walkYaw),state.walkSpeed*state.movementScale*state.clips[battle->clips.jump].duration))events.boundary=false;
+                if(dragStarted&&!dragging){auto drag=events;drag.dragging=true;drag.petClick=drag.mouseClick=drag.keyPressed=drag.windowClosed=false;battle->tick(0,drag);}
+                const bool allowWalk=state.walkEnabled;state.walkEnabled=allowWalk&&(!preferences.follow||!state.inputActive)&&!directed.active;
+                const bool menuOpen=state.settingsOpen;if(directed.jumping)state.settingsOpen=true;
+                battle->activityDelta=elapsed;battle->tick(dt,events);state.settingsOpen=menuOpen;state.walkEnabled=allowWalk;
+                if(phaseBefore==pet::Battle::Phase::MoveEnd){
+                    endingClip=clipBefore;
+                    endingFrom=std::max(0.0,(loopBefore?pet::Battle::StopFallbackSeconds:state.clips[clipBefore].duration)-remainingBefore);
+                    endingTo=endingFrom+battle->movementSeconds;
+                }else if(battle->phase==pet::Battle::Phase::MoveEnd){
+                    const double duration=state.loop?pet::Battle::StopFallbackSeconds:state.clips[state.current].duration;
+                    if(duration-state.walkRemaining>1e-8){
+                        endingClip=state.current;endingTo=duration-state.walkRemaining;
+                        endingFrom=std::max(0.0,endingTo-battle->movementSeconds);
+                    }
+                }
+                if(state.walking&&walkGeneration!=state.generation){if(!stopTurn.active)yaw=float(state.walkYaw);walkGeneration=state.generation;}
+                if(battle->returnToCafe)selectMode(false,!review);
+                else if(state.facingRequest&&battle->phase!=pet::Battle::Phase::Idle&&!dragging&&!right
+                    &&!(stopTurn.active&&(phaseBefore==pet::Battle::Phase::MoveEnd||battle->phase==pet::Battle::Phase::MoveEnd)))
+                    yaw=float(*state.facingRequest);
+                if(battle->phase!=pet::Battle::Phase::Moving&&battle->phase!=pet::Battle::Phase::MoveEnd)stopTurn.reset();
+            }else{
+                if(dragStarted&&!dragging)behavior->tick(0,false,true);
+                const bool allowWalk=state.walkEnabled;state.walkEnabled=allowWalk&&(!preferences.follow||!state.inputActive)&&!directed.active;
+                const bool allowLook=state.trackingEnabled;state.trackingEnabled=false;
+                if(directed.jumping)deferredCafeClick|=click;
+                else {behavior->tick(dt,click||deferredCafeClick,dragging);deferredCafeClick=false;}
+                state.walkEnabled=allowWalk;state.trackingEnabled=allowLook;
+            }
+            state.trackingCursor=false;
+            state.facingRequest.reset();wasDragging=dragging;dragStarted=click=false;
+            if(state.returningHome){if(!state.settingsOpen&&!state.returnArrived){
+                double speed=state.walkSpeed*state.movementScale;
+                if(smooth&&!journey.route.empty()) {const auto home=journey.route.back();const double distance=std::hypot(home.x-ground.position.x,home.z-ground.position.z);speed*=std::min(1.0,std::sqrt(2*distance/(speed*0.28)));}
+                if(avoidHeading&&!journey.route.empty()){
+                    const auto home=journey.route.back();const double dx=home.x-ground.position.x,dz=home.z-ground.position.z,remaining=std::hypot(dx,dz);
+                    if(remaining<0.002){ground.position=home;journey.route.clear();state.returnArrived=true;}
+                    else {const float direct=std::atan2(dx,dz)*RAD2DEG;const double travel=std::min(remaining,speed*dt);const float heading=avoidHeading(direct,travel);
+                        if(std::isfinite(heading)){yaw=PetGround::turnToward(yaw,heading,dt);ground.position=ground.step(heading,float(travel));
+                            if(travel>=remaining&&std::abs(std::remainder(heading-direct,360.0f))<0.01f){ground.position=home;journey.route.clear();state.returnArrived=true;}}
+                        else stopBlocked();
+                    }
+                }else state.returnArrived=journey.stepHome(ground,float(speed*dt),yaw);
+                if(state.returnArrived)yaw=0;
+            }}
+            else if(battleMode && battle->movementSeconds>0){
+                const auto& profile=stopProfile(endingClip);
+                const float distance=endingClip>=0?float((profile.distanceAt(endingTo)-profile.distanceAt(endingFrom))*zoom)
+                    :float(battle->movementSpeed*state.movementScale*battle->movementSeconds);
+                if(battle->jumpMotion){yaw=float(battle->movementYaw);ground.position=ground.step(yaw,distance);}
+                else if(!moveGround(float(battle->movementYaw),distance))stopBlocked();
+            }
+            else if(!battleMode&&state.walking&&!state.settingsOpen){if(walkGeneration!=state.generation){yaw=float(state.walkYaw);walkGeneration=state.generation;journey.begin(ground.position);state.returnArrived=false;}
+                state.walkYaw=yaw;
+                const double duration=pet::Battle::StopFallbackSeconds;
+                if(smooth&&!DesktopPath::stepAllowed(ground,yaw,state.walkSpeed*state.movementScale*duration*0.75))
+                    state.walkRemaining=std::min(state.walkRemaining,duration);
+                const double remaining=std::min<double>(dt,state.walkRemaining);
+                const double travel=smooth?pet::Battle::stopDistance(duration-state.walkRemaining+remaining,duration)
+                    -pet::Battle::stopDistance(duration-state.walkRemaining,duration):remaining;
+                const double movingTime=state.walkRemaining>=duration?remaining:std::max(0.0,travel);
+                if(!moveGround(yaw,float(state.walkSpeed*state.movementScale*movingTime)))stopBlocked();
+            }
+            const bool idlePose=battleMode?battle->phase==pet::Battle::Phase::Idle:state.current==cafeIdle;
+            if(directed.active&&(!idlePose||directed.owner!=state.generation||(left&&!directed.jumping)||right||((!state.walkEnabled||(directed.following&&!preferences.follow))&&!directed.jumping))){directed.cancel();deferredInput={};deferredCafeClick=false;}
+            if(idlePose&&placementGeneration!=state.generation){placementNeeded=true;placementGeneration=state.generation;}
+            const int travelClip=battleMode?battle->clips.move:cafeWalk;
+            if(idlePose&&(!left||directed.jumping)&&!right&&(!state.settingsOpen||directed.jumping)&&!state.returningHome){
+                if(placementNeeded&&!directed.active){
+                    const auto foot=ground.screen(ground.position),target=geometry.idleFoot(ground,zoom);placementNeeded=false;
+                    if(std::hypot(target.x-foot.x,target.y-foot.y)>2){
+                        if(travelClip>=0&&state.walkEnabled){if(beginDirected(ground.floorAt(target),false)){restFacing.reset();state.log("PLACEMENT one-monitor destination");}}
+                        else ground.position=ground.floorAt(target);
+                    }
+                }
+                if(blockedCursor&&std::hypot(cursor.x-blockedCursor->x,cursor.y-blockedCursor->y)>16)blockedCursor.reset();
+                if(!blockedCursor&&preferences.follow&&state.inputActive&&state.walkEnabled&&travelClip>=0&&!directed.jumping&&!directed.crossing&&preciseNow>=interactionUntil&&(!directed.active||directed.following)&&preciseNow>=followPlanAt){
+                    const auto foot=ground.screen(ground.position);
+                    const auto center=ground.screen({ground.position.x,1.15f*zoom,ground.position.z});
+                    const auto side=ground.screen({ground.position.x+geometry.bodyWidth*zoom,1.15f*zoom,ground.position.z});
+                    const float bodyPixels=std::max(1.0f,std::abs(side.x-center.x));
+                    const bool outside=DirectedWalk::outsideBand(center,pixel,bodyPixels,preferences.followNear,preferences.followFar);
+                    if(outside||directed.active){
+                        const auto destination=DirectedWalk::followTarget(center,pixel,bodyPixels,float((preferences.followNear+preferences.followFar)*0.5));
+                        auto target=ground.clampFoot({destination.x+foot.x-center.x,destination.y+foot.y-center.y});
+                        const auto saved=ground.position;ground.position=ground.floorAt(target);target=geometry.idleFoot(ground,zoom);ground.position=saved;geometry.measure(ground,zoom);
+                        const auto world=ground.floorAt(target);
+                        if(!directed.active&&std::hypot(target.x-foot.x,target.y-foot.y)>8){if(beginDirected(world,true)){restFacing.reset();state.log(std::string("FOLLOW begin: ")+(battleMode?"battle":"cafe"));}}
+                        else if(directed.active){const double dx=world.x-ground.position.x,dz=world.z-ground.position.z;
+                            if(DesktopPath::trip(ground,geometry,zoom,std::atan2(dx,dz)*RAD2DEG,std::hypot(dx,dz))){directed.target=world;directed.crossing=DesktopPath::crossing(ground,geometry,zoom,world);}}
+                    }
+                    followPlanAt=preciseNow+0.15;
+                }
+                if(directed.active){
+                    const int jump=battleMode?battle->clips.jump:-1;
+                    const float jumpHeading=std::atan2(directed.target.x-ground.position.x,directed.target.z-ground.position.z)*RAD2DEG;
+                    if(jump>=0&&(!clearJump||clearJump(jumpHeading,0.792*state.movementScale*state.clips[jump].duration))&&directed.planJump(ground,0.792*state.movementScale,state.clips[jump].duration,yaw,dt,[&](float heading,float maximum){return visibleWindows.distance(ground,heading,maximum,work.left,work.top,window,true);}))state.log("FOLLOW JUMP continuous: "+state.clips[jump].name);
+                    const bool following=directed.following;const float oldFacing=directed.finalYaw;
+                    if(directed.step(ground,0.792*state.movementScale,dt,yaw,avoidHeading)){if(following)restFacing.reset();else restFacing=oldFacing;placementNeeded=false;state.log("DIRECTED arrival");}
+                    else if(directed.blocked)stopBlocked();
+                }else if(restFacing){yaw=PetGround::turnToward(yaw,*restFacing,dt);if(std::abs(std::remainder(yaw-*restFacing,360.0f))<0.1f)restFacing.reset();}
+            }
+            if(!battleMode)cafeAttention.update(state,yaw,dt,
+                idlePose&&!directed.active&&!restFacing&&!state.returningHome&&!left&&!right&&!front&&!state.settingsOpen
+                    &&preciseNow>=interactionUntil,preferences.cafeLookMode=="threshold",preferences.cafeTracking);
+            else cafeAttention.reset();
+            if(battleMode&&(battle->phase==pet::Battle::Phase::VictoryStart||battle->phase==pet::Battle::Phase::VictoryEnd))yaw=0;
+            if(dt>0 && (state.walking||directed.active) && (!state.settingsOpen || directed.jumping || (battleMode && battle->phase==pet::Battle::Phase::Jump))) {
+                motionVelocity={(ground.position.x-before.x)/dt,0,(ground.position.z-before.z)/dt};
+                motionRemaining=directed.active?(directed.jumping?std::min(0.032,directed.jumpDuration-directed.jumpTime):0.032):state.returningHome ? 0 : state.walkRemaining;
+                if(endingClip>=0)motionRemaining=std::max(0.0,stopProfile(endingClip).stopTime-endingTo);
+                if(state.returningHome && !journey.route.empty()) {
+                    const auto home=journey.route.back();const float speed=std::hypot(motionVelocity.x,motionVelocity.z);
+                    if(speed>0)motionRemaining=std::hypot(home.x-ground.position.x,home.z-ground.position.z)/speed;
+                }
+            }
+        }
+        presentState();
+        if(frameReady&&!snapshot.empty()&&now-readyAt>600)capture();
+    }
+    void presentState(bool force=false){
+        if(!loaded)return;
+        geometry.update(ground,zoom,false);const auto crop=geometry.crop;
+        const int retreatOffset=battleMode && battle && battle->phase==pet::Battle::Phase::Retreat
+            ? int(battle->retreatProgress*(crop.y+geometry.height+20)):0;
+        const POINT destination{work.left+int(crop.x),work.top+int(crop.y)-retreatOffset};
+        // Move in the mouse handler, without waiting for a timer or browser frame.
+        if(destination.x!=windowPosition.x||destination.y!=windowPosition.y||geometry.width!=windowWidth||geometry.height!=windowHeight){
+            if(geometry.width!=windowWidth||geometry.height!=windowHeight){windowWidth=geometry.width;windowHeight=geometry.height;SetWindowRgn(inputWindow,CreateRectRgn(0,0,0,0),FALSE);if(controller)controller->put_Bounds({0,0,windowWidth,windowHeight});state.log("VIEWPORT "+std::to_string(windowWidth)+" x "+std::to_string(windowHeight));}
+            SetWindowPos(window,HWND_TOPMOST,destination.x,destination.y,windowWidth,windowHeight,SWP_NOACTIVATE|(grouped?SWP_NOZORDER:0));
+            SetWindowPos(inputWindow,HWND_TOPMOST,destination.x,destination.y,windowWidth,windowHeight,SWP_NOACTIVATE|(grouped?SWP_NOZORDER:0));
+            windowPosition=destination;
+        }
+        if(depthRequest)depthRequest();
+        const auto now=preciseSeconds();if(!force&&now-lastPost<0.007)return;lastPost=now;
+        const bool turningWalk=!battleMode&&cafeAttention.turning&&cafeWalk>=0;
+        const int index=turningWalk?cafeWalk:directed.active?(directed.jumping?(battleMode?battle->clips.jump:cafeJump):(battleMode?battle->clips.move:cafeWalk)):state.current;
+        const int clip=index>=0?state.clips[index].modelIndex:0;
+        const bool retreat=battle&&state.current==battle->clips.retreat;
+        const bool victory=battleMode&&battle&&(battle->phase==pet::Battle::Phase::VictoryStart||battle->phase==pet::Battle::Phase::VictoryEnd);
+        const float displayYaw=std::remainder(yaw+(retreat?180.0f:0),360.0f);
+        if(retreat && retreatLogged!=state.generation) {
+            retreatLogged=state.generation;std::printf("RETREAT facing: base=%.1f render=%.1f offset=180\n",yaw,displayYaw);std::fflush(stdout);
+        }
+        if(victory&&victoryLogged!=state.generation){victoryLogged=state.generation;state.log("VICTORY facing: render=0");}
+        post({{"type","state"},{"maskRevision",maskRevision},{"generation",displayGeneration()},{"clip",clip},{"time",fixedPose?reviewTime:turningWalk?cafeAttention.time:directed.active?(directed.jumping?directed.jumpTime:directed.time):state.time},{"loop",turningWalk|| (directed.active?!directed.jumping:state.loop)},{"review",fixedPose},
+            {"mode",battleMode?"battle":"cafe"},{"paused",state.settingsOpen&&!directed.jumping&&!(battleMode&&battle->phase==pet::Battle::Phase::Jump)},
+            {"camera",{ground.camera.position.x,ground.camera.position.y,ground.camera.position.z}},{"fov",ground.camera.fovy},{"far",500*std::max(1.0f,ground.height/primaryHeight)},
+            {"desktop",{ground.width,ground.height}},{"viewport",{windowWidth,windowHeight}},{"crop",{crop.x,crop.y}},{"position",{ground.position.x,0,ground.position.z}},
+            {"velocity",{motionVelocity.x,0,motionVelocity.z}},{"motionRemaining",motionRemaining},{"sampleTime",now*1000},
+            {"smooth",smooth},{"menuHint",menuHintVisible&&!state.settingsOpen},
+            {"zoom",zoom},{"yaw",victory?0:displayYaw},{"outline",state.outlineEnabled},{"outlineMode",preferences.outlineMode},{"outlineWidth",preferences.outlineWidth},{"interacting",left||right}});
+    }
+    void captureMouse(){
+        SetCapture(inputWindow);
+        // Capture keeps the gesture active outside the input silhouette.
+        presentState(true);
+    }
+    void releaseMouse(){
+        left=right=false;ReleaseCapture();presentState(true);
+    }
+    void initializeWebView(){
+        check(DCompositionCreateDevice(nullptr,__uuidof(IDCompositionDevice),reinterpret_cast<void**>(&device)),"Create composition device");
+        check(device->CreateTargetForHwnd(window,TRUE,&target),"Create composition target");
+        check(device->CreateVisual(&visual),"Create composition visual");check(target->SetRoot(visual),"Set composition root");
+        loader=LoadLibraryW((directory/L"WebView2Loader.dll").c_str());if(!loader)throw std::runtime_error("WebView2Loader.dll missing");
+        const auto create=reinterpret_cast<decltype(&CreateCoreWebView2EnvironmentWithOptions)>(GetProcAddress(loader,"CreateCoreWebView2EnvironmentWithOptions"));
+        if(!create)throw std::runtime_error("WebView2 loader entry point missing");
+        auto* cb=new Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler,HRESULT,ICoreWebView2Environment*>([this,life=alive](HRESULT result,ICoreWebView2Environment* env){
+            if(!*life)return S_OK;
+            check(result,"Create WebView2 environment (Runtime required)");environment=env;environment->AddRef();
+            ICoreWebView2Environment3* env3=nullptr;check(env->QueryInterface(uuid<ICoreWebView2Environment3>(),reinterpret_cast<void**>(&env3)),"Composition support");
+            auto* complete=new Callback<ICoreWebView2CreateCoreWebView2CompositionControllerCompletedHandler,HRESULT,ICoreWebView2CompositionController*>([this,life=alive](HRESULT result,ICoreWebView2CompositionController* value){
+                if(!*life)return S_OK;
+                check(result,"Create WebView2 composition controller");composition=value;composition->AddRef();
+                check(value->QueryInterface(uuid<ICoreWebView2Controller>(),reinterpret_cast<void**>(&controller)),"Get WebView controller");
+                check(controller->get_CoreWebView2(&browser),"Get browser");
+                ICoreWebView2Controller2* controller2=nullptr;check(controller->QueryInterface(uuid<ICoreWebView2Controller2>(),reinterpret_cast<void**>(&controller2)),"Transparent background support");
+                controller2->put_DefaultBackgroundColor({0,0,0,0});controller2->Release();
+                ICoreWebView2Controller3* controller3=nullptr;
+                if(SUCCEEDED(controller->QueryInterface(uuid<ICoreWebView2Controller3>(),reinterpret_cast<void**>(&controller3)))){controller3->put_ShouldDetectMonitorScaleChanges(FALSE);controller3->put_RasterizationScale(1);controller3->Release();}
+                controller->put_Bounds({0,0,windowWidth,windowHeight});controller->put_IsVisible(TRUE);
+                check(composition->put_RootVisualTarget(visual),"Attach browser visual");check(device->Commit(),"Commit browser visual");
+                ICoreWebView2Settings* options=nullptr;browser->get_Settings(&options);options->put_AreDefaultContextMenusEnabled(FALSE);options->put_IsStatusBarEnabled(FALSE);options->Release();
+                check(browser->QueryInterface(uuid<ICoreWebView2_3>(),reinterpret_cast<void**>(&browser3)),"Local resource mapping support");
+                check(browser3->SetVirtualHostNameToFolderMapping(L"pet.local",(directory/L"app").c_str(),COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_DENY_CORS),"Map application folder");
+                // Requests to mapped virtual hosts bypass WebResourceRequested;
+                // use a separate, unmapped host for the native model stream.
+                check(browser->AddWebResourceRequestedFilter(L"https://model.pet.local/model/*",COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL),"Filter model requests");
+                auto* resources=new Callback<ICoreWebView2WebResourceRequestedEventHandler,ICoreWebView2*,ICoreWebView2WebResourceRequestedEventArgs*>([this](ICoreWebView2*,ICoreWebView2WebResourceRequestedEventArgs* args){
+                    IStream* stream=nullptr;check(SHCreateStreamOnFileEx(pendingModel.c_str(),STGM_READ|STGM_SHARE_DENY_WRITE,FILE_ATTRIBUTE_NORMAL,FALSE,nullptr,&stream),"Open original GLB");
+                    ICoreWebView2WebResourceResponse* response=nullptr;
+                    std::printf("RESOURCE GLB bytes: %llu\n",static_cast<unsigned long long>(std::filesystem::file_size(pendingModel)));std::fflush(stdout);
+                    const auto headers=L"Content-Type: model/gltf-binary\r\nAccess-Control-Allow-Origin: https://pet.local\r\nCache-Control: no-store\r\nContent-Length: "+std::to_wstring(std::filesystem::file_size(pendingModel));
+                    const auto hr=environment->CreateWebResourceResponse(stream,200,L"OK",headers.c_str(),&response);stream->Release();check(hr,"Serve original GLB");
+                    const auto set=args->put_Response(response);response->Release();check(set,"Set model response");return S_OK;
+                });EventRegistrationToken resourceToken{};browser->add_WebResourceRequested(resources,&resourceToken);resources->Release();
+                auto* messages=new Callback<ICoreWebView2WebMessageReceivedEventHandler,ICoreWebView2*,ICoreWebView2WebMessageReceivedEventArgs*>([this](ICoreWebView2*,ICoreWebView2WebMessageReceivedEventArgs* args){
+                    LPWSTR text=nullptr;check(args->get_WebMessageAsJson(&text),"Read browser message");const auto json=utf8(text);CoTaskMemFree(text);
+                    try{receive(Json::parse(json));}catch(const std::exception& e){std::fprintf(stderr,"Message: %s\n",e.what());exitCode=1;if(review)DestroyWindow(window);}return S_OK;
+                });EventRegistrationToken token{};browser->add_WebMessageReceived(messages,&token);messages->Release();
+                check(browser->Navigate(L"https://pet.local/index.html"),"Navigate local application");return S_OK;
+            });
+            const auto hr=env3->CreateCoreWebView2CompositionController(window,complete);complete->Release();env3->Release();check(hr,"Start composition controller");return S_OK;
+        });
+        const auto runtime=directory/L"runtime/webview2";
+        const bool bundled=std::filesystem::is_regular_file(runtime/L"msedgewebview2.exe");
+        state.log(bundled?"WEBVIEW runtime: bundled fixed version":"WEBVIEW runtime: installed Evergreen");
+        const auto hr=create(bundled?runtime.c_str():nullptr,(storage()/L"webview-profile").c_str(),nullptr,cb);cb->Release();check(hr,"Start WebView2 environment");
+    }
+    static LRESULT CALLBACK proc(HWND hwnd,UINT message,WPARAM w,LPARAM l){
+        App* app=reinterpret_cast<App*>(GetWindowLongPtrW(hwnd,GWLP_USERDATA));
+        if(message==WM_NCCREATE){app=static_cast<App*>(reinterpret_cast<CREATESTRUCTW*>(l)->lpCreateParams);SetWindowLongPtrW(hwnd,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(app));}
+        if(!app)return DefWindowProcW(hwnd,message,w,l);
+        try{
+            POINT cursor{};GetCursorPos(&cursor);
+            switch(message){
+            case WM_ERASEBKGND:return 1;
+            case WM_NCHITTEST:return HTTRANSPARENT; // Only the separate alpha-shaped window accepts input.
+            case WM_PAINT:{PAINTSTRUCT p{};BeginPaint(hwnd,&p);EndPaint(hwnd,&p);return 0;}
+            case WM_MOUSEACTIVATE:return MA_NOACTIVATE;
+            case WM_DISPLAYCHANGE:app->refreshDisplays();app->geometry.prepareViewport(app->ground,app->zoom);app->geometry.place(app->ground,app->ground.screen(app->ground.position),app->zoom);app->placementNeeded=true;app->presentState(true);return 0;
+            case WM_TIMER:if(app->tickCallback)app->tickCallback();else app->tick();return 0;
+            case WM_LBUTTONDOWN:if(app->right)return 0;app->left=true;app->dragged=false;app->down=app->previous=cursor;app->captureMouse();return 0;
+            case WM_RBUTTONDOWN:if(app->left)return 0;app->right=true;app->previous=cursor;app->captureMouse();return 0;
+            case WM_MOUSEMOVE:
+                if(app->left){const bool before=app->dragged;app->dragged|=std::abs(cursor.x-app->down.x)>4||std::abs(cursor.y-app->down.y)>4;
+                    if(app->dragged){app->dragStarted|=!before;auto foot=app->ground.screen(app->ground.position);foot.x+=cursor.x-(before?app->previous.x:app->down.x);foot.y+=cursor.y-(before?app->previous.y:app->down.y);app->geometry.place(app->ground,foot,app->zoom);}app->previous=cursor;}
+                if(app->right){app->yaw=std::remainder(app->yaw+(cursor.x-app->previous.x)*0.7f,360.0f);app->previous=cursor;}
+                if(app->left||app->right)app->presentState();return 0;
+            case WM_LBUTTONUP:if(app->left){app->click=!app->dragged;app->releaseMouse();}return 0;
+            case WM_RBUTTONUP:if(app->right)app->releaseMouse();return 0;
+            case WM_CAPTURECHANGED:app->left=app->right=false;app->presentState(true);return 0;
+            case WM_CANCELMODE:app->releaseMouse();return 0;
+            case WM_MOUSEWHEEL:app->setZoom(app->zoom*std::pow(1.1f,GET_WHEEL_DELTA_WPARAM(w)/120.0f));return 0;
+            case WM_MBUTTONUP:app->showSettings();return 0;
+            case WM_HOTKEY:if(w==1){if(app->closeRequest)app->closeRequest();else DestroyWindow(hwnd);}else if(w==2){if(app->followRequest)app->followRequest();else{app->preferences.follow=!app->preferences.follow;app->preferences.save(app->settings->ini);app->syncSettings();}}return 0;
+            case WM_CLOSE:if(app->closeRequest)app->closeRequest();else DestroyWindow(hwnd);return 0;
+            case WM_DESTROY:KillTimer(hwnd,1);if(app->quitHotkey)UnregisterHotKey(hwnd,1);if(app->lookHotkey)UnregisterHotKey(hwnd,2);app->done=true;app->window=nullptr;if(app->destroyedCallback)app->destroyedCallback();else if(!app->grouped)PostQuitMessage(0);return 0;
+            default:return DefWindowProcW(hwnd,message,w,l);
+            }
+        }catch(const std::exception& e){std::fprintf(stderr,"Host: %s\n",e.what());std::fflush(stderr);app->exitCode=1;DestroyWindow(hwnd);return 0;}
+    }
+    static LRESULT CALLBACK inputProc(HWND hwnd,UINT message,WPARAM w,LPARAM l){
+        auto* app=reinterpret_cast<App*>(GetWindowLongPtrW(hwnd,GWLP_USERDATA));
+        if(message==WM_NCCREATE){app=static_cast<App*>(reinterpret_cast<CREATESTRUCTW*>(l)->lpCreateParams);SetWindowLongPtrW(hwnd,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(app));}
+        if(app&&app->window){
+            switch(message){
+            case WM_MOUSEACTIVATE:return MA_NOACTIVATE;
+            case WM_LBUTTONDOWN:case WM_LBUTTONUP:case WM_RBUTTONDOWN:case WM_RBUTTONUP:
+            case WM_MBUTTONUP:case WM_MOUSEMOVE:case WM_MOUSEWHEEL:case WM_CAPTURECHANGED:case WM_CANCELMODE:
+                return proc(app->window,message,w,l);
+            }
+        }
+        return DefWindowProcW(hwnd,message,w,l);
+    }
+    void initialize(bool leader=true){
+        state.log=[](const std::string& text){std::printf("%s\n",text.c_str());std::fflush(stdout);};
+        state.log(smooth?"VARIANT smooth transitions + braking":"VARIANT regular");
+        state.canWalk=[this](double y,double d){return canStartWalk(y,d);};
+        std::filesystem::create_directories(storage()/L"behavior");
+        const auto ini=storage()/L"settings.ini";
+        if(!std::filesystem::exists(ini)&&std::filesystem::is_regular_file(directory/L"defaults.ini"))std::filesystem::copy_file(directory/L"defaults.ini",ini);
+        settings=std::make_unique<PetSettings>(state,model.stem().wstring(),ini.wstring());
+        menuHintVisible=!review&&leader&&GetPrivateProfileIntW(L"UI",L"MenuHintDismissed",0,ini.c_str())==0;
+        settings->outlineTitle=L"角色线条";settings->outlineDescription=L"Wiki 网格描边，保留内部贴图线条";
+        settings->modesEnabled=true;preferences.load(settings->ini);state.outlineEnabled=preferences.outlineMode!=0;
+        webSettings=std::make_unique<WebSettings>();webSettings->snapshot=[this]{return settingsSnapshot();};webSettings->receive=[this](const Json& j){settingsMessage(j);};
+        webSettings->visibility=[this](bool visible){state.settingsOpen=visible;if(visible)dismissMenuHint();else{placementNeeded=true;interactionUntil=preciseSeconds()+0.5;}};
+        settings->importBusy=true;settings->progressDetail=L"初始化模型显示窗口";
+        if(!std::filesystem::exists(ini))state.outlineEnabled=true;
+        refreshDisplays();ground.modelZoom=zoom;ground.measuredBounds=true;geometry.prepareViewport(ground,zoom);geometry.place(ground,{ground.width*0.72f,ground.height*0.83f},zoom);geometry.update(ground,zoom,false);const auto crop=geometry.crop;windowWidth=geometry.width;windowHeight=geometry.height;
+        WNDCLASSW wc{};wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"DesktopPetThree";wc.lpfnWndProc=proc;wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&wc);
+        // WS_EX_TRANSPARENT alone only changes paint ordering. Combining it
+        // with WS_EX_LAYERED makes real mouse input skip this display surface,
+        // including windows owned by other processes. Pixels still come from
+        // DirectComposition; no color key or per-frame bitmap upload is used.
+        window=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_NOREDIRECTIONBITMAP|WS_EX_LAYERED|WS_EX_TRANSPARENT,wc.lpszClassName,L"ba_cafe_lite",WS_POPUP,
+            work.left+int(crop.x),work.top+int(crop.y),windowWidth,windowHeight,nullptr,nullptr,wc.hInstance,this);
+        if(!window)throw std::runtime_error("Cannot create desktop pet window");
+        wc.lpszClassName=L"DesktopPetThreeInput";wc.lpfnWndProc=inputProc;RegisterClassW(&wc);
+        // No redirected bitmap, background brush or composition visual: this
+        // window has no visible surface. Its region is exclusively for input.
+        inputWindow=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_NOREDIRECTIONBITMAP,wc.lpszClassName,L"ba_cafe_lite input",WS_POPUP,
+            work.left+int(crop.x),work.top+int(crop.y),windowWidth,windowHeight,nullptr,nullptr,wc.hInstance,this);
+        if(!inputWindow)throw std::runtime_error("Cannot create desktop pet input window");
+        SetWindowRgn(inputWindow,CreateRectRgn(0,0,0,0),FALSE);
+        // High-resolution waitable timer drives motion at 125 Hz on the message
+        // thread. No global timer-resolution change and no extra worker thread.
+        ShowWindow(window,SW_SHOWNOACTIVATE);ShowWindow(inputWindow,SW_SHOWNOACTIVATE);started=GetTickCount64();lastTick=preciseSeconds();
+        if(leader)motionTimer=CreateWaitableTimerExW(nullptr,nullptr,CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,TIMER_ALL_ACCESS);
+        if(motionTimer) {
+            LARGE_INTEGER due{};due.QuadPart=-80000;
+            if(!SetWaitableTimer(motionTimer,&due,8,nullptr,nullptr,FALSE)){CloseHandle(motionTimer);motionTimer=nullptr;}
+        }
+        if(leader&&!motionTimer)SetTimer(window,1,10,nullptr);
+        std::printf("HOST motion timer: %s; clock=steady\n",motionTimer?"high resolution 125 Hz":"Win32 fallback");std::fflush(stdout);
+        if(leader){quitHotkey=RegisterHotKey(window,1,MOD_CONTROL|MOD_ALT|MOD_SHIFT|MOD_NOREPEAT,'Q');lookHotkey=RegisterHotKey(window,2,MOD_CONTROL|MOD_ALT|MOD_SHIFT|MOD_NOREPEAT,'L');}
+        initializeWebView();
+    }
+    int run(){
+        initialize();MSG message{};
+        while(!done){
+            const DWORD wake=MsgWaitForMultipleObjectsEx(motionTimer?1:0,motionTimer?&motionTimer:nullptr,INFINITE,QS_ALLINPUT,MWMO_INPUTAVAILABLE);
+            if(wake==WAIT_FAILED)throw std::runtime_error("Motion/message wait failed");
+            if(motionTimer && wake==WAIT_OBJECT_0) {
+                try{tick();}catch(const std::exception& e){std::fprintf(stderr,"Host: %s\n",e.what());exitCode=1;DestroyWindow(window);}
+            }
+            while(PeekMessageW(&message,nullptr,0,0,PM_REMOVE)) {
+                if(message.message==WM_QUIT){done=true;break;}
+                TranslateMessage(&message);DispatchMessageW(&message);
+            }
+        }return exitCode;
+    }
+    ~App(){
+        *alive=false;
+        if(motionTimer){CancelWaitableTimer(motionTimer);CloseHandle(motionTimer);}
+        if(settings)settings->window=nullptr;webSettings.reset();
+        if(!grouped)battleInput.enable(false);battle.reset();behavior.reset();if(controller)controller->Close();if(composition)composition->put_RootVisualTarget(nullptr);
+        release(browser3);release(browser);release(composition);release(controller);release(environment);release(visual);release(target);release(device);
+        if(loader)FreeLibrary(loader);
+        if(inputWindow&&IsWindow(inputWindow))DestroyWindow(inputWindow);
+        if(window&&IsWindow(window))DestroyWindow(window);
+    }
+};
+
+#include "scene.h"
+
+#ifndef PET_THREE_NO_ENTRY
+int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    if(FAILED(CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED)))return 1;
+    int result=1;
+    try{
+        auto owned=std::make_unique<App>();auto& app=*owned;wchar_t executable[32768]{};GetModuleFileNameW(nullptr,executable,32768);app.directory=std::filesystem::path(executable).parent_path();
+        wchar_t dataRoot[32768]{};if(GetEnvironmentVariableW(L"BA_PET_DATA_DIR",dataRoot,32768)>0)app.dataDirectory=std::filesystem::absolute(dataRoot);
+        app.model=app.directory/L"models/Shiroko.glb";
+        wchar_t saved[32768]{};GetPrivateProfileStringW(L"Model",L"Path",L"",saved,32768,(app.storage()/L"active-model.ini").c_str());
+        if(*saved&&std::filesystem::is_regular_file(saved))app.model=saved;
+        int argc=0;auto** argv=CommandLineToArgvW(GetCommandLineW(),&argc);
+        for(int i=1;i<argc;i++){
+            const std::wstring flag=argv[i];
+            if(flag==L"--model"&&i+1<argc){app.model=std::filesystem::absolute(argv[++i]);app.modelSpecified=true;}
+            else if(flag==L"--clip"&&i+1<argc){app.reviewClip=utf8(argv[++i]);app.review=true;}
+            else if(flag==L"--sample"&&i+1<argc){app.reviewTime=std::wcstod(argv[++i],nullptr);app.sampleSpecified=true;app.review=true;}
+            else if(flag==L"--mode"&&i+1<argc){app.initialMode=utf8(argv[++i]);app.review=true;}
+            else if(flag==L"--smooth")app.smooth=true;
+            else if(flag==L"--settings")app.settingsOnLoad=true;
+            else if(flag==L"--zoom"&&i+1<argc)app.zoom=std::clamp(float(std::wcstod(argv[++i],nullptr)),0.45f,1.65f);
+            else if(flag==L"--snapshot"&&i+1<argc){app.snapshot=std::filesystem::absolute(argv[++i]);app.review=true;}
+            else if(flag==L"--duration"&&i+1<argc){app.runSeconds=std::clamp(std::wcstod(argv[++i],nullptr),1.0,20.0);app.review=true;}
+            else if(flag==L"--exit-after"&&i+1<argc){app.runSeconds=std::clamp(std::wcstod(argv[++i],nullptr),1.0,20.0);}
+        }LocalFree(argv);
+        if(!app.initialMode.empty()&&app.initialMode!="cafe"&&app.initialMode!="battle")throw std::runtime_error("Mode must be cafe or battle");
+        app.fixedPose=app.review&&(app.initialMode.empty()||!app.reviewClip.empty()||app.sampleSpecified);
+        Scene scene(std::move(owned));result=scene.run();
+    }catch(const std::exception& e){std::fprintf(stderr,"Startup: %s\n",e.what());MessageBoxW(nullptr,wide(e.what()).c_str(),L"ba_cafe_lite",MB_ICONERROR);}
+    CoUninitialize();return result;
+}
+#endif

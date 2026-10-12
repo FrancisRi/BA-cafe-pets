@@ -1,0 +1,186 @@
+{
+  "asset": {
+    "version": "2.0"
+  },
+  "scene": 0,
+  "scenes": [
+    {
+      "nodes": [
+        4,
+        2
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "name": "Animated parent",
+      "children": [
+        1
+      ]
+    },
+    {
+      "name": "Joint A",
+      "translation": [
+        1,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "Other parent",
+      "translation": [
+        0,
+        4,
+        0
+      ],
+      "children": [
+        3
+      ]
+    },
+    {
+      "name": "Joint B",
+      "translation": [
+        0,
+        1,
+        0
+      ]
+    },
+    {
+      "name": "Grandparent",
+      "translation": [
+        0,
+        0,
+        3
+      ],
+      "children": [
+        0
+      ]
+    }
+  ],
+  "skins": [
+    {
+      "joints": [
+        1,
+        3
+      ]
+    }
+  ],
+  "buffers": [
+    {
+      "byteLength": 88,
+      "uri": "data:application/octet-stream;base64,AAAAAAAAgD8AAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAADzBDU/8wQ1PwAAgD8AAIA/AACAPwAAAEAAAABAAAAAQA=="
+    }
+  ],
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteOffset": 0,
+      "byteLength": 8
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 8,
+      "byteLength": 24
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 32,
+      "byteLength": 32
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 64,
+      "byteLength": 24
+    }
+  ],
+  "accessors": [
+    {
+      "bufferView": 0,
+      "componentType": 5126,
+      "count": 2,
+      "type": "SCALAR"
+    },
+    {
+      "bufferView": 1,
+      "componentType": 5126,
+      "count": 2,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 2,
+      "componentType": 5126,
+      "count": 2,
+      "type": "VEC4"
+    },
+    {
+      "bufferView": 3,
+      "componentType": 5126,
+      "count": 2,
+      "type": "VEC3"
+    }
+  ],
+  "animations": [
+    {
+      "name": "Moving parent",
+      "samplers": [
+        {
+          "input": 0,
+          "output": 1,
+          "interpolation": "LINEAR"
+        },
+        {
+          "input": 0,
+          "output": 2,
+          "interpolation": "LINEAR"
+        },
+        {
+          "input": 0,
+          "output": 3,
+          "interpolation": "LINEAR"
+        }
+      ],
+      "channels": [
+        {
+          "sampler": 0,
+          "target": {
+            "node": 0,
+            "path": "translation"
+          }
+        },
+        {
+          "sampler": 1,
+          "target": {
+            "node": 0,
+            "path": "rotation"
+          }
+        },
+        {
+          "sampler": 2,
+          "target": {
+            "node": 0,
+            "path": "scale"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Static parent",
+      "samplers": [
+        {
+          "input": 0,
+          "output": 3,
+          "interpolation": "LINEAR"
+        }
+      ],
+      "channels": [
+        {
+          "sampler": 0,
+          "target": {
+            "node": 1,
+            "path": "scale"
+          }
+        }
+      ]
+    }
+  ]
+}

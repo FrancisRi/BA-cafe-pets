@@ -1,0 +1,167 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mxfile host="app.diagrams.net" version="24.7.17">
+  <diagram id="battle-mode" name="战斗模式">
+    <mxGraphModel dx="1800" dy="1250" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1840" pageHeight="1260" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="cafe" value="咖啡厅模式" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e9f7ff;strokeColor=#1eaee6;fontColor=#253951;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="25" y="30" width="205" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="any" value="任意战斗状态&lt;br&gt;拖拽 &gt; 连击退场 &gt; 关窗结算 &gt; 技能" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e9f7ff;strokeColor=#1eaee6;fontColor=#253951;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="780" y="35" width="320" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="death" value="退场：Vital_Death × 1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff1f0;strokeColor=#1eaee6;fontColor=#253951;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="1180" y="35" width="225" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="retreat" value="Vital_Retreat × 1&lt;br&gt;上升到屏幕外" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff1f0;strokeColor=#1eaee6;fontColor=#253951;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="1470" y="35" width="255" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="victory_start" value="胜利：Victory_Start × 1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e9f7ff;strokeColor=#1eaee6;fontColor=#253951;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="270" y="165" width="240" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="victory_end" value="Victory_End × 3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e9f7ff;strokeColor=#1eaee6;fontColor=#253951;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="560" y="165" width="220" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="skill" value="技能：Exs × 1&lt;br&gt;结束恢复原状态和播放进度" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e9f7ff;strokeColor=#1eaee6;fontColor=#253951;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="1180" y="185" width="330" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="pickup" value="被拖拽&lt;br&gt;Formation_Pickup 循环" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e9f7ff;strokeColor=#1eaee6;fontColor=#253951;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="45" y="420" width="250" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="normal" value="初始 / 松开拖拽 / 胜利后&lt;br&gt;Normal_Idle（未选姿态）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e9f7ff;strokeColor=#1eaee6;fontColor=#253951;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="355" y="410" width="300" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="move" value="随机移动：Move_Ing&lt;br&gt;有输入 0.6–1.2s；无输入 2–4s&lt;br&gt;速度 ×2.5，随角色大小变化" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e9f7ff;strokeColor=#1eaee6;fontColor=#253951;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="780" y="410" width="315" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="jump" value="提前起跳：Move_Jump × 1&lt;br&gt;交界处为动作中点；移动不中断" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e9f7ff;strokeColor=#1eaee6;fontColor=#253951;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="1180" y="370" width="280" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="move_end" value="结束移动&lt;br&gt;Move_End_Normal / Stand / Kneel&lt;br&gt;只选完整可用姿态；有输入时朝向鼠标" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e9f7ff;strokeColor=#1eaee6;fontColor=#253951;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="1470" y="480" width="330" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="idle" value="姿态_Idle&lt;br&gt;Normal / Stand / Kneel" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e9f7ff;strokeColor=#1eaee6;fontColor=#253951;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="1030" y="680" width="280" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="callsign" value="指挥：朝向鼠标&lt;br&gt;姿态_Callsign × 1&lt;br&gt;缺少时使用 Normal_Callsign" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e9f7ff;strokeColor=#1eaee6;fontColor=#253951;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="1470" y="710" width="330" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="attack_start" value="准备攻击&lt;br&gt;姿态_Attack_Start × 1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e9f7ff;strokeColor=#1eaee6;fontColor=#253951;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="75" y="825" width="260" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="attack_delay" value="攻击空闲&lt;br&gt;姿态_Attack_Delay 循环" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e9f7ff;strokeColor=#1eaee6;fontColor=#253951;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="430" y="825" width="280" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="attack" value="攻击&lt;br&gt;姿态_Attack_Ing × 1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e9f7ff;strokeColor=#1eaee6;fontColor=#253951;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="75" y="1060" width="260" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="attack_end" value="攻击结束&lt;br&gt;姿态_Attack_End × 1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e9f7ff;strokeColor=#1eaee6;fontColor=#253951;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="810" y="1060" width="265" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="reload" value="换弹&lt;br&gt;姿态_Reload / Attack_Reload × 1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e9f7ff;strokeColor=#1eaee6;fontColor=#253951;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="1250" y="1060" width="350" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="edge0" value="选择战斗模式；模型具备战斗动作" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#ffffff;strokeColor=#627d94;" edge="1" parent="1" source="cafe" target="normal">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge1" value="拖拽：强制打断（最高优先级）" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#ffffff;strokeColor=#627d94;" edge="1" parent="1" source="any" target="pickup">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge2" value="松开 / 取消拖拽" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#ffffff;strokeColor=#627d94;" edge="1" parent="1" source="pickup" target="normal">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge3" value="1.2s 内点击角色三次：强制" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#ffffff;strokeColor=#627d94;" edge="1" parent="1" source="any" target="death">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge4" value="死亡播放结束" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#ffffff;strokeColor=#627d94;" edge="1" parent="1" source="death" target="retreat">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge5" value="退场结束" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#ffffff;strokeColor=#627d94;" edge="1" parent="1" source="retreat" target="cafe">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge6" value="关闭其他应用的顶层窗口" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#ffffff;strokeColor=#627d94;" edge="1" parent="1" source="any" target="victory_start">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge7" value="播放结束" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#ffffff;strokeColor=#627d94;" edge="1" parent="1" source="victory_start" target="victory_end">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge8" value="完整播放三次结束" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#ffffff;strokeColor=#627d94;" edge="1" parent="1" source="victory_end" target="normal">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge9" value="普通状态持续输入：每 30s 有 5% 概率" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#ffffff;strokeColor=#627d94;" edge="1" parent="1" source="any" target="skill">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge10" value="恢复被打断的状态、动作时间和剩余行走" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#ffffff;strokeColor=#627d94;" edge="1" parent="1" source="skill" target="any">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge11" value="持续输入 3s 或无输入等待 10–30s" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#ffffff;strokeColor=#627d94;" edge="1" parent="1" source="normal" target="move">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge12" value="无触发：循环 Idle" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#ffffff;strokeColor=#627d94;" edge="1" parent="1" source="normal" target="normal">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge13" value="预测可跨越屏幕 / 窗口边界；仅有 Jump 的模型" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#ffffff;strokeColor=#627d94;" edge="1" parent="1" source="move" target="jump">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge14" value="落地且尚有路程：保持原方向、速度" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#ffffff;strokeColor=#627d94;" edge="1" parent="1" source="jump" target="move">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge15" value="落地后：走完 / 关闭走动" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#ffffff;strokeColor=#627d94;" edge="1" parent="1" source="jump" target="move_end">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge16" value="走完 / 关闭走动 / 不可通行的桌面外边缘" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#ffffff;strokeColor=#627d94;" edge="1" parent="1" source="move" target="move_end">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge17" value="结束动作播放完成" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#ffffff;strokeColor=#627d94;" edge="1" parent="1" source="move_end" target="idle">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge18" value="无触发：循环 Idle" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#ffffff;strokeColor=#627d94;" edge="1" parent="1" source="idle" target="idle">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge19" value="持续输入 3s 或无输入等待 10–30s" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#ffffff;strokeColor=#627d94;" edge="1" parent="1" source="idle" target="move">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge20" value="鼠标点击：10% 概率" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#ffffff;strokeColor=#627d94;" edge="1" parent="1" source="idle" target="callsign">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge21" value="鼠标点击：10% 概率（若有动作）" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#ffffff;strokeColor=#627d94;" edge="1" parent="1" source="normal" target="callsign">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge22" value="完成：已选择姿态" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#ffffff;strokeColor=#627d94;" edge="1" parent="1" source="callsign" target="idle">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge23" value="完成：未选择姿态" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#ffffff;strokeColor=#627d94;" edge="1" parent="1" source="callsign" target="normal">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge24" value="键盘输入" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#ffffff;strokeColor=#627d94;" edge="1" parent="1" source="idle" target="attack_start">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge25" value="准备动作播放结束" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#ffffff;strokeColor=#627d94;" edge="1" parent="1" source="attack_start" target="attack_delay">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge26" value="连续键盘输入 3s" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#ffffff;strokeColor=#627d94;" edge="1" parent="1" source="attack_delay" target="attack">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge27" value="攻击动作播放结束" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#ffffff;strokeColor=#627d94;" edge="1" parent="1" source="attack" target="attack_delay">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge28" value="无键盘输入 10s（鼠标不重置计时）" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#ffffff;strokeColor=#627d94;" edge="1" parent="1" source="attack_delay" target="attack_end">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge29" value="播放结束" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#ffffff;strokeColor=#627d94;" edge="1" parent="1" source="attack_end" target="idle">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge30" value="句号 / 回车 / 分号 / 问号键（若有换弹动作）" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#ffffff;strokeColor=#627d94;" edge="1" parent="1" source="attack_delay" target="reload">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge31" value="播放结束" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#ffffff;strokeColor=#627d94;" edge="1" parent="1" source="reload" target="idle">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="note" value="两版共用 src/pet_battle.h。图是设计文档，编辑图不自动修改程序。&lt;br&gt;Jump 期间保持移动，设置/关窗/技能反应等待落地；拖拽/三连击仍强制打断。&lt;br&gt;无 Jump 时不检测交界，正常移动；无完整 Normal 战斗姿态时禁用战斗模式（Hibiki）。" style="text;html=1;whiteSpace=wrap;align=left;fontSize=14;fontColor=#627d94;" vertex="1" parent="1">
+          <mxGeometry x="25" y="1175" width="1740" height="70" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

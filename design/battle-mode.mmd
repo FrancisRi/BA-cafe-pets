@@ -1,0 +1,57 @@
+%% Design document; runtime: src/pet_battle.h
+flowchart TB
+  cafe["咖啡厅模式"]
+  any["任意战斗状态<br/>拖拽 > 连击退场 > 关窗结算 > 技能"]
+  death["退场：Vital_Death × 1"]
+  retreat["Vital_Retreat × 1<br/>上升到屏幕外"]
+  victory_start["胜利：Victory_Start × 1"]
+  victory_end["Victory_End × 3"]
+  skill["技能：Exs × 1<br/>结束恢复原状态和播放进度"]
+  pickup["被拖拽<br/>Formation_Pickup 循环"]
+  normal["初始 / 松开拖拽 / 胜利后<br/>Normal_Idle（未选姿态）"]
+  move["随机移动：Move_Ing<br/>有输入 0.6–1.2s；无输入 2–4s<br/>速度 ×2.5，随角色大小变化"]
+  jump["提前起跳：Move_Jump × 1<br/>交界处为动作中点；移动不中断"]
+  move_end["结束移动<br/>Move_End_Normal / Stand / Kneel<br/>只选完整可用姿态；有输入时朝向鼠标"]
+  idle["姿态_Idle<br/>Normal / Stand / Kneel"]
+  callsign["指挥：朝向鼠标<br/>姿态_Callsign × 1<br/>缺少时使用 Normal_Callsign"]
+  attack_start["准备攻击<br/>姿态_Attack_Start × 1"]
+  attack_delay["攻击空闲<br/>姿态_Attack_Delay 循环"]
+  attack["攻击<br/>姿态_Attack_Ing × 1"]
+  attack_end["攻击结束<br/>姿态_Attack_End × 1"]
+  reload["换弹<br/>姿态_Reload / Attack_Reload × 1"]
+  cafe -->|"选择战斗模式；模型具备战斗动作"| normal
+  any -->|"拖拽：强制打断（最高优先级）"| pickup
+  pickup -->|"松开 / 取消拖拽"| normal
+  any -->|"1.2s 内点击角色三次：强制"| death
+  death -->|"死亡播放结束"| retreat
+  retreat -->|"退场结束"| cafe
+  any -->|"关闭其他应用的顶层窗口"| victory_start
+  victory_start -->|"播放结束"| victory_end
+  victory_end -->|"完整播放三次结束"| normal
+  any -->|"普通状态持续输入：每 30s 有 5% 概率"| skill
+  skill -->|"恢复被打断的状态、动作时间和剩余行走"| any
+  normal -->|"持续输入 3s 或无输入等待 10–30s"| move
+  normal -->|"无触发：循环 Idle"| normal
+  move -->|"预测可跨越屏幕 / 窗口边界；仅有 Jump 的模型"| jump
+  jump -->|"落地且尚有路程：保持原方向、速度"| move
+  jump -->|"落地后：走完 / 关闭走动"| move_end
+  move -->|"走完 / 关闭走动 / 不可通行的桌面外边缘"| move_end
+  move_end -->|"结束动作播放完成"| idle
+  idle -->|"无触发：循环 Idle"| idle
+  idle -->|"持续输入 3s 或无输入等待 10–30s"| move
+  idle -->|"鼠标点击：10% 概率"| callsign
+  normal -->|"鼠标点击：10% 概率（若有动作）"| callsign
+  callsign -->|"完成：已选择姿态"| idle
+  callsign -->|"完成：未选择姿态"| normal
+  idle -->|"键盘输入"| attack_start
+  attack_start -->|"准备动作播放结束"| attack_delay
+  attack_delay -->|"连续键盘输入 3s"| attack
+  attack -->|"攻击动作播放结束"| attack_delay
+  attack_delay -->|"无键盘输入 10s（鼠标不重置计时）"| attack_end
+  attack_end -->|"播放结束"| idle
+  attack_delay -->|"句号 / 回车 / 分号 / 问号键（若有换弹动作）"| reload
+  reload -->|"播放结束"| idle
+  classDef base fill:#e9f7ff,stroke:#1eaee6,color:#253951;
+  classDef exit fill:#fff1f0,stroke:#e67e75,color:#253951;
+  class cafe,any,victory_start,victory_end,skill,pickup,normal,move,jump,move_end,idle,callsign,attack_start,attack_delay,attack,attack_end,reload base;
+  class death,retreat exit;

@@ -1,0 +1,43 @@
+<root BTCPP_format="4">
+    <TreeNodesModel>
+        <Condition ID="ActiveInputChance">
+            <input_port name="probability" type="double" default="0.500000">One chance per continuous-input session</input_port>
+            <input_port name="seconds" type="double" default="30.000000">Continuous input duration; gaps over 3 seconds reset</input_port>
+        </Condition>
+        <Action ID="FaceCursor"/>
+        <Condition ID="HasPendingClick"/>
+        <Condition ID="IdleCooldownReady">
+            <input_port name="max_seconds" type="double" default="12.000000">Maximum idle delay</input_port>
+            <input_port name="min_seconds" type="double" default="5.000000">Minimum idle delay</input_port>
+        </Condition>
+        <Condition ID="IsDragging"/>
+        <Action ID="LoopAnimation">
+            <input_port name="clip" type="std::string">Model animation name</input_port>
+        </Action>
+        <Action ID="PlayAnimation">
+            <input_port name="reset_cooldown" type="bool" default="true">Reset idle delay after completion or interruption</input_port>
+            <input_port name="consume_click" type="bool" default="false">Consume one queued click at start</input_port>
+            <input_port name="clip" type="std::string">Model animation name</input_port>
+        </Action>
+        <Action ID="PlayRandomAnimation">
+            <input_port name="reset_cooldown" type="bool" default="true">Reset idle delay after completion or interruption</input_port>
+            <input_port name="clips" type="std::string">Semicolon-separated model animation names</input_port>
+        </Action>
+        <Action ID="ReturnHome">
+            <input_port name="speed" type="double" default="0.792000">Return speed in world units per second</input_port>
+            <input_port name="clip" type="std::string" default="Cafe_Walk">Return walking animation</input_port>
+        </Action>
+        <Condition ID="UserInactive">
+            <input_port name="seconds" type="double" default="60.000000">Seconds without input in the current Windows session</input_port>
+        </Condition>
+        <Action ID="WalkRandom">
+            <input_port name="cursor_bias" type="double" default="2.000000">Extra weight toward cursor; zero disables</input_port>
+            <input_port name="up_distance" type="double" default="2.500000">Duration multiplier for away/up headings</input_port>
+            <input_port name="up_weight" type="double" default="0.400000">Relative probability of away/up headings</input_port>
+            <input_port name="min_seconds" type="double" default="2.000000">Minimum walk duration</input_port>
+            <input_port name="speed" type="double" default="0.792000">Ground units per second</input_port>
+            <input_port name="max_seconds" type="double" default="4.000000">Maximum walk duration</input_port>
+            <input_port name="clip" type="std::string" default="Cafe_Walk">Looping walk animation</input_port>
+        </Action>
+    </TreeNodesModel>
+</root>

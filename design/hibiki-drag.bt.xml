@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root BTCPP_format="4"
+      main_tree_to_execute="Hibiki">
+  <BehaviorTree ID="Hibiki">
+    <ReactiveFallback name="Interaction before autonomous behavior">
+      <ReactiveSequence name="Drag interrupts current action">
+        <IsDragging/>
+        <LoopAnimation clip="Formation_Pickup"/>
+      </ReactiveSequence>
+      <Sequence name="Click reaction">
+        <HasPendingClick/>
+        <PlayAnimation reset_cooldown="true"
+                       consume_click="true"
+                       clip="Cafe_Reaction"/>
+      </Sequence>
+      <LoopAnimation clip="Cafe_Idle"/>
+    </ReactiveFallback>
+  </BehaviorTree>
+
+  <!-- Description of Node Models (used by Groot) -->
+  <TreeNodesModel>
+    <Condition ID="HasPendingClick"/>
+    <Condition ID="IsDragging"/>
+    <Action ID="LoopAnimation">
+      <input_port name="clip"
+                  type="std::string">Model animation name</input_port>
+    </Action>
+    <Action ID="PlayAnimation">
+      <input_port name="reset_cooldown"
+                  default="true"
+                  type="bool">Reset idle delay after completion or interruption</input_port>
+      <input_port name="consume_click"
+                  default="false"
+                  type="bool">Consume one queued click at start</input_port>
+      <input_port name="clip"
+                  type="std::string">Model animation name</input_port>
+    </Action>
+  </TreeNodesModel>
+
+</root>

@@ -1,0 +1,14 @@
+ba_cafe_lite native distribution
+
+raylib 6.0 (zlib): https://github.com/raysan5/raylib
+cgltf (MIT): https://github.com/jkuhlmann/cgltf
+GLFW (zlib): https://www.glfw.org/
+BehaviorTree.CPP 4.8.0 (MIT): https://github.com/BehaviorTree/BehaviorTree.CPP
+BehaviorTree.CPP helper libraries: tinyxml2, minitrace, minicoro, lexy.
+Their license texts are included alongside this notice.
+GCC libstdc++/libgcc: GPLv3 with GCC Runtime Library Exception.
+
+Default Shiroko.glb: unchanged file from the user-provided BlueArchiveModels archive.
+Model collection: https://github.com/lihaohong6/BlueArchiveModels
+Viewer reference: https://bluearchive.wiki/wiki/Models
+Blue Archive character/model rights belong to their respective owners.
