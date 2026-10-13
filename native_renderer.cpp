@@ -59,24 +59,28 @@ void NativeRenderer::resize(int w,int h){
  BITMAPINFO info{};info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);info.bmiHeader.biWidth=w;info.bmiHeader.biHeight=-h;info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=32;info.bmiHeader.biCompression=BI_RGB;void* bits=nullptr;bitmap=CreateDIBSection(memory,&info,DIB_RGB_COLORS,&bits,nullptr,0);if(!bitmap)throw std::runtime_error("Cannot allocate transparent window DIB");dib=static_cast<unsigned char*>(bits);previous=SelectObject(memory,bitmap);
 }
 void NativeRenderer::load(const std::filesystem::path& file,const std::function<void(int,const std::string&)>& progress){
- auto candidate=std::make_unique<GltfModel>(file,progress);model=std::move(candidate);generation=UINT64_MAX;sampledAt=0;frameValid=false;
+ auto candidate=std::make_unique<GltfModel>(file,progress);model=std::move(candidate);generation=UINT64_MAX;sampledAt=0;frameValid=cpuPrepared=false;
 }
 void NativeRenderer::drawHint(const Json& s){
  if(!s.value("menuHint",false))return;const int x=s["viewport"][0].get<int>()/2-surfaceOffset.x,y=std::clamp(s["viewport"][1].get<int>()-int(s.value("hintBelow",64))+12-int(surfaceOffset.y),0,std::max(0,height-32));const int left=std::max(0,x-85),right=std::min(width,x+85),bottom=std::min(height,y+32);
  for(int row=y;row<bottom;row++)for(int col=left;col<right;col++){auto* p=dib+(row*width+col)*4;const bool edge=row==y||row==bottom-1||col==left||col==right-1;p[0]=edge?245:255;p[1]=edge?230:251;p[2]=edge?188:245;p[3]=255;}
- auto old=SelectObject(memory,hintFont);SetBkMode(memory,TRANSPARENT);SetTextColor(memory,RGB(8,127,175));RECT rect{left,y,right,bottom};DrawTextW(memory,L"右键点击打开菜单",-1,&rect,DT_CENTER|DT_VCENTER|DT_SINGLELINE);SelectObject(memory,old);
+ auto old=SelectObject(memory,hintFont);SetBkMode(memory,TRANSPARENT);SetTextColor(memory,RGB(8,127,175));RECT rect{left,y,right,bottom};DrawTextW(memory,L"右键打开菜单",-1,&rect,DT_CENTER|DT_VCENTER|DT_SINGLELINE);SelectObject(memory,old);
  GdiFlush();for(int row=y;row<bottom;row++)for(int col=left;col<right;col++)dib[(row*width+col)*4+3]=255;
 }
-void NativeRenderer::render(HWND display,HWND input,bool screenshot,const std::filesystem::path& output){
- didDraw=false;if(!model||state.empty())return;const auto& s=state;const double now=clock(),elapsed=sampledAt?std::clamp(now-sampledAt,0.0,0.1):0;sampledAt=now;const double meshStart=clock();
+void NativeRenderer::prepareCpu(double now){
+ if(cpuPrepared||!model||state.empty())return;const auto& s=state;const double elapsed=sampledAt?std::clamp(now-sampledAt,0.0,0.1):0;sampledAt=now;const double meshStart=clock();
  const int clip=s["clip"];const auto gen=s["generation"].get<uint64_t>();const bool changed=generation!=gen;if(changed){model->currentClip=-1;generation=gen;}
  double time=s["time"].get<double>();if(!s.value("paused",false)&&!s.value("review",false))time+=std::clamp(now-s["sampleTime"].get<double>()/1000,0.0,0.032)*s.value("playbackRate",1.0);const double duration=model->clips.at(clip).duration;
- time=s.value("loop",true)?std::fmod(time,duration):std::min(time,duration);model->sample(clip,time,s.value("paused",false)?0:elapsed,s.value("smooth",true)&&!s.value("review",false));model->updateGeometry();meshMs+=(clock()-meshStart)*1000;changedMeshes+=model->updatedParts;
+ time=s.value("loop",true)?std::fmod(time,duration):std::min(time,duration);model->sample(clip,time,s.value("paused",false)?0:elapsed,s.value("smooth",true)&&!s.value("review",false));model->updateGeometry(false);meshMs+=(clock()-meshStart)*1000;changedMeshes+=model->updatedParts;preparedChanged=changed;preparedAt=now;cpuPrepared=true;
+}
+void NativeRenderer::render(HWND display,HWND input,bool screenshot,const std::filesystem::path& output){
+ didDraw=false;if(!model||state.empty())return;if(!cpuPrepared)prepareCpu(clock());const auto& s=state;const double now=preparedAt;const bool changed=preparedChanged;cpuPrepared=false;
  const auto desktop=s["desktop"],crop=s["crop"],cameraPos=s["camera"],position=s["position"];Camera3D camera{{cameraPos[0],cameraPos[1],cameraPos[2]},{0,0,0},{0,1,0},s["fov"],CAMERA_PERSPECTIVE};
  const std::array<double,20> key{cameraPos[0],cameraPos[1],cameraPos[2],s["fov"],s["far"],desktop[0],desktop[1],s["viewport"][0],s["viewport"][1],crop[0],crop[1],position[0],position[1],position[2],s["yaw"],s["zoom"],double(s.value("outlineMode",2)),s.value("outlineWidth",100.0),s.value("menuHint",false)?1.0:0.0,double(s.value("hintBelow",64))};
  // Exact dependency checks: animated geometry, expression weights, projection,
  // appearance and action visibility must all agree before reusing a frame.
  if(frameValid&&!changed&&!model->updatedParts&&key==frameKey&&!screenshot){++reusedFrames;statistics(now);return;}
+ const double uploadStart=clock();model->uploadGeometry();uploadMs+=(clock()-uploadStart)*1000;
  const float angle=s["yaw"].get<float>()*DEG2RAD,z=s["zoom"];Mat actor=identity();actor[0]=std::cos(angle)*z;actor[2]=-std::sin(angle)*z;actor[5]=z;actor[8]=std::sin(angle)*z;actor[10]=std::cos(angle)*z;actor[12]=position[0];actor[13]=position[1];actor[14]=position[2];const Matrix pose=matrix(actor);
  // Keep the full desktop projection, but allocate/read only the current pose.
  // Bounds come from all deformed vertices, never from sparse animation samples
@@ -140,5 +144,5 @@ void NativeRenderer::render(HWND display,HWND input,bool screenshot,const std::f
  if(input){RECT rect{};if(!GetWindowRect(input,&rect)||rect.left!=destination.x||rect.top!=destination.y||rect.right-rect.left!=width||rect.bottom-rect.top!=height)SetWindowPos(input,nullptr,destination.x,destination.y,width,height,SWP_NOACTIVATE|SWP_NOZORDER);}
  frameKey=key;frameValid=true;didDraw=true;presentMs+=(clock()-presentStart)*1000;statistics(now);
 }
-void NativeRenderer::statistics(double now){++frames;if(!statsAt)statsAt=now;if(now-statsAt>=3){TraceLog(LOG_INFO,"PERF native: %.1f FPS; surface %dx%d; SSAA %.2f; mesh %.2f ms (%0.1f/%d updated); readback %.2f ms; present %.2f ms (mask %.2f, layer %.2f); cached frames %u/%u, masks %u",frames/(now-statsAt),width,height,scale,meshMs/frames,changedMeshes/frames,int(model->parts.size()),readMs/frames,presentMs/frames,maskMs/frames,layerMs/frames,reusedFrames,frames,reusedMasks);statsAt=now;frames=reusedFrames=reusedMasks=0;meshMs=readMs=presentMs=maskMs=layerMs=changedMeshes=0;}}
+void NativeRenderer::statistics(double now){++frames;if(!statsAt)statsAt=now;if(now-statsAt>=3){TraceLog(LOG_INFO,"PERF native: %.1f FPS; surface %dx%d; SSAA %.2f; mesh %.2f ms (%0.1f/%d updated); readback %.2f ms; present %.2f ms (mask %.2f, layer %.2f); cached frames %u/%u, masks %u; upload %.2f ms",frames/(now-statsAt),width,height,scale,meshMs/frames,changedMeshes/frames,int(model->parts.size()),readMs/frames,presentMs/frames,maskMs/frames,layerMs/frames,reusedFrames,frames,reusedMasks,uploadMs/frames);statsAt=now;frames=reusedFrames=reusedMasks=0;meshMs=readMs=presentMs=maskMs=layerMs=changedMeshes=uploadMs=0;}}
 }

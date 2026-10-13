@@ -3,13 +3,14 @@
 #include "screen_boundary.h"
 struct DirectedWalk {
     bool active=false,following=false,jumping=false,crossing=false,blocked=false;
+    bool followAway=false;
     Vector3 target{};
     double time=0;uint64_t owner=0,serial=0;
     float finalYaw=0;
     double jumpTime=0,jumpDuration=0,jumpSpeed=0;float jumpYaw=0;
     void cancel(){if(active)++serial;active=jumping=crossing=false;}
     void begin(Vector3 destination,bool follow,uint64_t generation,float yaw){
-        target=destination;following=follow;owner=generation;finalYaw=yaw;time=0;active=true;blocked=false;jumping=crossing=false;++serial;
+        target=destination;following=follow;followAway=false;owner=generation;finalYaw=yaw;time=0;active=true;blocked=false;jumping=crossing=false;++serial;
     }
     bool planJump(const PetGround& ground,double speed,double duration,float yaw,double dt,
                   const std::function<float(float,float)>& visibleDistance={}){
@@ -59,5 +60,15 @@ struct DirectedWalk {
     static bool outsideBand(Vector2 center,Vector2 cursor,float bodyPixels,float nearest,float farthest){
         const float distance=std::hypot(center.x-cursor.x,center.y-cursor.y);
         return distance<nearest*bodyPixels-1||distance>farthest*bodyPixels+1;
+    }
+    static bool continueFollow(Vector2 center,Vector2 cursor,float bodyPixels,float nearest,float farthest,bool movingAway){
+        const float distance=std::hypot(center.x-cursor.x,center.y-cursor.y),middle=(nearest+farthest)*0.5f*bodyPixels;
+        // A zero lower limit never requests retreat, including a cursor that
+        // moves closer while a previously started approach is still running.
+        if(nearest<=0&&movingAway)return false;
+        return movingAway?distance<middle-1:distance>middle+1;
+    }
+    static bool approachesCursor(Vector2 center,Vector2 cursor,Vector2 destination){
+        return (cursor.x-center.x)*(destination.x-center.x)+(cursor.y-center.y)*(destination.y-center.y)>0;
     }
 };

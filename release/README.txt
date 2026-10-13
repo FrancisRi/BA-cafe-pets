@@ -1,8 +1,9 @@
-ba_cafe_lite 0.2.0 · Windows x64
+ba_cafe_lite 0.2.4 · Windows x64
 
-双击 ba_cafe_lite-0.2.0-x64.exe 即可启动，默认角色 Shiroko。
+双击 ba_cafe_lite-0.2.4-x64.exe 即可启动，默认角色 Shiroko。
 不需要 Blender、浏览器、WebView2、Python 或开发环境。
 首次启动会释放模型及程序资源，后续启动复用缓存。
+首次使用在角色下方提示“右键打开菜单”，打开菜单后不再显示。
 
 操作
   右键点击角色：打开设置。

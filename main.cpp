@@ -61,6 +61,7 @@ void replaceAll(std::string& text,const std::string& from,const std::string& to)
 #include "native_preferences.h"
 #include "native_settings.h"
 #include "native_renderer.h"
+#include "frame_jobs.h"
 void nativeLog(int level,const char* text,va_list args){
     if(std::strstr(text,"Pixel data retrieved successfully"))return;
     FILE* out=level>=LOG_WARNING?stderr:stdout;std::fprintf(out,"[%d] ",level);std::vfprintf(out,text,args);std::fputc('\n',out);std::fflush(out);
@@ -76,8 +77,8 @@ struct App {
     std::filesystem::path storage() const {return dataDirectory.empty()?directory:dataDirectory;}
     std::string reviewClip,initialMode;double reviewTime=0,runSeconds=0;
     bool review=false,fixedPose=false,sampleSpecified=false,done=false,loaded=false,frameReady=false,capturing=false;
-    bool smooth=true;
-    bool grouped=false,displayed=true,modelSpecified=false;std::string actorId;
+    bool smooth=true,serialCpu=false;
+    bool grouped=false,displayed=true,modelSpecified=false,deferRendering=false,pendingRender=false;std::string actorId;
     std::shared_ptr<bool> alive=std::make_shared<bool>(true);
     std::function<void()> menuRequest,closeRequest,loadedCallback,destroyedCallback,tickCallback,settingsChanged,syncRequest,followRequest,depthRequest;
     std::function<float(float,double)> avoidHeading;
@@ -117,6 +118,12 @@ struct App {
         const double now=preciseSeconds();if(!force&&now<nextRender){presentState();return;}
         nextRender+=1.0/60;if(nextRender<=now)nextRender=now+1.0/60;
         presentState(true); // The image and HWND must use the same latest pose/anchor.
+        if(deferRendering){pendingRender=true;return;}
+        finishRender();
+    }
+    void finishRender(){
+        pendingRender=false;
+        if(!renderer||!loaded||!displayed||!window)return;
         renderer->render(window,inputWindow);frameReady=true;if(renderer->didDraw)++renderedFrames;
         RECT rect{};if(GetWindowRect(window,&rect))windowPosition={rect.left,rect.top};
     }
@@ -126,6 +133,7 @@ struct App {
     }
     uint64_t displayGeneration() const {return state.generation*100000+directed.serial*2+(directed.active?1:0)+cafeAttention.serial*1000000000ULL;}
     void applyPreferences(){
+        state.walkEnabled=preferences.wandering;
         state.walkIntervalOverride=preferences.moveInterval;state.walkTimeJitter=preferences.walkTimeJitter/100;state.walkDistanceJitter=preferences.walkDistanceJitter/100;
         state.walkDurationOverride=geometry.bodyWidth*preferences.moveBodies/0.792;
         state.attentionProbabilityOverride=1; // Legacy BT chance is disabled in this host; cafe tracking uses its toggle.
@@ -134,7 +142,7 @@ struct App {
             battle->callsignProbability=preferences.clickProbability/100;battle->skillProbability=preferences.skillProbability/100;battle->keyboardIdleSeconds=preferences.keyboardIdle;}
     }
     Json settingsSnapshot() const {
-        auto value=preferences.json();value.update({{"walking",state.walkEnabled},{"look",state.trackingEnabled},{"outline",state.outlineEnabled},
+        auto value=preferences.json();value.update({{"look",state.trackingEnabled},{"outline",state.outlineEnabled},
             {"mode",battleMode?"battle":"cafe"},{"idleSeconds",state.inactivityThreshold()},{"activeSeconds",state.activeSecondsOverride.value_or(30)}});
         return {{"type","settings"},{"name",utf8(settings->title)},{"value",value},{"battleAvailable",settings->battleAvailable},
             {"canFollow",battleMode?battle&&battle->clips.move>=0:cafeWalk>=0},{"busy",settings->importBusy},{"percent",settings->importPercent},
@@ -169,7 +177,7 @@ struct App {
             else if(behavior&&cafeIdle>=0){behavior->halt();state.start(cafeIdle,true);}}
         motionVelocity={};motionRemaining=0;blockedCursor.reset();
         zoom=std::clamp(value,0.45f,1.65f);ground.modelZoom=zoom;++maskRevision;
-        yaw=facing;state.resetCooldown();geometry.yaw=yaw;
+        yaw=facing;state.resetCooldown();updatePlacementShape();
         ground.position=anchor;
         const auto foot=ground.screen(anchor),target=geometry.idleFoot(ground,zoom);
         if(std::hypot(target.x-foot.x,target.y-foot.y)>1)ground.position=ground.floorAt(target);
@@ -243,13 +251,13 @@ struct App {
         if(type!="save")return;
         const auto& value=message.at("value");auto candidate=preferences;
         bool valid=candidate.apply(value);
-        for(const char* key:{"walking","look"})valid&=value.contains(key)&&value[key].is_boolean();
+        for(const char* key:{"look"})valid&=value.contains(key)&&value[key].is_boolean();
         for(const char* key:{"idleSeconds","activeSeconds"})valid&=value.contains(key)&&value[key].is_number()&&std::isfinite(value[key].get<double>())&&value[key].get<double>()>=1&&value[key].get<double>()<=3600;
         const auto mode=value.value("mode",std::string{});valid&=mode=="cafe"||(mode=="battle"&&settings->battleAvailable);
         if(!valid){settingsError="设置值超出允许范围，未保存";syncSettings();return;}
         const bool startFollow=!preferences.follow&&candidate.follow;
         if(candidate.cafeLookMode!=preferences.cafeLookMode)cafeAttention.pause();
-        preferences=candidate;if(startFollow){blockedCursor.reset();followPlanAt=0;interactionUntil=0;}state.walkEnabled=value["walking"];state.trackingEnabled=value["look"];state.outlineEnabled=preferences.outlineMode!=0;
+        preferences=candidate;if(startFollow){blockedCursor.reset();followPlanAt=0;interactionUntil=0;}state.trackingEnabled=value["look"];state.outlineEnabled=preferences.outlineMode!=0;
         state.idleSecondsOverride=value["idleSeconds"];state.activeSecondsOverride=value["activeSeconds"];
         if((mode=="battle")!=battleMode)selectMode(mode=="battle",false);
         if(!directed.jumping)directed.cancel();restFacing.reset();placementNeeded=true;state.resetCooldown();applyPreferences();settings->save();preferences.save(settings->ini);
@@ -293,7 +301,7 @@ struct App {
         state.resetCooldown();
         battleMode=enabled;settings->battleMode=enabled;battleInput.pollKeyboard=false;if(!grouped)battleInput.enable(enabled);
         if(enabled)battle->start();else if(!fixedPose){const bool walk=state.walkEnabled,look=state.trackingEnabled;state.walkEnabled=state.trackingEnabled=false;behavior->tick(0);state.walkEnabled=walk;state.trackingEnabled=look;}
-        ground.position=anchor;yaw=facing;placementGeneration=state.generation;interactionUntil=preciseSeconds()+0.5;
+        ground.position=anchor;yaw=facing;updatePlacementShape();placementGeneration=state.generation;interactionUntil=preciseSeconds()+0.5;
         if(persist)settings->save();
         syncSettings();
         state.log(std::string("MODE ")+(enabled?"battle":"cafe")+"; battle supported="+(battle->clips.supported()?"1":"0"));
@@ -377,7 +385,13 @@ struct App {
         auto box=[&](const Json& values,Vector3& low,Vector3& high){if(!values.is_array()||values.size()!=6)throw std::runtime_error("Invalid spatial bounds");for(const auto& v:values)if(!v.is_number()||!std::isfinite(v.get<float>())||std::abs(v.get<float>())>100)throw std::runtime_error("Invalid model envelope");low={values[0],values[1],values[2]};high={values[3],values[4],values[5]};};
         box(spatial.at("idle"),geometry.minimum,geometry.maximum);box(spatial.at("envelope"),geometry.renderMinimum,geometry.renderMaximum);
         auto radial=[](Vector3& low,Vector3& high){const float radius=std::hypot(std::max(std::abs(low.x),std::abs(high.x)),std::max(std::abs(low.z),std::abs(high.z)));low.x=low.z=-radius;high.x=high.z=radius;};
-        radial(geometry.minimum,geometry.maximum);radial(geometry.renderMinimum,geometry.renderMaximum);
+        radial(geometry.renderMinimum,geometry.renderMaximum);
+        for(const auto& row:spatial.at("placement")){
+            auto& shapes=geometry.restingBoxes[row.at("clip").get<int>()];
+            for(const auto& values:row.at("boxes")){BoundingBox bounds{};box(values,bounds.min,bounds.max);shapes.push_back(bounds);}
+        }
+        updatePlacementShape();
+        state.log("PLACEMENT per-primitive idle bounds: "+std::to_string(geometry.restingBoxes.size())+" clips; clearance=2 px");
         geometry.bodyWidth=spatial.at("bodyWidth");ground.measuredBounds=true;geometry.prepareViewport(ground,zoom);
         state.log("FOLLOW body unit="+std::to_string(geometry.bodyWidth)+" source="+spatial.value("bodyWidthSource",std::string{"unknown"}));
         geometry.place(ground,ground.screen(ground.position),zoom);placementNeeded=true;placementGeneration=UINT64_MAX;applyPreferences();
@@ -405,8 +419,8 @@ struct App {
         if(review&&(fixedPose||runSeconds>0||!snapshot.empty())&&now-started>25000){std::fprintf(stderr,"Preview timed out\n");exitCode=1;DestroyWindow(window);return;}
         if(!loaded||!behavior||!displayed)return;
         if(settings->modeRequest){selectMode(*settings->modeRequest,true);settings->modeRequest.reset();}
-        if(runSeconds>0&&now-readyAt>=runSeconds*1000){std::printf("PROFILE completed %.1f seconds\n",runSeconds);DestroyWindow(window);return;}
-        ground.modelZoom=zoom;state.movementScale=zoom*(battleMode?3.0:1.0);geometry.measure(ground,zoom);
+        if(runSeconds>0&&now>=readyAt&&now-readyAt>=runSeconds*1000){std::printf("PROFILE completed %.1f seconds\n",runSeconds);DestroyWindow(window);return;}
+        ground.modelZoom=zoom;state.movementScale=zoom*(battleMode?3.0:1.0);updatePlacementShape();geometry.measure(ground,zoom);
         const double idle=idleInputSeconds();
         if(!fixedPose){
             if(observeDebouncedInput(state,idle,elapsed,preferences.inputGrace) && !battleMode&&!preferences.follow&&!directed.active){state.trackingCursor=false;state.returnRequested=state.walkEnabled&&!journey.route.empty();if(!state.returnRequested)yaw=0;}
@@ -451,7 +465,7 @@ struct App {
                 if(smooth && phaseBefore==pet::Battle::Phase::Moving && !DesktopPath::stepAllowed(ground,yaw,stoppingTravel))
                     state.walkRemaining=std::min(state.walkRemaining,StopTurn::LeadSeconds);
                 if(phaseBefore==pet::Battle::Phase::Moving&&!stopTurn.active&&!front&&!dragging&&!right
-                    &&(state.walkRemaining<=turnLead||!state.walkEnabled)) {
+                    &&(state.walkRemaining<=turnLead||!preferences.automaticWalk(true,state.inputActive))) {
                     const double lead=std::max(0.0,std::min(state.walkRemaining,turnLead));const auto brakes=brakeRange();
                     const bool activeRetreat=battle->activeInputMove;
                     const double turnSeconds=activeRetreat?std::max(0.008,lead+earliestFootPlant()):state.walkRemaining>0?std::min(state.walkRemaining,turnLead):0.18;
@@ -469,7 +483,7 @@ struct App {
                 });
                 if(events.boundary&&clearJump&&battle->clips.jump>=0&&!clearJump(float(state.walkYaw),state.walkSpeed*state.movementScale*state.clips[battle->clips.jump].duration))events.boundary=false;
                 if(dragStarted&&!dragging){auto drag=events;drag.dragging=true;drag.petClick=drag.mouseClick=drag.keyPressed=drag.windowClosed=false;battle->tick(0,drag);}
-                const bool allowWalk=state.walkEnabled;state.walkEnabled=allowWalk&&(!preferences.follow||!state.inputActive)&&!directed.active;
+                const bool allowWalk=state.walkEnabled;state.walkEnabled=preferences.automaticWalk(true,state.inputActive)&&(!preferences.follow||!state.inputActive)&&!directed.active;
                 const bool menuOpen=state.settingsOpen;if(directed.jumping)state.settingsOpen=true;
                 battle->activityDelta=elapsed;battle->tick(dt,events);state.settingsOpen=menuOpen;state.walkEnabled=allowWalk;
                 if(phaseBefore==pet::Battle::Phase::MoveEnd){
@@ -540,7 +554,7 @@ struct App {
                 if(!moveGround(yaw,float(state.walkSpeed*state.movementScale*movingTime)))stopBlocked();
             }
             const bool idlePose=battleMode?battle->phase==pet::Battle::Phase::Idle:state.current==cafeIdle;
-            if(directed.active&&(!idlePose||directed.owner!=state.generation||(left&&!directed.jumping)||right||((!state.walkEnabled||(directed.following&&!preferences.follow))&&!directed.jumping))){directed.cancel();deferredInput={};deferredCafeClick=false;}
+            if(directed.active&&(!idlePose||directed.owner!=state.generation||(left&&!directed.jumping)||right||(directed.following&&!preferences.follow&&!directed.jumping))){directed.cancel();deferredInput={};deferredCafeClick=false;}
             if(idlePose&&placementGeneration!=state.generation){placementNeeded=true;placementGeneration=state.generation;}
             const int travelClip=battleMode?battle->clips.move:cafeWalk;
             if(idlePose&&(!left||directed.jumping)&&!right&&(!state.settingsOpen||directed.jumping)&&!state.returningHome){
@@ -552,7 +566,19 @@ struct App {
                     }
                 }
                 if(blockedCursor&&std::hypot(cursor.x-blockedCursor->x,cursor.y-blockedCursor->y)>16)blockedCursor.reset();
-                if(!blockedCursor&&preferences.follow&&state.inputActive&&state.walkEnabled&&travelClip>=0&&!directed.jumping&&!directed.crossing&&preciseNow>=interactionUntil&&(!directed.active||directed.following)&&preciseNow>=followPlanAt){
+                if(directed.active&&directed.following&&!directed.jumping
+                    &&(!directed.crossing||DesktopPath::restingMonitor(ground,geometry,zoom,ground.position)>=0)){
+                    const auto center=ground.screen({ground.position.x,1.15f*zoom,ground.position.z});
+                    const auto side=ground.screen({ground.position.x+geometry.bodyWidth*zoom,1.15f*zoom,ground.position.z});
+                    const float bodyPixels=std::max(1.0f,std::abs(side.x-center.x));
+                    const auto destination=ground.screen({directed.target.x,1.15f*zoom,directed.target.z});
+                    if(!DirectedWalk::continueFollow(center,pixel,bodyPixels,preferences.followNear,preferences.followFar,directed.followAway)
+                        ||(preferences.followNear==0&&!DirectedWalk::approachesCursor(center,pixel,destination))){
+                        directed.cancel();motionVelocity={};motionRemaining=0;restFacing.reset();followPlanAt=0;
+                        state.log("FOLLOW distance satisfied: stop");
+                    }
+                }
+                if(!blockedCursor&&preferences.follow&&state.inputActive&&travelClip>=0&&!directed.jumping&&!directed.crossing&&preciseNow>=interactionUntil&&(!directed.active||directed.following)&&preciseNow>=followPlanAt){
                     const auto foot=ground.screen(ground.position);
                     const auto center=ground.screen({ground.position.x,1.15f*zoom,ground.position.z});
                     const auto side=ground.screen({ground.position.x+geometry.bodyWidth*zoom,1.15f*zoom,ground.position.z});
@@ -563,7 +589,9 @@ struct App {
                         auto target=ground.clampFoot({destination.x+foot.x-center.x,destination.y+foot.y-center.y});
                         const auto saved=ground.position;ground.position=ground.floorAt(target);target=geometry.idleFoot(ground,zoom);ground.position=saved;geometry.measure(ground,zoom);
                         const auto world=ground.floorAt(target);
-                        if(!directed.active&&std::hypot(target.x-foot.x,target.y-foot.y)>8){if(beginDirected(world,true)){restFacing.reset();state.log(std::string("FOLLOW begin: ")+(battleMode?"battle":"cafe"));}}
+                        const auto targetCenter=ground.screen({world.x,1.15f*zoom,world.z});
+                        if(preferences.followNear==0&&!DirectedWalk::approachesCursor(center,pixel,targetCenter)){stopBlocked();}
+                        else if(!directed.active&&std::hypot(target.x-foot.x,target.y-foot.y)>8){if(beginDirected(world,true)){directed.followAway=std::hypot(center.x-pixel.x,center.y-pixel.y)<bodyPixels*(preferences.followNear+preferences.followFar)*0.5;restFacing.reset();state.log(std::string("FOLLOW begin: ")+(battleMode?"battle":"cafe"));}}
                         else if(directed.active){const double dx=world.x-ground.position.x,dz=world.z-ground.position.z;
                             if(DesktopPath::trip(ground,geometry,zoom,std::atan2(dx,dz)*RAD2DEG,std::hypot(dx,dz))){directed.target=world;directed.crossing=DesktopPath::crossing(ground,geometry,zoom,world);}}
                     }
@@ -594,7 +622,7 @@ struct App {
             }
         }
         renderFrame();
-        if(frameReady&&!snapshot.empty()&&now-readyAt>600)capture();
+        if(frameReady&&!snapshot.empty()&&now>=readyAt&&now-readyAt>600)capture();
     }
     int retreatDisplacement()const{
         if(!battleMode||!battle||battle->phase!=pet::Battle::Phase::Retreat)return 0;
@@ -602,8 +630,16 @@ struct App {
         // Ease in: preserve the animation duration and total travel, accelerate upward.
         return int(t*t*(geometry.crop.y+geometry.height+20));
     }
+    void updatePlacementShape(){
+        geometry.yaw=yaw;int idle=cafeIdle;
+        if(battleMode&&battle)idle=battle->idleClip();
+        const int clip=idle>=0&&idle<int(state.clips.size())?state.clips[idle].modelIndex:-1;
+        if(loaded&&geometry.restingClip!=clip)placementNeeded=true;
+        geometry.restingClip=clip;
+    }
     void presentState(bool force=false){
         if(!loaded)return;
+        updatePlacementShape();
         geometry.update(ground,zoom,false);const auto crop=geometry.crop;
         const int retreatOffset=retreatDisplacement();
         const POINT surfaceOrigin{work.left+int(crop.x),work.top+int(crop.y)-retreatOffset};
@@ -647,6 +683,7 @@ struct App {
         presentState(true);
     }
     void releaseMouse(){
+        if(right)placementNeeded=true;
         left=right=menuPressed=rightDragged=false;ReleaseCapture();presentState(true);
     }
     static LRESULT CALLBACK proc(HWND hwnd,UINT message,WPARAM w,LPARAM l){
@@ -667,7 +704,7 @@ struct App {
             case WM_MBUTTONDOWN:if(app->left||app->menuPressed)return 0;app->right=true;app->previous=cursor;app->captureMouse();return 0;
             case WM_MOUSEMOVE:
                 if(app->left){const bool before=app->dragged;app->dragged|=std::abs(cursor.x-app->down.x)>4||std::abs(cursor.y-app->down.y)>4;
-                    if(app->dragged){app->dragStarted|=!before;auto foot=app->ground.screen(app->ground.position);foot.x+=cursor.x-(before?app->previous.x:app->down.x);foot.y+=cursor.y-(before?app->previous.y:app->down.y);app->geometry.place(app->ground,foot,app->zoom);}app->previous=cursor;}
+                    if(app->dragged){app->dragStarted|=!before;auto foot=app->ground.screen(app->ground.position);foot.x+=cursor.x-(before?app->previous.x:app->down.x);foot.y+=cursor.y-(before?app->previous.y:app->down.y);app->updatePlacementShape();app->geometry.place(app->ground,foot,app->zoom);}app->previous=cursor;}
                 if(app->right){
                     if(app->menuPressed&&!app->rightDragged){app->rightDragged=std::abs(cursor.x-app->down.x)>4||std::abs(cursor.y-app->down.y)>4;if(!app->rightDragged)return 0;}
                     app->yaw=std::remainder(app->yaw+(cursor.x-app->previous.x)*0.7f,360.0f);app->previous=cursor;
@@ -787,6 +824,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
             else if(flag==L"--sample"&&i+1<argc){app.reviewTime=std::wcstod(argv[++i],nullptr);app.sampleSpecified=true;app.review=true;}
             else if(flag==L"--mode"&&i+1<argc){app.initialMode=utf8(argv[++i]);app.review=true;}
             else if(flag==L"--smooth")app.smooth=true;
+            else if(flag==L"--serial-cpu")app.serialCpu=true;
             else if(flag==L"--settings")app.settingsOnLoad=true;
             else if(flag==L"--zoom"&&i+1<argc)app.zoom=std::clamp(float(std::wcstod(argv[++i],nullptr)),0.45f,1.65f);
             else if(flag==L"--snapshot"&&i+1<argc){app.snapshot=std::filesystem::absolute(argv[++i]);app.review=true;}

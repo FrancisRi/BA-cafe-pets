@@ -2,6 +2,7 @@
 #include "rlgl.h"
 #include <algorithm>
 #include <bit>
+#include <climits>
 #include <cstring>
 #include <fstream>
 #include <map>
@@ -144,24 +145,40 @@ GltfModel::GltfModel(const std::filesystem::path& file,const std::function<void(
    for(size_t pi=0;pi<n.mesh->primitives_count;pi++){const auto& p=n.mesh->primitives[pi];if(p.has_draco_mesh_compression)throw std::runtime_error("Draco decoder is not included in this prototype");if(p.type!=cgltf_primitive_type_triangles)throw std::runtime_error("This prototype requires triangle meshes");auto* positions=cgltf_find_accessor(&p,cgltf_attribute_type_position,0);if(!positions)continue;const auto count=positions->count;
     auto part=std::make_unique<DrawPart>();part->node=int(ni);part->skin=n.skin?int(n.skin-raw->skins):-1;part->name=nodes[ni].name;part->positions=vectors(positions,count);part->normals=vectors(cgltf_find_accessor(&p,cgltf_attribute_type_normal,0),count);part->material=LoadMaterialDefault();
     std::vector<unsigned> indices;const auto total=p.indices?p.indices->count:count;if(total%3)throw std::runtime_error("Invalid triangle index count");for(size_t k=0;k<total;k++){const auto index=p.indices?cgltf_accessor_read_index(p.indices,k):k;if(index>=count)throw std::runtime_error("Invalid vertex index");indices.push_back(unsigned(index));}
-    const bool expand=count>65535;part->source.resize(expand?indices.size():count);if(expand)part->source=indices;else std::iota(part->source.begin(),part->source.end(),0);
+    // A glTF primitive often references a tiny subset of a shared POSITION
+    // accessor. Retain the exact triangles, but do not skin/upload unused vertices.
+    std::vector<unsigned> remap(count,UINT_MAX),drawIndices;drawIndices.reserve(indices.size());
+    for(unsigned index:indices){if(remap[index]==UINT_MAX){remap[index]=unsigned(part->source.size());part->source.push_back(index);}drawIndices.push_back(remap[index]);}
+    const bool expand=part->source.size()>65535;if(expand)part->source=indices;
     std::map<std::array<long,3>,Vector3> sums;auto key=[](Vector3 v){return std::array<long,3>{std::lround(v.x*10000),std::lround(v.y*10000),std::lround(v.z*10000)};};
     std::vector<Vector3> computed(count);for(size_t k=0;k<indices.size();k+=3){const auto a=indices[k],b=indices[k+1],c=indices[k+2];const auto normal=Vector3CrossProduct(Vector3Subtract(part->positions[b],part->positions[a]),Vector3Subtract(part->positions[c],part->positions[a]));for(auto id:{a,b,c}){sums[key(part->positions[id])]=Vector3Add(sums[key(part->positions[id])],normal);computed[id]=Vector3Add(computed[id],normal);}}
     part->smoothNormals.resize(count);for(size_t k=0;k<count;k++){part->smoothNormals[k]=Vector3Normalize(sums[key(part->positions[k])]);if(Vector3LengthSqr(part->normals[k])<1e-12f)part->normals[k]=Vector3Normalize(computed[k]);}
     part->joints.resize(count);part->weights.resize(count);
     if(part->skin>=0)for(int set=0;set<2;set++){const auto* joints=cgltf_find_accessor(&p,cgltf_attribute_type_joints,set);const auto* weights=cgltf_find_accessor(&p,cgltf_attribute_type_weights,set);if(!joints&&!weights)continue;if(!joints||!weights||joints->count!=count||weights->count!=count)throw std::runtime_error("Invalid skin attributes");const auto jv=unpack(joints),wv=unpack(weights);if(jv.size()!=count*4||wv.size()!=count*4)throw std::runtime_error("Expected four weights per skin set");for(size_t k=0;k<count;k++)for(int j=0;j<4;j++){const auto joint=unsigned(jv[k*4+j]);if(wv[k*4+j]>0&&joint>=skins[part->skin].joints.size())throw std::runtime_error("Skin joint index out of range");part->joints[k][set*4+j]=joint;part->weights[k][set*4+j]=wv[k*4+j];}}
-    if(part->skin>=0){std::set<unsigned> used;part->influenceCounts.resize(count);for(size_t k=0;k<part->weights.size();k++){auto& weights=part->weights[k];auto& joints=part->joints[k];float sum=std::accumulate(weights.begin(),weights.end(),0.0f);if(sum>0)for(float& w:weights)w/=sum;unsigned char n=0;for(int j=0;j<8;j++)if(weights[j]>0){used.insert(joints[j]);joints[n]=joints[j];weights[n++]=weights[j];}part->influenceCounts[k]=n;for(int j=n;j<8;j++)weights[j]=0;}part->usedJoints.assign(used.begin(),used.end());part->jointVersions.assign(used.size(),UINT64_MAX);}
-    if(part->skin>=0){std::map<std::array<uint32_t,16>,unsigned> groups;part->vertexGroups.resize(count);for(size_t k=0;k<count;k++){std::array<uint32_t,16> key{};for(unsigned j=0;j<part->influenceCounts[k];j++){key[j*2]=part->joints[k][j];key[j*2+1]=std::bit_cast<uint32_t>(part->weights[k][j]);}const auto [group,added]=groups.emplace(key,unsigned(part->influenceGroups.size()));if(added)part->influenceGroups.push_back({part->joints[k],part->weights[k],part->influenceCounts[k]});part->vertexGroups[k]=group->second;}part->sharedInfluences=part->influenceGroups.size()*2<count;if(!part->sharedInfluences){part->influenceGroups.clear();part->vertexGroups.clear();}else if(count>1000)TraceLog(LOG_INFO,"SKIN shared blends: %s, %d vertices / %d influence groups",part->name.c_str(),int(count),int(part->influenceGroups.size()));}
+    if(part->skin>=0){std::set<unsigned> used;part->influenceCounts.resize(count);for(size_t k=0;k<part->weights.size();k++){auto& weights=part->weights[k];auto& joints=part->joints[k];float sum=std::accumulate(weights.begin(),weights.end(),0.0f);if(sum>0)for(float& w:weights)w/=sum;unsigned char n=0;for(int j=0;j<8;j++)if(weights[j]>0){joints[n]=joints[j];weights[n++]=weights[j];}part->influenceCounts[k]=n;for(int j=n;j<8;j++)weights[j]=0;}for(unsigned k:part->source)for(unsigned j=0;j<part->influenceCounts[k];j++)used.insert(part->joints[k][j]);part->usedJoints.assign(used.begin(),used.end());part->jointVersions.assign(used.size(),UINT64_MAX);}
+    if(part->skin>=0){
+     // Preserve the previous floating-point path (matrix blend vs vertex blend)
+     // so compacting a material does not subtly change antialiased edge coverage.
+     std::map<std::array<uint32_t,16>,unsigned> groups;part->vertexGroups.resize(count);
+     for(size_t k=0;k<count;k++){std::array<uint32_t,16> key{};for(unsigned j=0;j<part->influenceCounts[k];j++){key[j*2]=part->joints[k][j];key[j*2+1]=std::bit_cast<uint32_t>(part->weights[k][j]);}const auto [group,added]=groups.emplace(key,unsigned(part->influenceGroups.size()));if(added)part->influenceGroups.push_back({part->joints[k],part->weights[k],part->influenceCounts[k]});part->vertexGroups[k]=group->second;}
+     part->sharedInfluences=part->influenceGroups.size()*2<count;
+     if(!part->sharedInfluences){part->influenceGroups.clear();part->vertexGroups.clear();}
+     else{
+      std::vector<DrawPart::InfluenceGroup> active;std::vector<unsigned> remapped(part->influenceGroups.size(),UINT_MAX);
+      for(unsigned k:part->source){const unsigned group=part->vertexGroups[k];if(remapped[group]==UINT_MAX){remapped[group]=unsigned(active.size());active.push_back(part->influenceGroups[group]);}}
+      for(auto& group:part->vertexGroups)group=remapped[group];part->influenceGroups=std::move(active);
+     }
+    }
     for(size_t k=0;k<p.targets_count;k++){const auto& target=p.targets[k];const cgltf_accessor* pos=nullptr;const cgltf_accessor* normal=nullptr;for(size_t a=0;a<target.attributes_count;a++){if(target.attributes[a].type==cgltf_attribute_type_position)pos=target.attributes[a].data;else if(target.attributes[a].type==cgltf_attribute_type_normal)normal=target.attributes[a].data;}part->morphPositions.push_back(vectors(pos,count));part->morphNormals.push_back(vectors(normal,count));}
     auto& mesh=part->mesh;mesh.vertexCount=int(part->source.size());mesh.triangleCount=int(indices.size()/3);mesh.vertices=static_cast<float*>(MemAlloc(mesh.vertexCount*3*sizeof(float)));mesh.normals=static_cast<float*>(MemAlloc(mesh.vertexCount*3*sizeof(float)));mesh.texcoords=static_cast<float*>(MemAlloc(mesh.vertexCount*2*sizeof(float)));mesh.colors=static_cast<unsigned char*>(MemAlloc(mesh.vertexCount*4));if(!mesh.vertices||!mesh.normals||!mesh.texcoords||!mesh.colors)throw std::bad_alloc();
     const cgltf_texture_view* view=nullptr;if(p.material){const auto& m=*p.material;part->transparent=m.alpha_mode==cgltf_alpha_mode_blend;part->doubleSided=m.double_sided;part->alphaCutoff=m.alpha_mode==cgltf_alpha_mode_mask?m.alpha_cutoff:-1;if(m.has_pbr_metallic_roughness){std::copy_n(m.pbr_metallic_roughness.base_color_factor,4,part->factor.data());view=&m.pbr_metallic_roughness.base_color_texture;}else if(m.has_pbr_specular_glossiness){std::copy_n(m.pbr_specular_glossiness.diffuse_factor,4,part->factor.data());view=&m.pbr_specular_glossiness.diffuse_texture;}}
     if(view&&view->texture)part->material.maps[MATERIAL_MAP_DIFFUSE].texture=textures[view->texture-raw->textures];
     const int uvIndex=view&&view->has_transform&&view->transform.has_texcoord?view->transform.texcoord:view?view->texcoord:0;const auto uv=unpack(cgltf_find_accessor(&p,cgltf_attribute_type_texcoord,uvIndex));const auto* colorAccessor=cgltf_find_accessor(&p,cgltf_attribute_type_color,0);const auto colors=unpack(colorAccessor);const int colorWidth=colorAccessor?int(cgltf_num_components(colorAccessor->type)):0;
     for(size_t k=0;k<part->source.size();k++){const auto index=part->source[k];std::memcpy(mesh.vertices+k*3,&part->positions[index],3*sizeof(float));std::memcpy(mesh.normals+k*3,&part->normals[index],3*sizeof(float));float u=uv.empty()?0:uv.at(index*2),v=uv.empty()?0:uv.at(index*2+1);if(view&&view->has_transform){const auto& t=view->transform;const float x=u*t.scale[0],y=v*t.scale[1];u=t.offset[0]+std::cos(t.rotation)*x-std::sin(t.rotation)*y;v=t.offset[1]+std::sin(t.rotation)*x+std::cos(t.rotation)*y;}mesh.texcoords[k*2]=u;mesh.texcoords[k*2+1]=v;for(int c=0;c<4;c++)mesh.colors[k*4+c]=static_cast<unsigned char>(std::clamp(colors.empty()||c>=colorWidth?1.0f:colors.at(index*colorWidth+c),0.0f,1.0f)*255+0.5f);}
-    if(!expand){mesh.indices=static_cast<unsigned short*>(MemAlloc(indices.size()*sizeof(unsigned short)));if(!mesh.indices)throw std::bad_alloc();for(size_t k=0;k<indices.size();k++)mesh.indices[k]=static_cast<unsigned short>(indices[k]);}UploadMesh(&mesh,true);if(!mesh.vaoId)throw std::runtime_error("Cannot upload GLB mesh");parts.push_back(std::move(part));
+    if(!expand){mesh.indices=static_cast<unsigned short*>(MemAlloc(drawIndices.size()*sizeof(unsigned short)));if(!mesh.indices)throw std::bad_alloc();for(size_t k=0;k<drawIndices.size();k++)mesh.indices[k]=static_cast<unsigned short>(drawIndices[k]);}UploadMesh(&mesh,true);if(!mesh.vaoId)throw std::runtime_error("Cannot upload GLB mesh");parts.push_back(std::move(part));
    }
   }
-  if(parts.empty())throw std::runtime_error("No visible mesh in GLB scene");preparePartGuards();preparePickupFaceGuard();analyze(progress);progress(100,"原始 GLB 就绪，无转换步骤");
+  if(parts.empty())throw std::runtime_error("No visible mesh in GLB scene");size_t full=0,used=0;for(const auto& p:parts){full+=p->positions.size();used+=p->source.size();}TraceLog(LOG_INFO,"MESH referenced vertices: %d / %d; unchanged triangle topology",int(used),int(full));preparePartGuards();preparePickupFaceGuard();analyze(progress);progress(100,"原始 GLB 就绪，无转换步骤");
  }catch(...){parts.clear();for(auto t:textures)if(t.id)UnloadTexture(t);textures.clear();throw;}
 }
 void GltfModel::restore(){for(auto& n:nodes)n.current=n.rest;hierarchy();}
@@ -274,6 +291,9 @@ void GltfModel::updateGeometry(bool upload){
   if(upload&&p.needsUpload){UpdateMeshBuffer(p.mesh,0,p.mesh.vertices,p.mesh.vertexCount*3*sizeof(float),0);UpdateMeshBuffer(p.mesh,2,p.mesh.normals,p.mesh.vertexCount*3*sizeof(float),0);p.needsUpload=false;}
  }
 }
+void GltfModel::uploadGeometry(){
+ for(auto& part:parts)if(part->needsUpload){auto& mesh=part->mesh;UpdateMeshBuffer(mesh,0,mesh.vertices,mesh.vertexCount*3*sizeof(float),0);UpdateMeshBuffer(mesh,2,mesh.normals,mesh.vertexCount*3*sizeof(float),0);part->needsUpload=false;}
+}
 Bounds GltfModel::bounds(bool normalized)const{
  Bounds body;std::vector<Bounds> props;for(const auto& p:parts){if(!visible(nodes,p->node))continue;Bounds part;for(size_t i=0;i<p->positions.size();i++){auto v=point(*p,i);if(normalized)v=Vector3Scale(Vector3Add(v,origin),fit);part.add(v);}if(has(compact(p->name),{"weapon","shield","bullet","prop","effect"}))props.push_back(part);else body.join(part);}
  const auto core=body;const float reach=core.valid()?std::max(3.0f,Vector3Length(Vector3Subtract(core.high,core.low))*2):INFINITY;
@@ -299,12 +319,25 @@ void GltfModel::analyze(const std::function<void(int,const std::string&)>& progr
  if(source=="height-fallback"){std::vector<Vector3> shoulders;for(const auto& n:nodes)if(compact(n.name).find("upperarm")!=std::string::npos)shoulders.push_back(transform(n.world,{}));if(shoulders.size()==2&&Vector3Distance(shoulders[0],shoulders[1])*fit>0.1){bodyWidth=Vector3Distance(shoulders[0],shoulders[1])*fit;source="shoulder-bones";}}
  const auto profiles=stopProfiles();progress(75,"采样必要动作的显示边界");Bounds resting;std::set<int> restingClips{idle};for(const auto& p:catalog["battle"]["poses"])restingClips.insert(p["idle"].get<int>());
  auto measure=[&](int index,double time){visibility(index);evaluate(index,time);hierarchy();return bounds();};
- for(int index:restingClips)if(index>=0)for(double fraction:{0.0,0.25,0.5,0.75,1.0})resting.join(measure(index,clips[index].duration*fraction));
+ Json placement=Json::array();
+ for(int index:restingClips)if(index>=0){
+  std::vector<Bounds> boxes(parts.size());
+  for(double fraction:{0.0,0.25,0.5,0.75,1.0}){
+   resting.join(measure(index,clips[index].duration*fraction));
+   // Placement uses only vertices this visible primitive actually draws.
+   // Keep normalization and the rendering envelope unchanged.
+   for(size_t k=0;k<parts.size();++k){const auto& p=*parts[k];if(!visible(nodes,p.node))continue;
+    for(unsigned vertex:p.source)boxes[k].add(Vector3Scale(Vector3Add(point(p,vertex),origin),fit));
+   }
+  }
+  Json shapes=Json::array();for(const auto& box:boxes)if(box.valid())shapes.push_back(box.json());
+  placement.push_back({{"clip",index},{"boxes",shapes}});
+ }
  Bounds envelope=resting;std::set<int> used;const auto collect=[&](auto&& self,const Json& j)->void{if(j.is_number_integer()){const int i=j;if(i>=0&&i<int(clips.size()))used.insert(i);}else if(j.is_object()||j.is_array())for(const auto& item:j)self(self,item);};collect(collect,catalog["cafe"]);collect(collect,catalog["battle"]);
  size_t done=0;for(int index:used){const int count=std::clamp(int(std::ceil(clips[index].duration*4)),2,16);for(int i=0;i<=count;i++)envelope.join(measure(index,clips[index].duration*i/count));progress(75+int(++done*20/std::max(size_t(1),used.size())),"计算动作范围 "+std::to_string(done)+" / "+std::to_string(used.size()));}
  const auto padding=Vector3Add(Vector3Scale(Vector3Subtract(envelope.high,envelope.low),0.12f),{0.12f,0.12f,0.12f});envelope.low=Vector3Subtract(envelope.low,padding);envelope.high=Vector3Add(envelope.high,padding);
  Json list=Json::array();for(size_t i=0;i<clips.size();i++)list.push_back({{"name",clips[i].name},{"duration",clips[i].duration},{"index",i}});
- metadata={{"type","loaded"},{"catalog",catalog},{"clips",list},{"skins",skins.size()},{"outlineMeshes",parts.size()},{"eyeHeight",eyeHeight},{"stopProfiles",profiles},{"spatial",{{"idle",resting.json()},{"envelope",envelope.json()},{"bodyWidth",bodyWidth},{"bodyWidthSource",source}}}};
+ metadata={{"type","loaded"},{"catalog",catalog},{"clips",list},{"skins",skins.size()},{"outlineMeshes",parts.size()},{"eyeHeight",eyeHeight},{"stopProfiles",profiles},{"spatial",{{"idle",resting.json()},{"envelope",envelope.json()},{"placement",placement},{"bodyWidth",bodyWidth},{"bodyWidthSource",source}}}};
  currentClip=-1;displayed=false;frozen.clear();visibility(idle);restore();sample(idle,0,0,false);updateGeometry();currentClip=-1;displayed=false;
 }
 }

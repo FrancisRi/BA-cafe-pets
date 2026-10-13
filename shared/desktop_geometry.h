@@ -1,5 +1,6 @@
 #pragma once
 #include "pet_ground.h"
+#include <map>
 
 // Authored animated mesh bounds in normalized model units. This only changes
 // presentation and placement in the Three.js host, never skeleton transforms.
@@ -10,32 +11,43 @@ struct DesktopGeometry {
     int width=480,height=480;
     float above=448,below=64;
     static constexpr float ViewportZoom=1.65f; // Reserve the complete supported wheel range once.
+    static constexpr float EdgeClearance=2; // Half the previous 4 px screen-edge clearance.
     float yaw=0;
+    std::map<int,std::vector<BoundingBox>> restingBoxes;
+    int restingClip=-1;
     Vector2 crop{};
     void prepareViewport(PetGround& ground,float zoom){
         const auto saved=ground.position;const auto low=minimum,high=maximum;
         minimum=renderMinimum;maximum=renderMaximum;
         float left=0,right=0,top=0,bottom=0;
         for(const auto& a:ground.monitors)for(float x:{a.left,a.right})for(float y:{a.top,a.bottom}){
-            ground.position=ground.floorAt({x,y});measure(ground,ViewportZoom);const auto b=ground.bodyOffsets;
+            ground.position=ground.floorAt({x,y});measureBox(ground,ViewportZoom);const auto b=ground.bodyOffsets;
             left=std::min(left,b.left);right=std::max(right,b.right);top=std::min(top,b.top);bottom=std::max(bottom,b.bottom);
         }
         width=int(std::ceil(std::max(480.0f,2*std::max(-left,right)+48)/32)*32);
         above=std::ceil(std::max(440.0f,-top+24)/32)*32;below=std::ceil(std::max(40.0f,bottom+24)/32)*32;
         height=int(above+below);minimum=low;maximum=high;ground.position=saved;measure(ground,zoom);
     }
-    void measure(PetGround& ground,float zoom) const {
+    PetGround::Area projectBoxes(const PetGround& ground,float zoom,const std::vector<BoundingBox>& boxes,float facing) const {
         PetGround::Area offsets{INFINITY,INFINITY,-INFINITY,-INFINITY};
         const auto foot=ground.screen(ground.position);
-        for(int x=0;x<2;++x)for(int y=0;y<2;++y)for(int z=0;z<2;++z) {
-            const float dx=(x?maximum.x:minimum.x)*zoom,dz=(z?maximum.z:minimum.z)*zoom;
-            const float angle=yaw*DEG2RAD;
-            const auto p=ground.screen({ground.position.x+dx*std::cos(angle)+dz*std::sin(angle),
-                (y?maximum.y:minimum.y)*zoom,ground.position.z+dz*std::cos(angle)-dx*std::sin(angle)});
-            offsets.left=std::min(offsets.left,p.x-foot.x-4);offsets.right=std::max(offsets.right,p.x-foot.x+4);
-            offsets.top=std::min(offsets.top,p.y-foot.y-4);offsets.bottom=std::max(offsets.bottom,p.y-foot.y+4);
+        const float angle=facing*DEG2RAD,cosine=std::cos(angle),sine=std::sin(angle);
+        for(const auto& box:boxes)for(int x=0;x<2;++x)for(int y=0;y<2;++y)for(int z=0;z<2;++z) {
+            const float dx=(x?box.max.x:box.min.x)*zoom,dz=(z?box.max.z:box.min.z)*zoom;
+            const auto p=ground.screen({ground.position.x+dx*cosine+dz*sine,
+                (y?box.max.y:box.min.y)*zoom,ground.position.z+dz*cosine-dx*sine});
+            offsets.left=std::min(offsets.left,p.x-foot.x-EdgeClearance);offsets.right=std::max(offsets.right,p.x-foot.x+EdgeClearance);
+            offsets.top=std::min(offsets.top,p.y-foot.y-EdgeClearance);offsets.bottom=std::max(offsets.bottom,p.y-foot.y+EdgeClearance);
         }
-        ground.bodyOffsets=offsets;
+        return offsets;
+    }
+    void measureBox(PetGround& ground,float zoom) const {
+        ground.bodyOffsets=projectBoxes(ground,zoom,{{minimum,maximum}},0);
+    }
+    void measure(PetGround& ground,float zoom) const {
+        const auto shapes=restingBoxes.find(restingClip);
+        if(shapes!=restingBoxes.end()&&!shapes->second.empty())ground.bodyOffsets=projectBoxes(ground,zoom,shapes->second,yaw);
+        else measureBox(ground,zoom);
     }
     void place(PetGround& ground,Vector2 foot,float zoom) const {
         // Bounds depend on perspective depth: solve the edge clamp at the

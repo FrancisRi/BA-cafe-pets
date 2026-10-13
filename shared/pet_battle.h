@@ -169,6 +169,7 @@ private:
     }
 public:
     explicit Battle(Playback& playback,std::optional<BattleClips> catalog={}):clips(catalog?*catalog:BattleClips(playback)),state(playback) {}
+    int idleClip() const {return pose<clips.poses.size()?clips.poses[pose].idle:-1;}
     bool canCallsign() const {return phase==Phase::Idle&&!clips.poses.empty()&&(clips.poses[pose].callsign>=0||clips.poses.front().callsign>=0);}
     bool start() {
         if(!clips.supported())return false;

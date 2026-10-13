@@ -12,6 +12,7 @@ class NativeRenderer {
     HFONT hintFont{};std::vector<RECT> inputRegion;std::vector<unsigned char> regionBytes;
     HWND regionWindow{};int regionWidth=0,regionHeight=0;
     std::array<double,20> frameKey{};bool frameValid=false;
+    bool cpuPrepared=false,preparedChanged=false;double preparedAt=0,uploadMs=0;
     void statistics(double);
     int factorLocation=-1,alphaLocation=-1,cutoffLocation=-1,hullWidthLocation=-1,texelLocation=-1,radiusLocation=-1;
     std::vector<RECT> region;
@@ -23,6 +24,7 @@ public:
     std::unique_ptr<GltfModel> model;Json state;
     NativeRenderer();~NativeRenderer();
     void load(const std::filesystem::path&,const std::function<void(int,const std::string&)>&);
+    void prepareCpu(double now); // No OpenGL, HWND or shared raylib state.
     void render(HWND display,HWND input,bool screenshot=false,const std::filesystem::path& output={});
 };
 }

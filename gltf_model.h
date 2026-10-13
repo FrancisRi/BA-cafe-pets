@@ -55,6 +55,7 @@ public:
     GltfModel(const GltfModel&)=delete;GltfModel& operator=(const GltfModel&)=delete;
     void sample(int clip,double seconds,double elapsed=0,bool blend=true);
     void updateGeometry(bool upload=true);
+    void uploadGeometry(); // OpenGL only; CPU preparation can run on workers.
     Bounds bounds(bool normalized=true)const;
     Vector3 point(const DrawPart&,size_t vertex,bool normal=false,bool smooth=false,bool cachedSkin=false)const;
     void restore();

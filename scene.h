@@ -2,6 +2,7 @@
 // One input observer and settings menu coordinate up to five native render windows.
 struct Scene {
     std::vector<std::unique_ptr<App>> actors;
+    FrameJobs cpuJobs;
     SceneRoster roster;
     NativeDesktopInput input;
     std::filesystem::path historyFile;
@@ -26,7 +27,7 @@ struct Scene {
     }
     void copySettings(App& target,const App& source){
         if(!target.preferences.follow&&source.preferences.follow){target.blockedCursor.reset();target.followPlanAt=0;target.interactionUntil=0;}
-        target.preferences=source.preferences;target.state.walkEnabled=source.state.walkEnabled;
+        target.preferences=source.preferences;
         target.state.trackingEnabled=source.state.trackingEnabled;target.state.outlineEnabled=source.state.outlineEnabled;
         target.state.idleSecondsOverride=source.state.idleSecondsOverride;target.state.activeSecondsOverride=source.state.activeSecondsOverride;
         target.state.settingsOpen=source.state.settingsOpen;target.applyPreferences();
@@ -220,11 +221,24 @@ struct Scene {
         if(events.mouseClick&&!calling)for(auto& a:actors)if(a->displayed&&a->loaded&&a->battleMode&&a->battle->canCallsign()&&!a->directed.jumping&&!a->state.settingsOpen)candidates.push_back(a.get());
         App* caller=candidates.empty()?nullptr:candidates[std::uniform_int_distribution<size_t>(0,candidates.size()-1)(leader().state.random)];
         bool modesChanged=false,drew=false;
-        for(auto& a:actors)if(a->displayed){const auto before=a->renderedFrames;a->sharedEvents=events;a->sharedEvents.mouseClick=a.get()==caller;a->tick();drew|=a->renderedFrames!=before;
+        for(auto& a:actors)if(a->displayed){a->deferRendering=true;a->sharedEvents=events;a->sharedEvents.mouseClick=a.get()==caller;a->tick();
             if(a->loaded)if(auto* e=roster.find(a->actorId)){const auto mode=a->battleMode?"battle":"cafe";if(e->mode!=mode){e->mode=mode;modesChanged=true;}}
             if(stopping)break;}
+        std::vector<App*> renderActors;std::vector<std::function<void()>> jobs;
+        const double sampleAt=preciseSeconds();
+        if(!stopping)for(auto& a:actors)if(a->pendingRender&&a->window&&a->displayed&&a->loaded){
+            renderActors.push_back(a.get());jobs.emplace_back([renderer=a->renderer.get(),sampleAt]{renderer->prepareCpu(sampleAt);});
+        }
+        const unsigned beforeWorkers=cpuJobs.count();
+        if(leader().serialCpu)for(const auto& job:jobs)job();else cpuJobs.run(jobs);
+        if(cpuJobs.count()!=beforeWorkers)TraceLog(LOG_INFO,"FRAME CPU workers: %u; OpenGL and Win32 remain on the main thread",cpuJobs.count());
+        for(auto* a:renderActors){const auto before=a->renderedFrames;a->finishRender();drew|=a->renderedFrames!=before;}
         if(modesChanged){save();sync();}
-        orderDepth();if(drew){BeginDrawing();EndDrawing();}
+        // Every actor flushes its FBO before readback and is presented through
+        // UpdateLayeredWindow. The hidden GLFW backbuffer is never displayed.
+        // The Win32 loop above already drains events; swapping that backbuffer
+        // adds a driver/compositor stall and can also consume WM_QUIT in GLFW.
+        orderDepth();if(drew)rlDrawRenderBatchActive();
         // Keep the leader's hidden host timer/menu; release other closed renderers.
         for(size_t i=1;i<actors.size();)if(!actors[i]->displayed){actors[i]->destroyedCallback=actors[i]->depthRequest={};actors.erase(actors.begin()+i);}else ++i;
     }
@@ -240,5 +254,5 @@ struct Scene {
             if(!stopping&&host.motionTimer&&wake==WAIT_OBJECT_0)tick();
         }return host.exitCode;
     }
-    ~Scene(){input.enable(false);for(auto& a:actors){a->syncRequest=a->menuRequest=a->closeRequest=a->loadedCallback=a->destroyedCallback=a->tickCallback=a->settingsChanged=a->followRequest=a->depthRequest={};}actors.clear();}
+    ~Scene(){cpuJobs.shutdown();input.enable(false);for(auto& a:actors){a->syncRequest=a->menuRequest=a->closeRequest=a->loadedCallback=a->destroyedCallback=a->tickCallback=a->settingsChanged=a->followRequest=a->depthRequest={};}actors.clear();}
 };
