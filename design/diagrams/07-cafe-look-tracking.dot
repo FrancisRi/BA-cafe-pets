@@ -1,0 +1,32 @@
+digraph G {
+graph [rankdir=TB, bgcolor="transparent", pad=0.35, nodesep=0.45, ranksep=0.65, fontname="Microsoft YaHei", fontsize=18, splines=polyline];
+node [shape=box, style="rounded,filled", fillcolor="#eef8fc", color="#7cafc3", fontcolor="#183848", fontname="Microsoft YaHei", fontsize=14, margin="0.18,0.15", width=3.8];
+edge [color="#7093a3", fontcolor="#47697b", fontname="Microsoft YaHei", fontsize=12, arrowsize=0.65];
+input [label="inputActive 且 cafeTracking 开启？",shape=diamond,fillcolor="#fff5d9"];
+reset [label="重置追踪\n停止转身动画；保留当前朝向"];
+eligible [label="基础 Cafe_Idle 且无跟随/停靠/返程\n非拖拽/旋转/点击/菜单/交互冷却？",shape=diamond,fillcolor="#fff5d9"];
+wait [label="暂停本次转身\n等待基础动作重新允许追踪"];
+time [label="持续输入 ≥ activeSeconds\n且鼠标方向有效？",shape=diamond,fillcolor="#fff5d9"];
+mode [label="视线模式？",shape=diamond,fillcolor="#fff5d9"];
+smooth [label="平滑追踪\n每帧 turnToward 当前鼠标方向\n仍显示 Cafe_Idle；锚点不动"];
+angle [label="当前未转身且角差 ≥ 30°？",shape=diamond,fillcolor="#fff5d9"];
+still [label="保持 Idle 与当前朝向"];
+turn [label="锁定本次 targetYaw\n转身覆盖 Cafe_Walk\n朝向最多变化 240°/s；位置不变"];
+done [label="与锁定方向角差 < 0.5°？",shape=diamond,fillcolor="#fff5d9"];
+idle [label="结束转身 → Cafe_Idle\n后续角差再次达到 30° 才重启"];
+input -> reset [label="否"];
+input -> eligible [label="是"];
+eligible -> wait [label="否"];
+eligible -> time [label="是"];
+time -> wait [label="否"];
+time -> mode [label="是"];
+mode -> smooth [label="smooth"];
+mode -> angle [label="threshold"];
+angle -> still [label="否"];
+angle -> turn [label="是"];
+turn -> done [label=""];
+done -> turn [label="否"];
+done -> idle [label="是"];
+idle -> input [label="下一帧"];
+smooth -> input [label="下一帧"];
+}

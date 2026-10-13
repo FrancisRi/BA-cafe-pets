@@ -1,0 +1,29 @@
+%% ba_cafe_lite native 0.2.5 · actual source snapshot
+flowchart TB
+  input{"inputActive 且 cafeTracking 开启？"}
+  reset["重置追踪<br/>停止转身动画；保留当前朝向"]
+  eligible{"基础 Cafe_Idle 且无跟随/停靠/返程<br/>非拖拽/旋转/点击/菜单/交互冷却？"}
+  wait["暂停本次转身<br/>等待基础动作重新允许追踪"]
+  time{"持续输入 ≥ activeSeconds<br/>且鼠标方向有效？"}
+  mode{"视线模式？"}
+  smooth["平滑追踪<br/>每帧 turnToward 当前鼠标方向<br/>仍显示 Cafe_Idle；锚点不动"]
+  angle{"当前未转身且角差 ≥ 30°？"}
+  still["保持 Idle 与当前朝向"]
+  turn["锁定本次 targetYaw<br/>转身覆盖 Cafe_Walk<br/>朝向最多变化 240°/s；位置不变"]
+  done{"与锁定方向角差 < 0.5°？"}
+  idle["结束转身 → Cafe_Idle<br/>后续角差再次达到 30° 才重启"]
+  input -->|"否"| reset
+  input -->|"是"| eligible
+  eligible -->|"否"| wait
+  eligible -->|"是"| time
+  time -->|"否"| wait
+  time -->|"是"| mode
+  mode -->|"smooth"| smooth
+  mode -->|"threshold"| angle
+  angle -->|"否"| still
+  angle -->|"是"| turn
+  turn --> done
+  done -->|"否"| turn
+  done -->|"是"| idle
+  idle -->|"下一帧"| input
+  smooth -->|"下一帧"| input

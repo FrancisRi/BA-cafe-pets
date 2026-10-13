@@ -19,16 +19,36 @@
 using Json=nlohmann::json;
 #include "native_preferences.h"
 #include "shared/directed_walk.h"
+#include "shared/cafe_attention.h"
 static void check(bool value,const char* text){if(!value)throw std::runtime_error(text);}
 int main(int argc,char** argv){
  try{
   const Vector2 cursor{};
+  DirectedWalk walk;PetGround ground;float facing=0;walk.begin({0,0,10},true,1,0);
+  walk.step(ground,2,.01,facing,[](float heading,double){return MovementChoice{heading,.25,true};});
+  check(std::abs(ground.position.z-.005)<1e-6&&std::abs(walk.time-.01)<1e-9,"Avoidance reduces displacement without slowing the walking animation");
+  walk.step(ground,2,.01,facing,[](float heading,double){return MovementChoice{heading,0,true};});
+  check(std::abs(ground.position.z-.005)<1e-6&&std::abs(walk.time-.02)<1e-9,"Waiting for a peer keeps the walking animation at its normal rate");
+  pet::Playback attentionState;attentionState.inputActive=true;attentionState.activeSecondsOverride=0;attentionState.lookTarget=true;attentionState.lookYaw=170;
+  CafeAttention smoothAttention;facing=0;smoothAttention.update(attentionState,facing,.008,true,false);
+  check(facing>240*.008&&facing<170,"Smooth cafe tracking has no fixed angular speed cap and does not snap");
+  float rate60=0,rate125=0;CafeAttention track60,track125;
+  for(int i=0;i<60;++i)track60.update(attentionState,rate60,1.0/60,true,false);
+  for(int i=0;i<125;++i)track125.update(attentionState,rate125,.008,true,false);
+  check(std::abs(rate60-rate125)<.001&&std::abs(rate60-170)<.001,"Smooth tracking depends on elapsed time, not update frequency");
+  facing=179;attentionState.lookYaw=-179;smoothAttention.update(attentionState,facing,.008,true,false);
+  check(facing>179&&facing<180,"Smooth tracking uses the short arc across the angle wrap");
+  facing=0;attentionState.lookYaw=170;CafeAttention thresholdAttention;thresholdAttention.update(attentionState,facing,.008,true,true);
+  check(thresholdAttention.turning&&std::abs(facing-240*.008)<1e-5,"Threshold tracking retains its turning-walk speed cap");
   check(!DirectedWalk::outsideBand({30,0},cursor,10,1,5),"An idle character inside the band must remain still");
   check(!DirectedWalk::outsideBand({10,0},cursor,10,1,5),"The lower endpoint belongs to the band");
   check(!DirectedWalk::outsideBand({50,0},cursor,10,1,5),"The upper endpoint belongs to the band");
   check(DirectedWalk::outsideBand({60,0},cursor,10,1,5),"A distant character must start approaching");
   check(DirectedWalk::continueFollow({45,0},cursor,10,1,5,false),"Approach continues inside the band until its midpoint");
   check(!DirectedWalk::continueFollow({30,0},cursor,10,1,5,false),"Approach stops at the midpoint");
+  check(!DirectedWalk::continueFollow({45,0},cursor,10,1,5,false,true),"An obstructed follower may stop anywhere inside the band");
+  check(DirectedWalk::continueFollow({60,0},cursor,10,1,5,false,true),"An obstructed follower outside the band must retain its follow task");
+  check(DirectedWalk::continueFollow({5,0},cursor,10,1,5,true,true),"A blocked retreat outside the near limit is not a satisfied follow distance");
   check(DirectedWalk::outsideBand({5,0},cursor,10,1,5),"A positive lower limit permits retreat");
   check(DirectedWalk::continueFollow({20,0},cursor,10,1,5,true),"Retreat continues to the midpoint");
   check(!DirectedWalk::continueFollow({30,0},cursor,10,1,5,true),"Retreat stops at the midpoint");

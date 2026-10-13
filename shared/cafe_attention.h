@@ -16,7 +16,10 @@ struct CafeAttention {
         if(!eligible){pause();return;}
         chosen=state.activeInputSeconds>=state.activeSecondsOverride.value_or(30);
         if(!chosen||!state.lookTarget){pause();return;}
-        if(!threshold){pause();yaw=PetGround::turnToward(yaw,float(state.lookYaw),float(dt));return;}
+        if(!threshold){pause();
+            const float delta=std::remainder(float(state.lookYaw)-yaw,360.0f);
+            yaw=std::remainder(yaw+delta*float(-std::expm1(-std::max(0.0,dt)/0.08)),360.0f);return;
+        }
         if(!turning&&std::abs(std::remainder(float(state.lookYaw)-yaw,360.0f))>=30){
             turning=true;targetYaw=float(state.lookYaw);time=0;++serial;
         }

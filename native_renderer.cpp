@@ -10,6 +10,8 @@
 #undef LoadImage
 #undef PlaySound
 #include "native_renderer.h"
+#include "native_health.h"
+#include "native_frame.h"
 #include "rlgl.h"
 #include <algorithm>
 #include <cstring>
@@ -80,7 +82,7 @@ void NativeRenderer::render(HWND display,HWND input,bool screenshot,const std::f
  // Exact dependency checks: animated geometry, expression weights, projection,
  // appearance and action visibility must all agree before reusing a frame.
  if(frameValid&&!changed&&!model->updatedParts&&key==frameKey&&!screenshot){++reusedFrames;statistics(now);return;}
- const double uploadStart=clock();model->uploadGeometry();uploadMs+=(clock()-uploadStart)*1000;
+ NativeHealth::mark("GPU mesh upload");const double uploadStart=clock();model->uploadGeometry();uploadMs+=(clock()-uploadStart)*1000;
  const float angle=s["yaw"].get<float>()*DEG2RAD,z=s["zoom"];Mat actor=identity();actor[0]=std::cos(angle)*z;actor[2]=-std::sin(angle)*z;actor[5]=z;actor[8]=std::sin(angle)*z;actor[10]=std::cos(angle)*z;actor[12]=position[0];actor[13]=position[1];actor[14]=position[2];const Matrix pose=matrix(actor);
  // Keep the full desktop projection, but allocate/read only the current pose.
  // Bounds come from all deformed vertices, never from sparse animation samples
@@ -102,20 +104,20 @@ void NativeRenderer::render(HWND display,HWND input,bool screenshot,const std::f
  const auto desired=[](int need,int limit){return std::min(limit,((need+31)/32)*32+32);};
  const int idealWidth=desired(x1-x0,logicalWidth),idealHeight=desired(y1-y0,logicalHeight);
  bool shrink=false;
- if(!changed&&s.value("loop",true)&&!s.value("interacting",false)&&(width>idealWidth+32||height>idealHeight+32)){
+ if(!changed&&s.value("resting",false)&&shrunkGeneration!=generation&&(width>idealWidth+32||height>idealHeight+32)){
   if(!smallCropAt){smallCropAt=now;smallCropWidth=idealWidth;smallCropHeight=idealHeight;}
-  else {smallCropWidth=std::max(smallCropWidth,idealWidth);smallCropHeight=std::max(smallCropHeight,idealHeight);shrink=now-smallCropAt>=0.75;}
+  else {smallCropWidth=std::max(smallCropWidth,idealWidth);smallCropHeight=std::max(smallCropHeight,idealHeight);shrink=now-smallCropAt>=std::clamp(model->clips.at(s["clip"].get<int>()).duration/s.value("playbackRate",1.0),1.5,8.0);}
  }else smallCropAt=0;
  const auto capacity=[&](int need,int current,int limit,int maximum){const int ideal=desired(need,limit);if(current<=0||current<need||current>limit)return ideal;if(shrink&&current>maximum+32)return maximum;return current;};
- const int w=capacity(x1-x0,width,logicalWidth,smallCropWidth),h=capacity(y1-y0,height,logicalHeight,smallCropHeight);if(shrink)smallCropAt=0;
+ const int w=capacity(x1-x0,width,logicalWidth,smallCropWidth),h=capacity(y1-y0,height,logicalHeight,smallCropHeight);if(shrink){smallCropAt=0;shrunkGeneration=generation;}
  // Do not recenter the HWND for breathing/hair movement while its padded
  // bounds still fit. The camera projection continues to use the same anchor.
  if(w!=width||h!=height||x0<surfaceOffset.x||y0<surfaceOffset.y||x1>surfaceOffset.x+w||y1>surfaceOffset.y+h||surfaceOffset.x+w>logicalWidth||surfaceOffset.y+h>logicalHeight)
   surfaceOffset={std::clamp(x0-(w-(x1-x0))/2,0,logicalWidth-w),std::clamp(y0-(h-(y1-y0))/2,0,logicalHeight-h)};
- surfaceWidth=w;surfaceHeight=h;resize(w,h);
+ NativeHealth::mark("GPU / GDI surface resize");surfaceWidth=w;surfaceHeight=h;resize(w,h);
  const double clipNear=5,clipFar=s["far"],top=clipNear*std::tan(camera.fovy*DEG2RAD*0.5),fullHeight=top*2,fullWidth=fullHeight*desktop[0].get<double>()/desktop[1].get<double>();const double l=-fullWidth/2+(crop[0].get<double>()+surfaceOffset.x)/desktop[0].get<double>()*fullWidth,t=top-(crop[1].get<double>()+surfaceOffset.y)/desktop[1].get<double>()*fullHeight;
  const auto projection=MatrixFrustum(l,l+width/desktop[0].get<double>()*fullWidth,t-height/desktop[1].get<double>()*fullHeight,t,clipNear,clipFar);
- const int mode=s.value("outlineMode",2);const float line=s.value("outlineWidth",100.0f);BeginTextureMode(target);ClearBackground(BLANK);BeginMode3D(camera);rlSetMatrixProjection(projection);
+ NativeHealth::mark("GPU draw");const int mode=s.value("outlineMode",2);const float line=s.value("outlineWidth",100.0f);BeginTextureMode(target);ClearBackground(BLANK);BeginMode3D(camera);rlSetMatrixProjection(projection);
  rlSetBlendFactorsSeparate(0x0302,0x0303,1,0x0303,0x8006,0x8006);BeginBlendMode(BLEND_CUSTOM_SEPARATE);
  const float outline=0.002f*std::tan(camera.fovy*DEG2RAD*0.5f)/std::tan(35*DEG2RAD*0.5f)*480/desktop[1].get<float>()*line/100;
  if(mode==2){SetShaderValue(hull,hullWidthLocation,&outline,SHADER_UNIFORM_FLOAT);rlEnableBackfaceCulling();rlSetCullFace(RL_CULL_FACE_FRONT);
@@ -129,19 +131,13 @@ void NativeRenderer::render(HWND display,HWND input,bool screenshot,const std::f
  BeginTextureMode(resolved);ClearBackground(BLANK);rlSetBlendFactors(1,0,0x8006);BeginBlendMode(BLEND_CUSTOM);
  if(mode==1){const float texel[]{1.0f/target.texture.width,1.0f/target.texture.height},radius=1.5f*line/100*scale;SetShaderValue(contour,texelLocation,texel,SHADER_UNIFORM_VEC2);SetShaderValue(contour,radiusLocation,&radius,SHADER_UNIFORM_FLOAT);BeginShaderMode(contour);}
  DrawTexturePro(target.texture,{0,0,float(target.texture.width),float(-target.texture.height)},{0,0,float(width),float(height)},{},0,WHITE);if(mode==1)EndShaderMode();EndBlendMode();EndTextureMode();
- const double readStart=clock();Image image=LoadImageFromTexture(resolved.texture);readMs+=(clock()-readStart)*1000;if(!image.data)throw std::runtime_error("Cannot read native frame");const double presentStart=clock();if(screenshot){ImageFlipVertical(&image);const auto path=output.u8string();ExportImage(image,reinterpret_cast<const char*>(path.c_str()));ImageFlipVertical(&image);}
- const auto* pixels=static_cast<const unsigned char*>(image.data);region.clear();size_t previousStart=0,previousCount=0;
- for(int y=0;y<height;y++){const size_t rowStart=region.size();const auto* row=pixels+size_t(height-1-y)*width*4;auto* dst=dib+size_t(y)*width*4;int start=-1;for(int x=0;x<width;x++){const auto* p=row+x*4;dst[x*4]=p[2];dst[x*4+1]=p[1];dst[x*4+2]=p[0];dst[x*4+3]=p[3];const bool hit=p[3]>=12;if(hit&&start<0)start=x;if(!hit&&start>=0){region.push_back({start,y,x,y+1});start=-1;}}if(start>=0)region.push_back({start,y,width,y+1});
-  const size_t count=region.size()-rowStart;bool same=count>0&&count==previousCount;
-  for(size_t i=0;same&&i<count;i++)same=region[previousStart+i].left==region[rowStart+i].left&&region[previousStart+i].right==region[rowStart+i].right&&region[previousStart+i].bottom==y;
-  if(same){for(size_t i=0;i<count;i++)region[previousStart+i].bottom=y+1;region.resize(rowStart);}else{previousStart=rowStart;previousCount=count;}
-  // Only rendered model pixels enter the input window; the onboarding text does not.
- }
- UnloadImage(image);const double maskStart=clock();if(input){const bool same=regionWindow==input&&regionWidth==width&&regionHeight==height&&inputRegion.size()==region.size()&&(region.empty()||std::memcmp(inputRegion.data(),region.data(),region.size()*sizeof(RECT))==0);
+ NativeHealth::mark("GPU readback");const double readStart=clock();Image image=LoadImageFromTexture(resolved.texture);readMs+=(clock()-readStart)*1000;if(!image.data)throw std::runtime_error("Cannot read native frame");const double presentStart=clock();if(screenshot){ImageFlipVertical(&image);const auto path=output.u8string();ExportImage(image,reinterpret_cast<const char*>(path.c_str()));ImageFlipVertical(&image);}
+ const auto* pixels=static_cast<const unsigned char*>(image.data);nativePixels(pixels,dib,width,height,region);
+ NativeHealth::mark("Win32 input region");UnloadImage(image);const double maskStart=clock();if(input){const bool same=regionWindow==input&&regionWidth==width&&regionHeight==height&&inputRegion.size()==region.size()&&(region.empty()||std::memcmp(inputRegion.data(),region.data(),region.size()*sizeof(RECT))==0);
   if(same)++reusedMasks;else{const size_t size=sizeof(RGNDATAHEADER)+region.size()*sizeof(RECT);regionBytes.resize(size);auto* data=reinterpret_cast<RGNDATA*>(regionBytes.data());data->rdh={sizeof(RGNDATAHEADER),RDH_RECTANGLES,DWORD(region.size()),DWORD(region.size()*sizeof(RECT)),{0,0,width,height}};if(!region.empty())std::memcpy(data->Buffer,region.data(),region.size()*sizeof(RECT));auto r=region.empty()?CreateRectRgn(0,0,0,0):ExtCreateRegion(nullptr,DWORD(size),data);if(r){if(SetWindowRgn(input,r,FALSE)){inputRegion=region;regionWindow=input;regionWidth=width;regionHeight=height;}else DeleteObject(r);}}
  }
- maskMs+=(clock()-maskStart)*1000;drawHint(s);POINT source{},destination{s["surfaceOrigin"][0].get<LONG>()+surfaceOffset.x,s["surfaceOrigin"][1].get<LONG>()+surfaceOffset.y};SIZE size{width,height};BLENDFUNCTION blend{AC_SRC_OVER,0,255,AC_SRC_ALPHA};const double layerStart=clock();if(!UpdateLayeredWindow(display,nullptr,&destination,&size,memory,&source,0,&blend,ULW_ALPHA))throw std::runtime_error("Native UpdateLayeredWindow failed");layerMs+=(clock()-layerStart)*1000;
- if(input){RECT rect{};if(!GetWindowRect(input,&rect)||rect.left!=destination.x||rect.top!=destination.y||rect.right-rect.left!=width||rect.bottom-rect.top!=height)SetWindowPos(input,nullptr,destination.x,destination.y,width,height,SWP_NOACTIVATE|SWP_NOZORDER);}
+ maskMs+=(clock()-maskStart)*1000;drawHint(s);POINT source{},destination{s["surfaceOrigin"][0].get<LONG>()+surfaceOffset.x,s["surfaceOrigin"][1].get<LONG>()+surfaceOffset.y};SIZE size{width,height};BLENDFUNCTION blend{AC_SRC_OVER,0,255,AC_SRC_ALPHA};const double layerStart=clock();NativeHealth::mark("Win32 layered window commit");if(!UpdateLayeredWindow(display,nullptr,&destination,&size,memory,&source,0,&blend,ULW_ALPHA))throw std::runtime_error("Native UpdateLayeredWindow failed");layerMs+=(clock()-layerStart)*1000;
+ NativeHealth::mark("Win32 input window move");if(input){RECT rect{};if(!GetWindowRect(input,&rect)||rect.left!=destination.x||rect.top!=destination.y||rect.right-rect.left!=width||rect.bottom-rect.top!=height)SetWindowPos(input,nullptr,destination.x,destination.y,width,height,SWP_NOACTIVATE|SWP_NOZORDER);}
  frameKey=key;frameValid=true;didDraw=true;presentMs+=(clock()-presentStart)*1000;statistics(now);
 }
 void NativeRenderer::statistics(double now){++frames;if(!statsAt)statsAt=now;if(now-statsAt>=3){TraceLog(LOG_INFO,"PERF native: %.1f FPS; surface %dx%d; SSAA %.2f; mesh %.2f ms (%0.1f/%d updated); readback %.2f ms; present %.2f ms (mask %.2f, layer %.2f); cached frames %u/%u, masks %u; upload %.2f ms",frames/(now-statsAt),width,height,scale,meshMs/frames,changedMeshes/frames,int(model->parts.size()),readMs/frames,presentMs/frames,maskMs/frames,layerMs/frames,reusedFrames,frames,reusedMasks,uploadMs/frames);statsAt=now;frames=reusedFrames=reusedMasks=0;meshMs=readMs=presentMs=maskMs=layerMs=changedMeshes=uploadMs=0;}}

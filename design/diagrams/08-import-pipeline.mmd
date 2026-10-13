@@ -1,0 +1,31 @@
+%% ba_cafe_lite native 0.2.5 · actual source snapshot
+flowchart TB
+  file["用户选择 GLB<br/>历史最多 15 条；显示最多 5 个"]
+  validate["cgltf_parse / load_buffers / validate<br/>GLB 2.0；内嵌数据和 PNG/JPEG<br/>检查必需扩展与 accessor"]
+  error["不支持 / 数据损坏<br/>显示导入错误；保留已显示模型"]
+  nodes["保留完整父节点层级<br/>多套 Skin、inverseBindMatrices<br/>节点 TRS / matrix、原始 Morph"]
+  tracks["读取原始关键帧<br/>STEP / LINEAR / CUBICSPLINE<br/>不用 Blender 烘焙帧"]
+  catalog["关键词 / 别名 / 动作组映射<br/>选择一致 family + group<br/>歧义记录警告、跳过少数动作"]
+  parts["可选部件驱动检查<br/>optional + show/hide + 动画通道<br/>唯一塌缩 switch 面部保底"]
+  spatial["测量与缓存<br/>尺寸归一、眼高、本体宽度<br/>待机每网格边界、动作包络、脚部制动"]
+  caps{"能力降级"}
+  cafe["咖啡厅缺省映射<br/>Idle → 战斗 Idle / 首动作<br/>Walk → 战斗 Move；Pickup → Idle"]
+  battle["战斗姿态必须 Idle + Attack<br/>优先 Normal；少姿态不参与随机<br/>无姿态：不提供战斗模式"]
+  missing["可选动作不存在<br/>Start/End 跳过；Jump 不检查<br/>无 Delay 返回 Idle；无技能/换弹不触发"]
+  runtime["生成/复用每角色 .bt.xml<br/>创建 Behavior 与 Battle<br/>原生模型就绪，进度 100%"]
+  clip["运行帧<br/>采样 → 0.18s 内姿态混合<br/>Morph + 世界矩阵 + 蒙皮 → GPU"]
+  file --> validate
+  validate -->|"校验失败"| error
+  validate -->|"合法"| nodes
+  nodes --> tracks
+  tracks --> catalog
+  catalog --> parts
+  parts --> spatial
+  spatial --> caps
+  caps --> cafe
+  caps --> battle
+  caps --> missing
+  cafe --> runtime
+  battle --> runtime
+  missing --> runtime
+  runtime --> clip

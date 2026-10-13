@@ -1,0 +1,34 @@
+digraph G {
+graph [rankdir=TB, bgcolor="transparent", pad=0.35, nodesep=0.45, ranksep=0.65, fontname="Microsoft YaHei", fontsize=18, splines=polyline];
+node [shape=box, style="rounded,filled", fillcolor="#eef8fc", color="#7cafc3", fontcolor="#183848", fontname="Microsoft YaHei", fontsize=14, margin="0.18,0.15", width=3.8];
+edge [color="#7093a3", fontcolor="#47697b", fontname="Microsoft YaHei", fontsize=12, arrowsize=0.65];
+root [label="ReactiveFallback\n每次 tick 按 1 → 6 检查",shape=diamond,fillcolor="#fff5d9"];
+drag [label="1 · ReactiveSequence\nIsDragging → LoopAnimation\nFormation_Pickup"];
+click [label="2 · Sequence\nHasPendingClick → PlayAnimation\nCafe_Reaction；消费一次点击"];
+home [label="3 · ReturnHome\n散步后恢复输入且未开启位置跟随\nCafe_Walk；直线返回本轮起点"];
+legacy [label="4 · 旧视线 Sequence（未启用）\nActiveInputChance → FaceCursor\n原生宿主 trackingEnabled=false",style="rounded,dashed,filled",fillcolor="#f2f3f5",fontcolor="#78848b"];
+wander [label="5 · ReactiveSequence\nUserInactive 达标 + 允许散步",shape=diamond,fillcolor="#fff5d9"];
+cooldown [label="Sequence\nIdleCooldownReady\n间隔 × 随机时间幅度"];
+walk [label="WalkRandom → Cafe_Walk\n8 方向加权选择；距离带随机\n上行权重 0.4、路程倍率 2.5"];
+idle [label="6 · LoopAnimation\nCafe_Idle\n纯待机动画速度 75%"];
+finish [label="单次动作 / 返回 / 散步完成\n重置冷却，重新从根节点评估"];
+cap [label="导入时按能力修剪\n无 Reaction：移除点击分支\n无 Walk：移除返程和散步分支",shape=note,fillcolor="#f4f6f8"];
+override [label="宿主覆盖层（见移动/视线图）\n输入活跃 + 位置跟随会抑制随机散步\n跟随仍以基础 Idle 为宿主状态",shape=note,fillcolor="#f4f6f8"];
+fallback [label="XML 每 0.5s 检查更新\n无效更新保留旧树\n首次无效 / 执行异常 → SafeIdle",shape=note,fillcolor="#f4f6f8"];
+root -> drag [label="1"];
+root -> click [label="2"];
+root -> home [label="3"];
+root -> legacy [label="4",style=dashed,constraint=false];
+root -> wander [label="5"];
+root -> idle [label="6"];
+wander -> cooldown [label="无输入 ≥ input_idle"];
+cooldown -> walk [label="待机冷却达到间隔"];
+drag -> root [label="松开/取消拖拽"];
+click -> finish [label="动作结束"];
+home -> finish [label="到达起点；面向屏幕"];
+walk -> finish [label="路程完成 / 输入恢复中断"];
+finish -> root [label=""];
+cap -> root [label="动作映射与修剪",style=dashed,constraint=false];
+override -> root [label="宿主约束",style=dashed,constraint=false];
+fallback -> idle [label="安全待机",style=dashed,constraint=false];
+}

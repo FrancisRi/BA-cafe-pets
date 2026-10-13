@@ -1,6 +1,7 @@
 #pragma once
 #include "pet_ground.h"
 #include "screen_boundary.h"
+#include "crowd_steering.h"
 struct DirectedWalk {
     bool active=false,following=false,jumping=false,crossing=false,blocked=false;
     bool followAway=false;
@@ -30,7 +31,7 @@ struct DirectedWalk {
         jumping=true;jumpYaw=heading;jumpSpeed=velocity;jumpDuration=duration;
         jumpTime=offset;++serial;return true;
     }
-    bool step(PetGround& ground,double speed,double dt,float& yaw,const std::function<float(float,double)>& steer={}){
+    bool step(PetGround& ground,double speed,double dt,float& yaw,const std::function<MovementChoice(float,double)>& steer={}){
         if(jumping){
             const double step=std::min(dt,jumpDuration-jumpTime);
             yaw=jumpYaw;ground.position=ground.step(jumpYaw,float(jumpSpeed*step));jumpTime+=step;
@@ -41,13 +42,13 @@ struct DirectedWalk {
         const double dx=target.x-ground.position.x,dz=target.z-ground.position.z,remaining=std::hypot(dx,dz);
         if(remaining<=0.002){ground.position=target;cancel();return true;}
         const float direct=std::atan2(dx,dz)*RAD2DEG;
-        const float heading=steer?steer(direct,speed*dt):direct;
+        const auto choice=steer?steer(direct,speed*dt):MovementChoice{direct};const float heading=choice.heading;
         if(!std::isfinite(heading)){cancel();blocked=true;return false;}
         yaw=PetGround::turnToward(yaw,heading,dt);
         // Keep the endpoint fixed, soften the last ~0.35 seconds, and avoid
         // circling a close target while the facing catches up.
         const double alignment=std::max(0.0,double(std::cos(std::remainder(heading-yaw,360.0f)*DEG2RAD)));
-        const double movement=std::min(remaining,speed*dt*alignment*std::min(1.0,std::sqrt(2*remaining/(speed*0.35))));
+        const double movement=std::min(remaining,speed*dt*choice.scale*alignment*std::min(1.0,std::sqrt(2*remaining/(speed*0.35))));
         ground.position=ground.step(heading,float(movement));time+=dt;
         if(movement>=remaining&&std::abs(std::remainder(heading-direct,360.0f))<0.01f){ground.position=target;cancel();return true;}
         return false;
@@ -61,7 +62,8 @@ struct DirectedWalk {
         const float distance=std::hypot(center.x-cursor.x,center.y-cursor.y);
         return distance<nearest*bodyPixels-1||distance>farthest*bodyPixels+1;
     }
-    static bool continueFollow(Vector2 center,Vector2 cursor,float bodyPixels,float nearest,float farthest,bool movingAway){
+    static bool continueFollow(Vector2 center,Vector2 cursor,float bodyPixels,float nearest,float farthest,bool movingAway,bool blocked=false){
+        if(blocked&&!outsideBand(center,cursor,bodyPixels,nearest,farthest))return false;
         const float distance=std::hypot(center.x-cursor.x,center.y-cursor.y),middle=(nearest+farthest)*0.5f*bodyPixels;
         // A zero lower limit never requests retreat, including a cursor that
         // moves closer while a previously started approach is still running.

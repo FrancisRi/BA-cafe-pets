@@ -3,6 +3,9 @@
 struct Scene {
     std::vector<std::unique_ptr<App>> actors;
     FrameJobs cpuJobs;
+    std::array<CrowdBody,SceneRoster::Maximum> crowdBodies{};size_t crowdCount=0;uint64_t crowdSerial=0;
+    HANDLE frameTimer{};FrameDeadline frameClock;
+    double frameStatsAt=0,previousFrameAt=0;std::vector<double> frameIntervals,frameCosts;
     SceneRoster roster;
     NativeDesktopInput input;
     std::filesystem::path historyFile;
@@ -42,7 +45,7 @@ struct Scene {
     void orderDepth(){
         std::vector<App*> visible;for(auto& a:actors)if(a->displayed&&a->loaded&&a->window&&IsWindowVisible(a->window))visible.push_back(a.get());
         auto depth=[](const App& a){
-            double foot=a.ground.screen(a.ground.position).y+a.work.top;
+            double foot=(a.committedFrame?a.committedFoot:a.ground.screen(a.ground.position)).y+a.work.top;
             foot-=a.retreatDisplacement();
             return std::lround(foot);
         };
@@ -57,31 +60,42 @@ struct Scene {
         for(HWND hwnd:desired){SetWindowPos(hwnd,anchor,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE|SWP_NOOWNERZORDER);anchor=hwnd;}
         depthOrder=std::move(desired);
     }
-    float steer(App& a,float heading,double travel){
-        if(travel<=0)return heading;
-        const double lookahead=std::max(travel,0.792*a.zoom*(a.battleMode?3:1)*0.3);
-        auto clear=[&](float angle){
-            if(!DesktopPath::stepAllowed(a.ground,angle,travel))return false;
-            if(std::abs(std::remainder(angle-heading,360.0f))>0.1f&&a.state.walking&&!a.state.returningHome&&!a.directed.active
-                &&(!a.battleMode||a.battle->phase==pet::Battle::Phase::Moving)){
-                double distance=a.state.walkSpeed*a.state.movementScale*a.state.walkRemaining,minimum=0,maximum=0;
-                if(a.battleMode){const auto brakes=a.brakeRange();minimum=brakes.first;maximum=brakes.second;}
-                else if(a.smooth){const double reduction=std::min(distance,a.state.walkSpeed*a.zoom*(pet::Battle::StopFallbackSeconds*0.25+0.02));distance-=reduction;maximum=reduction;}
-                if(!DesktopPath::trip(a.ground,a.geometry,a.zoom,angle,distance,minimum,maximum))return false;
+    void snapshotCrowd(){
+        crowdCount=0;
+        for(const auto& actor:actors){const auto& a=*actor;if(!a.displayed||!a.loaded)continue;
+            CrowdBody b;b.id=a.crowdId;b.position={a.ground.position.x,a.ground.position.z};b.radius=radius(a);
+            b.velocity=a.left||a.right||a.state.settingsOpen?Vector2{}:Vector2{a.motionVelocity.x,a.motionVelocity.z};
+            if(a.directed.jumping){b.jumping=true;const auto p=a.ground.step(a.directed.jumpYaw,float(a.directed.jumpSpeed*(a.directed.jumpDuration-a.directed.jumpTime)));b.landing={p.x,p.z};}
+            else if(a.battleMode&&a.battle&&a.battle->phase==pet::Battle::Phase::Jump){b.jumping=true;
+                const double remaining=std::max(0.0,a.state.clips[a.state.current].duration-a.state.time);
+                const auto p=a.ground.step(float(a.state.walkYaw),float(a.state.walkSpeed*a.state.movementScale*remaining));b.landing={p.x,p.z};}
+            b.movable=(a.state.walking||a.directed.active)&&!a.left&&!a.right&&!a.state.settingsOpen&&!b.jumping;
+            crowdBodies[crowdCount++]=b;
+        }
+    }
+    void separateCrowd(){
+        if(crowdCount<2)return;
+        // Compute from a common post-movement snapshot, then commit corrections.
+        // Only moving actors participate; no idle drift or forced model rotation.
+        snapshotCrowd();const auto bodies=std::span<const CrowdBody>(crowdBodies.data(),crowdCount);
+        for(auto& actor:actors){auto& a=*actor;if(!a.displayed||!a.loaded)continue;
+            for(const auto& body:bodies)if(body.id==a.crowdId){
+                const auto push=CrowdSteering::separation(body,bodies,a.movementDt);const float distance=std::sqrt(CrowdSteering::norm(push));
+                if(distance>0){const float heading=std::atan2(push.x,push.y)*RAD2DEG;
+                    if(DesktopPath::stepAllowed(a.ground,heading,distance)){a.ground.position=a.ground.step(heading,distance);
+                        a.motionVelocity.x+=push.x/a.movementDt;a.motionVelocity.z+=push.y/a.movementDt;}}
+                break;
             }
-            const auto endpoint=a.ground.step(angle,float(lookahead));
-            for(const auto& other:actors){if(other.get()==&a||!other->displayed||!other->loaded)continue;
-                const auto p=other->ground.position;const double separation=radius(a)+radius(*other)+0.04;
-                const double before=std::hypot(p.x-a.ground.position.x,p.z-a.ground.position.z);
-                // Dragging can overlap characters: allow only an escape that increases separation.
-                if(before<separation){const auto next=a.ground.step(angle,float(travel));if(std::hypot(p.x-next.x,p.z-next.z)<=before+1e-7)return false;}
-                else if(segmentDistance(a.ground.position,endpoint,p)<separation)return false;
-                if(other->directed.jumping){const auto landing=other->ground.step(other->directed.jumpYaw,float(other->directed.jumpSpeed*(other->directed.jumpDuration-other->directed.jumpTime)));
-                    if(segmentDistance(a.ground.position,endpoint,landing)<separation)return false;}
-            }return true;
-        };
-        // An obstructed route stops immediately; no repeated detour/heading changes.
-        return clear(heading)?heading:std::numeric_limits<float>::quiet_NaN();
+        }
+    }
+    MovementChoice steer(App& a,float heading,double travel){
+        CrowdBody self;self.id=a.crowdId;self.position={a.ground.position.x,a.ground.position.z};self.radius=radius(a);
+        // O(1) cached radii and at most four peers. No vertex scans, allocations,
+        // screen enumeration or full-path tests in the local avoidance planner.
+        for(size_t i=0;i<crowdCount;++i)if(crowdBodies[i].id==self.id){self.radius=crowdBodies[i].radius;break;}
+        const auto choice=a.crowd.step(self,std::span<const CrowdBody>(crowdBodies.data(),crowdCount),heading,travel,a.movementDt,
+            [&](float angle,double distance){return DesktopPath::stepAllowed(a.ground,angle,distance);});
+        return choice;
     }
     void placeNew(App& a){
         // Place newly loaded characters beside existing ones; keep the first actor's anchor.
@@ -96,13 +110,14 @@ struct Scene {
         }
     }
     void attach(App& a,bool first){
-        a.grouped=true;
+        a.grouped=true;a.crowdId=++crowdSerial;
         a.syncRequest=[this]{sync();};a.menuRequest=[this,&a]{roster.selected=a.actorId;save();leader().nativeSettings->show(leader().window,leader().directory);};
         a.closeRequest=[this,&a]{close(a.displayed?a.actorId:roster.selected);};
         a.tickCallback=[this]{tick();};a.settingsChanged=[this,&a]{changed(a);};
         a.followRequest=[this]{auto& a=selected();a.preferences.follow=!a.preferences.follow;if(a.preferences.follow){a.blockedCursor.reset();a.followPlanAt=0;a.interactionUntil=0;}a.preferences.save(a.settings->ini);changed(a);};
         a.avoidHeading=[this,&a](float yaw,double distance){return steer(a,yaw,distance);};
         a.depthRequest=[this]{orderDepth();};
+        if(first)a.sessionChanged=[this]{frameClock.reset(preciseSeconds());frameStatsAt=previousFrameAt=0;frameIntervals.clear();frameCosts.clear();armFrame();input.clear();input.lastKeyboard=0;const double now=preciseSeconds();for(auto& actor:actors){actor->lastTick=now;actor->nextRender=0;actor->pendingRender=false;actor->motionVelocity={};actor->motionRemaining=0;if(actor->renderer)actor->renderer->resume();}};
         a.clearJump=[this,&a](float yaw,double distance){
             const auto end=a.ground.step(yaw,float(distance));
             for(const auto& b:actors)if(b.get()!=&a&&b->displayed&&b->loaded){
@@ -145,6 +160,9 @@ struct Scene {
         };
         // Load sequentially: allocating five GLBs simultaneously would stall the desktop.
         input.pollKeyboard=false;input.enable(true);save();
+        frameTimer=CreateWaitableTimerExW(nullptr,nullptr,CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,TIMER_ALL_ACCESS);
+        if(!frameTimer)frameTimer=CreateWaitableTimerW(nullptr,FALSE,nullptr);
+        frameClock.reset(preciseSeconds());armFrame();
     }
     void activate(const std::string& id){
         auto* e=roster.find(id);if(!e)return;
@@ -161,7 +179,7 @@ struct Scene {
     void close(const std::string& id){
         const auto* entry=roster.find(id);if(!entry||!entry->active)return;
         if(roster.last(id)){
-            if(!review&&MessageBoxW(leader().nativeSettings->window?leader().nativeSettings->window:leader().window,
+            if(!review&&nativeMessageBox(leader().nativeSettings->window?leader().nativeSettings->window:leader().window,
                 L"这是最后一个角色。关闭后将退出桌宠程序，确定继续吗？",L"关闭角色",MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2)!=IDYES)return;
             roster.find(id)->active=false;save();stopping=true;PostQuitMessage(0);return;
         }
@@ -191,6 +209,7 @@ struct Scene {
         }
         if(type=="close_character"){close(roster.selected);return;}
         if(type=="import"){
+            NativeHealth::Pause dialogWait;
             wchar_t path[32768]{};OPENFILENAMEW dialog{sizeof(dialog)};dialog.hwndOwner=leader().nativeSettings->window;
             dialog.lpstrFilter=L"GLB 模型\0*.glb\0\0";dialog.lpstrFile=path;dialog.nMaxFile=32768;dialog.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR;
             if(GetOpenFileNameW(&dialog)){
@@ -207,52 +226,77 @@ struct Scene {
         }else leader().settingsMessage(j);
     }
     void tick(){
-        if(stopping)return;
+        if(stopping||leader().session.paused())return;
         const bool loading=std::any_of(actors.begin(),actors.end(),[](const auto& a){return a->displayed&&!a->loaded&&!a->done&&(!a->renderer||a->settings->importBusy);});
         if(!loading)for(const auto& entry:roster.entries)if(entry.active&&!find(entry.id)){
             auto child=std::make_unique<App>();child->directory=leader().directory;child->dataDirectory=leader().dataDirectory;child->model=wide(entry.path);child->actorId=entry.id;
             child->initialMode=entry.mode;child->smooth=leader().smooth;child->zoom=commonZoom();
             auto& a=*child;actors.push_back(std::move(child));try{attach(a,false);}catch(const std::exception& e){a.done=true;a.displayed=false;roster.find(entry.id)->active=false;error=e.what();save();sync();}break;
         }
+        snapshotCrowd();
         auto events=input.take(false,false,false);
         if(leader().state.settingsOpen)events.keyPressed=events.reload=events.mouseClick=events.windowClosed=false;
         const bool calling=std::any_of(actors.begin(),actors.end(),[](const auto& a){return a->displayed&&a->battleMode&&a->battle&&a->battle->phase==pet::Battle::Phase::Callsign;});
         std::vector<App*> candidates;
         if(events.mouseClick&&!calling)for(auto& a:actors)if(a->displayed&&a->loaded&&a->battleMode&&a->battle->canCallsign()&&!a->directed.jumping&&!a->state.settingsOpen)candidates.push_back(a.get());
         App* caller=candidates.empty()?nullptr:candidates[std::uniform_int_distribution<size_t>(0,candidates.size()-1)(leader().state.random)];
-        bool modesChanged=false,drew=false;
+        bool modesChanged=false;
         for(auto& a:actors)if(a->displayed){a->deferRendering=true;a->sharedEvents=events;a->sharedEvents.mouseClick=a.get()==caller;a->tick();
             if(a->loaded)if(auto* e=roster.find(a->actorId)){const auto mode=a->battleMode?"battle":"cafe";if(e->mode!=mode){e->mode=mode;modesChanged=true;}}
             if(stopping)break;}
-        std::vector<App*> renderActors;std::vector<std::function<void()>> jobs;
-        const double sampleAt=preciseSeconds();
-        if(!stopping)for(auto& a:actors)if(a->pendingRender&&a->window&&a->displayed&&a->loaded){
-            renderActors.push_back(a.get());jobs.emplace_back([renderer=a->renderer.get(),sampleAt]{renderer->prepareCpu(sampleAt);});
+        if(!stopping)separateCrowd();
+        if(modesChanged){save();sync();}
+        // Keep the leader's hidden host/menu; release other closed renderers.
+        for(size_t i=1;i<actors.size();)if(!actors[i]->displayed){actors[i]->destroyedCallback=actors[i]->depthRequest={};actors.erase(actors.begin()+i);}else ++i;
+        if(!frameTimer&&frameClock.due(preciseSeconds()))renderScene();
+    }
+    void armFrame(){
+        if(!frameTimer)return;LARGE_INTEGER due{};due.QuadPart=-std::max<LONGLONG>(1,std::llround((frameClock.next-preciseSeconds())*10000000));
+        if(!SetWaitableTimer(frameTimer,&due,0,nullptr,nullptr,FALSE))throw std::runtime_error("Cannot arm scene frame timer");
+    }
+    void renderScene(){
+        if(stopping||leader().session.paused())return;
+        const double sampleAt=preciseSeconds();std::vector<App*> renderActors;std::vector<std::function<void()>> jobs;
+        for(auto& a:actors)if(a->window&&a->displayed&&a->loaded){
+            a->presentState(true,sampleAt);renderActors.push_back(a.get());
+            jobs.emplace_back([renderer=a->renderer.get(),sampleAt]{renderer->prepareCpu(sampleAt);});
         }
-        const unsigned beforeWorkers=cpuJobs.count();
+        const unsigned beforeWorkers=cpuJobs.count();NativeHealth::mark("CPU animation batch");
         if(leader().serialCpu)for(const auto& job:jobs)job();else cpuJobs.run(jobs);
         if(cpuJobs.count()!=beforeWorkers)TraceLog(LOG_INFO,"FRAME CPU workers: %u; OpenGL and Win32 remain on the main thread",cpuJobs.count());
-        for(auto* a:renderActors){const auto before=a->renderedFrames;a->finishRender();drew|=a->renderedFrames!=before;}
-        if(modesChanged){save();sync();}
-        // Every actor flushes its FBO before readback and is presented through
-        // UpdateLayeredWindow. The hidden GLFW backbuffer is never displayed.
-        // The Win32 loop above already drains events; swapping that backbuffer
-        // adds a driver/compositor stall and can also consume WM_QUIT in GLFW.
-        orderDepth();if(drew)rlDrawRenderBatchActive();
-        // Keep the leader's hidden host timer/menu; release other closed renderers.
-        for(size_t i=1;i<actors.size();)if(!actors[i]->displayed){actors[i]->destroyedCallback=actors[i]->depthRequest={};actors.erase(actors.begin()+i);}else ++i;
+        bool drew=false;for(auto* a:renderActors){const auto before=a->renderedFrames;a->finishRender();drew|=a->renderedFrames!=before;}
+        NativeHealth::mark("depth order");orderDepth();if(drew)rlDrawRenderBatchActive();
+        const double finished=preciseSeconds();
+        if(!renderActors.empty()){
+            if(previousFrameAt)frameIntervals.push_back((finished-previousFrameAt)*1000);previousFrameAt=finished;
+            frameCosts.push_back((finished-sampleAt)*1000);if(!frameStatsAt)frameStatsAt=finished;
+            if(finished-frameStatsAt>=3&&!frameIntervals.empty()){
+                auto intervals=frameIntervals,costs=frameCosts;std::sort(intervals.begin(),intervals.end());std::sort(costs.begin(),costs.end());
+                const auto p95=[](const auto& v){return v[std::min(v.size()-1,size_t(std::ceil(v.size()*0.95)-1))];};
+                TraceLog(LOG_INFO,"PERF scene: actors=%zu FPS=%.1f interval p95=%.2f max=%.2f ms; frame CPU+GPU+Win32 p95=%.2f ms",renderActors.size(),frameIntervals.size()/(finished-frameStatsAt),p95(intervals),intervals.back(),p95(costs));
+                frameStatsAt=finished;frameIntervals.clear();frameCosts.clear();
+            }
+        }
+        frameClock.advance(finished);armFrame();
     }
     int run(){
-        MSG message{};auto& host=leader();
+        auto& host=leader();
         while(!stopping){
-            const auto wake=MsgWaitForMultipleObjectsEx(host.motionTimer?1:0,host.motionTimer?&host.motionTimer:nullptr,INFINITE,QS_ALLINPUT,MWMO_INPUTAVAILABLE);
+            NativeHealth::mark("message wait");
+            const bool paused=host.session.paused();DWORD wake;HANDLE waits[2]{};DWORD count=0;int motion=-1,frame=-1;
+            if(!paused){if(host.motionTimer){motion=int(count);waits[count++]=host.motionTimer;}if(frameTimer){frame=int(count);waits[count++]=frameTimer;}}
+            {NativeHealth::Pause idleWait;
+                wake=MsgWaitForMultipleObjectsEx(count,waits,500,QS_ALLINPUT,MWMO_INPUTAVAILABLE);}
             if(wake==WAIT_FAILED)throw std::runtime_error("Scene timer wait failed");
             // Drain input before expensive rendering, as in the stable raylib host.
-            while(PeekMessageW(&message,nullptr,0,0,PM_REMOVE)){
-                if(message.message==WM_QUIT){stopping=true;break;}if(host.nativeSettings&&host.nativeSettings->route(message))continue;TranslateMessage(&message);DispatchMessageW(&message);
+            if(!drainNativeMessages([&](MSG& message){NativeHealth::mark("message dispatch");
+                if(host.nativeSettings&&host.nativeSettings->route(message))return;TranslateMessage(&message);DispatchMessageW(&message);
+            }))stopping=true;
+            if(!stopping&&!host.session.paused()){
+                if(motion>=0&&(wake==WAIT_OBJECT_0+DWORD(motion)||WaitForSingleObject(host.motionTimer,0)==WAIT_OBJECT_0))tick();
+                if(!stopping&&frame>=0&&(wake==WAIT_OBJECT_0+DWORD(frame)||WaitForSingleObject(frameTimer,0)==WAIT_OBJECT_0))renderScene();
             }
-            if(!stopping&&host.motionTimer&&wake==WAIT_OBJECT_0)tick();
         }return host.exitCode;
     }
-    ~Scene(){cpuJobs.shutdown();input.enable(false);for(auto& a:actors){a->syncRequest=a->menuRequest=a->closeRequest=a->loadedCallback=a->destroyedCallback=a->tickCallback=a->settingsChanged=a->followRequest=a->depthRequest={};}actors.clear();}
+    ~Scene(){if(frameTimer){CancelWaitableTimer(frameTimer);CloseHandle(frameTimer);}cpuJobs.shutdown();input.enable(false);for(auto& a:actors){a->syncRequest=a->menuRequest=a->closeRequest=a->loadedCallback=a->destroyedCallback=a->tickCallback=a->settingsChanged=a->followRequest=a->depthRequest=a->sessionChanged={};}actors.clear();}
 };

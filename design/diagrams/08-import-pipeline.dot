@@ -1,0 +1,34 @@
+digraph G {
+graph [rankdir=TB, bgcolor="transparent", pad=0.35, nodesep=0.45, ranksep=0.65, fontname="Microsoft YaHei", fontsize=18, splines=polyline];
+node [shape=box, style="rounded,filled", fillcolor="#eef8fc", color="#7cafc3", fontcolor="#183848", fontname="Microsoft YaHei", fontsize=14, margin="0.18,0.15", width=3.8];
+edge [color="#7093a3", fontcolor="#47697b", fontname="Microsoft YaHei", fontsize=12, arrowsize=0.65];
+file [label="用户选择 GLB\n历史最多 15 条；显示最多 5 个"];
+validate [label="cgltf_parse / load_buffers / validate\nGLB 2.0；内嵌数据和 PNG/JPEG\n检查必需扩展与 accessor"];
+error [label="不支持 / 数据损坏\n显示导入错误；保留已显示模型",fillcolor="#fff0ef",color="#cc8c89"];
+nodes [label="保留完整父节点层级\n多套 Skin、inverseBindMatrices\n节点 TRS / matrix、原始 Morph"];
+tracks [label="读取原始关键帧\nSTEP / LINEAR / CUBICSPLINE\n不用 Blender 烘焙帧"];
+catalog [label="关键词 / 别名 / 动作组映射\n选择一致 family + group\n歧义记录警告、跳过少数动作"];
+parts [label="可选部件驱动检查\noptional + show/hide + 动画通道\n唯一塌缩 switch 面部保底"];
+spatial [label="测量与缓存\n尺寸归一、眼高、本体宽度\n待机每网格边界、动作包络、脚部制动"];
+caps [label="能力降级",shape=diamond,fillcolor="#fff5d9"];
+cafe [label="咖啡厅缺省映射\nIdle → 战斗 Idle / 首动作\nWalk → 战斗 Move；Pickup → Idle"];
+battle [label="战斗姿态必须 Idle + Attack\n优先 Normal；少姿态不参与随机\n无姿态：不提供战斗模式"];
+missing [label="可选动作不存在\nStart/End 跳过；Jump 不检查\n无 Delay 返回 Idle；无技能/换弹不触发"];
+runtime [label="生成/复用每角色 .bt.xml\n创建 Behavior 与 Battle\n原生模型就绪，进度 100%"];
+clip [label="运行帧\n采样 → 0.18s 内姿态混合\nMorph + 世界矩阵 + 蒙皮 → GPU"];
+file -> validate [label=""];
+validate -> error [label="校验失败"];
+validate -> nodes [label="合法"];
+nodes -> tracks [label=""];
+tracks -> catalog [label=""];
+catalog -> parts [label=""];
+parts -> spatial [label=""];
+spatial -> caps [label=""];
+caps -> cafe [label=""];
+caps -> battle [label=""];
+caps -> missing [label=""];
+cafe -> runtime [label=""];
+battle -> runtime [label=""];
+missing -> runtime [label=""];
+runtime -> clip [label=""];
+}

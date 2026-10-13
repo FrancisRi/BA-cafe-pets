@@ -1,0 +1,49 @@
+%% ba_cafe_lite native 0.2.5 · actual source snapshot
+flowchart TB
+  launch["单 EXE 启动器<br/>release_launcher.cpp<br/>解包缓存 → 启动原生核心"]
+  entry["wWinMain / GraphicsContext<br/>main.cpp<br/>隐藏 GLFW OpenGL 上下文"]
+  scene["Scene · 场景协调<br/>scene.h<br/>最多 5 个角色；深度排序与避让"]
+  input["NativeDesktopInput<br/>native_input.h / input_activity.h<br/>异步 Raw Input；连续输入宽限 3s"]
+  settings["NativeSettings + NativePreferences<br/>native_settings.h / native_preferences.h<br/>Win32 菜单；共享设置"]
+  roster["SceneRoster<br/>shared/scene_state.h<br/>历史 15 条；当前角色选择"]
+  app["App · 每角色宿主<br/>main.cpp<br/>模式、交互、行为、位置、渲染状态"]
+  cafe["BehaviorTree.CPP 咖啡厅树<br/>pet_behavior.h + template.bt.xml<br/>每角色 XML；热重载与安全 Idle"]
+  battle["pet::Battle 战斗状态机<br/>shared/pet_battle.h<br/>16 个 Phase；按能力降级"]
+  motion["公共移动与朝向<br/>PetGround / DirectedWalk<br/>CafeAttention / StopTurn / FootStop"]
+  geometry["DesktopGeometry / DesktopPath<br/>每网格待机边界；单屏停靠<br/>VisibleWindowEdges：可见窗口边"]
+  playback["pet::Playback<br/>clip / time / loop / generation<br/>动作请求与宿主位置汇入帧状态"]
+  model["GltfModel · 独立 cgltf 适配<br/>gltf_model.cpp / gltf_model.h<br/>原始 GLB；多 Skin 与 Morph"]
+  jobs["FrameJobs · 持久工作线程<br/>frame_jobs.h<br/>逐角色 CPU 动画 / 蒙皮"]
+  barrier["主线程等待全部 CPU 任务<br/>单角色内联计算<br/>完成后才上传/销毁模型"]
+  renderer["NativeRenderer<br/>native_renderer.cpp<br/>动态顶点上传 → 材质/线条绘制"]
+  fbo["紧凑 FBO + 至多 2× SSAA<br/>GPU 回读 RGBA<br/>缓存姿态范围、帧和命中区域"]
+  win["Win32 透明显示 + 输入窗<br/>UpdateLayeredWindow + alpha Region<br/>置顶；透明区域鼠标穿透"]
+  session["NativeSession + NativeLoop<br/>125 Hz 动作计时；60 FPS 绘制<br/>睡眠/锁屏/熄屏暂停；消息预算"]
+  health["NativeHealth · 诊断观察线程<br/>主线程无进展 ≥ 8s<br/>保存 hang.txt / hang.dmp"]
+  disk["本地数据<br/>settings.ini / characters.json<br/>behavior/*.bt.xml / logs/*"]
+  launch --> entry
+  entry --> scene
+  input -->|"输入事件"| scene
+  settings -->|"参数 / 导入 / 列表操作"| scene
+  roster -->|"显示角色"| scene
+  scene -->|"协调各角色"| app
+  session -->|"消息与计时"| scene
+  app -->|"咖啡厅"| cafe
+  app -->|"战斗"| battle
+  app --> motion
+  motion -->|"路径与落点检查"| geometry
+  cafe -->|"动作请求"| playback
+  battle -->|"动作请求"| playback
+  motion -->|"位置 / 朝向 / 覆盖动作"| playback
+  model -->|"各模型独占一个任务"| jobs
+  playback -->|"采样帧状态"| jobs
+  jobs -->|"全部 future 完成"| barrier
+  barrier --> renderer
+  renderer --> fbo
+  fbo --> win
+  win -.->|"本角色鼠标交互"| input
+  settings -.->|"保存 / 读取"| disk
+  roster -.->|"保存 / 读取"| disk
+  cafe -.->|"轮询 XML"| disk
+  health -.->|"诊断文件"| disk
+  health -.->|"观察阶段；不操作渲染"| scene

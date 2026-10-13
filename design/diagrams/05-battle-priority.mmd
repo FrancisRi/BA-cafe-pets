@@ -1,0 +1,45 @@
+%% ba_cafe_lite native 0.2.5 · actual source snapshot
+flowchart TB
+  event["本帧输入与当前阶段"]
+  buffer["先缓存请求<br/>攻击请求去重 ≥ 0.12s<br/>四个攻击阶段记录换弹请求"]
+  triple{"角色 1.2s 内三连击？"}
+  retire["设置 Death / Retreat / 返回咖啡厅"]
+  drag{"正在拖拽？"}
+  pickup["最高优先级 → Pickup<br/>清理技能/换弹；拖动立即返回"]
+  drop{"刚结束拖拽？"}
+  reset["回首个姿态 Idle<br/>清理被打断技能状态"]
+  close{"存在其他应用关窗请求？<br/>非 Jump、非退场、非胜利"}
+  victory["VictoryStart / VictoryEnd<br/>Jump 中请求延后到落地"]
+  menu{"菜单打开且不在 Jump？"}
+  hold["暂停行为<br/>Jump 保持动画与移动"]
+  special{"当前是 EX / 退场 / 胜利？"}
+  specialRun["推进对应动画并处理结束<br/>不尝试新的 EX / 常规状态条件"]
+  ex{"输入活跃；EX 计时达阈值？<br/>非 Jump、非 Reload"}
+  try{"存在 Exs 且概率成功？"}
+  skill["保存普通状态 → Skill"]
+  normal["常规 Phase 分支<br/>Idle：攻击 > 指挥 > 走动<br/>AttackDelay：换弹 > 收枪 > 攻击"]
+  reload["Reload 特例<br/>屏蔽键盘/换弹，不缓存攻击<br/>拖拽、三连击和关窗仍可打断"]
+  jump["Jump 输入延后<br/>跟随 Jump：宿主缓存按键/换弹/关窗<br/>普通 Jump：攻击缓存、关窗延后"]
+  event --> buffer
+  buffer --> triple
+  triple -->|"是"| retire
+  triple -->|"否"| drag
+  retire -->|"拖拽仍可覆盖"| drag
+  drag -->|"是"| pickup
+  drag -->|"否"| drop
+  drop -->|"是"| reset
+  drop -->|"否"| close
+  reset --> close
+  close -->|"是"| victory
+  close -->|"否"| menu
+  victory --> menu
+  menu -->|"是"| hold
+  menu -->|"否"| special
+  special -->|"是"| specialRun
+  special -->|"否"| ex
+  ex -->|"是；计时归零"| try
+  ex -->|"否"| normal
+  try -->|"是"| skill
+  try -->|"否"| normal
+  reload -.->|"屏蔽键盘请求"| buffer
+  jump -.->|"延后普通请求"| close

@@ -1,0 +1,38 @@
+%% ba_cafe_lite native 0.2.5 · actual source snapshot
+flowchart TB
+  start["启动 / 导入 GLB"]
+  cap["分析动作能力<br/>咖啡厅映射；战斗姿态集合"]
+  mode{"选择角色模式"}
+  cafe["咖啡厅行为树<br/>拖拽 → 点击 → 返回起点<br/>散步 → Cafe_Idle"]
+  battle["战斗状态机<br/>Idle / Move / Attack / Reload<br/>Callsign / EX / Victory / Retreat"]
+  input["输入观测<br/>3s 宽限 → inputActive<br/>持续计时 / 无输入计时"]
+  follow["位置跟随覆盖<br/>仅基础 Idle + 输入活跃<br/>区间外启动，停在中点"]
+  dock["待机单屏停靠<br/>固定目标；避免 Idle 跨屏"]
+  look["咖啡厅视线覆盖<br/>持续输入达到阈值<br/>平滑转身 / 30° 阈值转身"]
+  integrate["宿主整合当前帧<br/>曲线朝向、脚部减速<br/>碰撞停止、透视大小、深度排序"]
+  render["原生渲染与透明窗口<br/>CPU 蒙皮 → GPU → Win32"]
+  pause["暂停门<br/>睡眠 / 锁屏 / 熄屏：全部暂停<br/>菜单：行为暂停；Jump 继续"]
+  resume["恢复桌面<br/>重置帧计时与缓存<br/>继续当前动作"]
+  interact["用户交互<br/>左拖移动；右拖旋转；滚轮缩放<br/>右键点击菜单"]
+  exit["退出<br/>红色退出 / 快捷键<br/>关闭最后角色须确认"]
+  start --> cap
+  cap -->|"无战斗姿态只保留咖啡厅"| mode
+  mode -->|"cafe"| cafe
+  mode -->|"battle；有战斗能力"| battle
+  input --> cafe
+  input --> battle
+  input --> follow
+  input --> look
+  cafe -->|"1.2s 内角色三连击；有战斗能力"| battle
+  battle -->|"死亡/退场结束；或菜单切模式"| cafe
+  cafe --> integrate
+  battle --> integrate
+  follow --> integrate
+  dock --> integrate
+  look --> integrate
+  integrate --> render
+  interact -->|"强制交互 / 缩放"| integrate
+  interact -->|"打开菜单"| pause
+  pause -->|"桌面可用 / 关闭菜单"| resume
+  resume -->|"按现有模式继续"| mode
+  interact -->|"明确退出或关闭最后角色"| exit

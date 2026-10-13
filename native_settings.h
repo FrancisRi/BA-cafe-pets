@@ -11,6 +11,7 @@ struct NativeSettings {
  struct Control{Field field;HWND input{},label{};bool checked=false;};std::vector<Control> controls;std::vector<HWND> content;
  Json last;int page=0,scroll=0,contentHeight=0;bool syncing=false;std::string highlighted;
  std::filesystem::path defaultsFile;
+ std::unique_ptr<NativeHealth::Pause> moveWait;
  static constexpr int MenuWidth=740;
  static int u(int value){return MulDiv(value,3,2);} // Menu text and spacing +50%.
  inline static const Field fields[]={
@@ -75,11 +76,11 @@ struct NativeSettings {
   }receive({{"type","save"},{"value",value}});sync();
  }
  void command(int id,int code){
-  if(syncing)return;if(id==1){hide();return;}if(id==2){receive({{"type","exit"}});return;}if(id==3){MessageBoxW(window,L"右键点击设置 · 右键拖动旋转 · 左键拖拽 · 滚轮缩放\n中键拖动也可旋转；右键拖动后松开不会打开菜单。\n\n咖啡厅：点击反应；持续输入后可追踪鼠标；无输入后散步。\n战斗：按键攻击；句号、回车、分号、问号请求换弹；持续输入可短走或 EX。\n三连击：咖啡厅进入战斗，战斗退场。拖拽优先打断。",L"使用说明",MB_OK);return;}
+  if(syncing)return;if(id==1){hide();return;}if(id==2){receive({{"type","exit"}});return;}if(id==3){nativeMessageBox(window,L"右键点击设置 · 右键拖动旋转 · 左键拖拽 · 滚轮缩放\n中键拖动也可旋转；右键拖动后松开不会打开菜单。\n\n咖啡厅：点击反应；持续输入后可追踪鼠标；无输入后散步。\n战斗：按键攻击；句号、回车、分号、问号请求换弹；持续输入可短走或 EX。\n三连击：咖啡厅进入战斗，战斗退场。拖拽优先打断。",L"使用说明",MB_OK);return;}
   if(id>=1000&&id<1004){page=id-1000;build();return;}if(id>=100&&id<100+int(std::size(fields))&&(code==BN_CLICKED||code==CBN_SELCHANGE||code==EN_KILLFOCUS)){if(code==BN_CLICKED)for(auto& c:controls)if(c.input==GetDlgItem(panel,id)&&c.field.kind==0)c.checked=!c.checked;save();return;}
   if(id==2000&&code==LBN_SELCHANGE){const int selected=int(SendMessageW(list,LB_GETCURSEL,0,0));if(selected>=0&&selected<int(last["characters"].size()))highlighted=last["characters"][selected]["id"];update();return;}
   if(id==2103){receive({{"type","uniform_size"}});return;}if(id==2104){receive({{"type","close_character"}});return;}
-  if(id>=2100&&id<=2102){const int selected=int(SendMessageW(list,LB_GETCURSEL,0,0));if(selected<0)return;const auto row=last["characters"][selected];if(id==2100)receive({{"type","roster_toggle"},{"id",row["id"]},{"active",!row.value("active",false)}});else if(id==2101)receive({{"type","roster_select"},{"id",row["id"]}});else if((row.value("active",false)&&last.value("activeCount",0)==1)||MessageBoxW(window,L"从历史列表移除该角色？原始 GLB 文件保留。",L"删除角色",MB_YESNO|MB_DEFBUTTON2)==IDYES)receive({{"type","roster_remove"},{"id",row["id"]}});return;}
+  if(id>=2100&&id<=2102){const int selected=int(SendMessageW(list,LB_GETCURSEL,0,0));if(selected<0)return;const auto row=last["characters"][selected];if(id==2100)receive({{"type","roster_toggle"},{"id",row["id"]},{"active",!row.value("active",false)}});else if(id==2101)receive({{"type","roster_select"},{"id",row["id"]}});else if((row.value("active",false)&&last.value("activeCount",0)==1)||nativeMessageBox(window,L"从历史列表移除该角色？原始 GLB 文件保留。",L"删除角色",MB_YESNO|MB_DEFBUTTON2)==IDYES)receive({{"type","roster_remove"},{"id",row["id"]}});return;}
   if(id==2200){receive({{"type","import"}});return;}
   if(id==2201){auto value=last["value"];NativePreferences defaults;const auto ini=defaultsFile.wstring();defaults.load(ini);value.update(defaults.json());value.update({{"look",GetPrivateProfileIntW(L"Behavior",L"Tracking",1,ini.c_str())!=0},{"idleSeconds",std::clamp(int(GetPrivateProfileIntW(L"Behavior",L"InputIdleSeconds",60,ini.c_str())),1,3600)},{"activeSeconds",std::clamp(int(GetPrivateProfileIntW(L"Behavior",L"ContinuedInputSeconds",30,ini.c_str())),1,3600)}});receive({{"type","save"},{"value",value}});sync();}
  }
@@ -98,6 +99,8 @@ struct NativeSettings {
  }
  bool route(MSG& message){if(!window||!IsWindowVisible(window)||(message.hwnd!=window&&!IsChild(window,message.hwnd)))return false;if(message.message==WM_KEYDOWN){if(message.wParam==VK_ESCAPE){hide();return true;}if(message.wParam==VK_TAB)return IsDialogMessageW(window,&message)!=FALSE;if(message.wParam==VK_RETURN){wchar_t cls[30]{};GetClassNameW(message.hwnd,cls,30);if(!std::wcscmp(cls,L"EDIT")){save();SetFocus(window);return true;}}}return false;}
  static LRESULT CALLBACK proc(HWND hwnd,UINT message,WPARAM w,LPARAM l){auto* self=reinterpret_cast<NativeSettings*>(GetWindowLongPtrW(hwnd,GWLP_USERDATA));if(message==WM_NCCREATE){self=static_cast<NativeSettings*>(reinterpret_cast<CREATESTRUCTW*>(l)->lpCreateParams);SetWindowLongPtrW(hwnd,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(self));}if(!self)return DefWindowProcW(hwnd,message,w,l);
+  if(message==WM_ENTERSIZEMOVE){self->moveWait=std::make_unique<NativeHealth::Pause>();return 0;}
+  if(message==WM_EXITSIZEMOVE){self->moveWait.reset();return 0;}
   if(message==WM_CLOSE){self->hide();return 0;}if(message==WM_SIZE&&hwnd==self->window&&self->panel){self->layout();return 0;}
   if(message==WM_COMMAND){self->command(LOWORD(w),HIWORD(w));return 0;}
   if(message==WM_HSCROLL){self->save();return 0;}

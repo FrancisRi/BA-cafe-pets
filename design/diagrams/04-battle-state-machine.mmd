@@ -1,0 +1,59 @@
+%% ba_cafe_lite native 0.2.5 · actual source snapshot
+flowchart TB
+  entry["进入战斗 / 拖拽松开 / 胜利完成<br/>选首个可用姿态；ready=false"]
+  Idle["Idle · 姿态_Idle<br/>循环；键盘、点击指挥、走动入口"]
+  Moving["Moving · Move_Ing 循环<br/>战斗速度 = 0.792 × zoom × 3<br/>输入走动距离 = 正常的 50%"]
+  Jump["Jump · Move_Jump 单次<br/>提前起跳；边界位于动作中点<br/>保持方向、速度与连续位移"]
+  MoveEnd["MoveEnd · Move_End_姿态<br/>随机选择可用姿态；末段曲线转向<br/>按脚部采样减速至站稳"]
+  AttackStart["AttackStart · 姿态_Attack_Start<br/>准备攻击；保留首次攻击请求"]
+  Attack["Attack · 姿态_Attack_Ing<br/>播放一次；重复按键可缓存"]
+  AttackDelay["AttackDelay · 姿态_Attack_Delay<br/>循环等待；优先处理换弹请求"]
+  AttackEnd["AttackEnd · 姿态_Attack_End<br/>收枪；可携带 reloadPending"]
+  Reload["Reload · 姿态_Reload<br/>或姿态_Attack_Reload；单次<br/>忽略键盘及换弹；清理攻击缓存"]
+  Callsign["Callsign · 姿态_Callsign 单次<br/>按追踪开关面向鼠标<br/>全场随机一名候选再掷概率"]
+  Pickup["Pickup · Formation_Pickup 循环<br/>缺少时用首姿态 Idle<br/>拖拽覆盖任何战斗状态"]
+  Skill["Skill · Exs 单次<br/>保存阶段、动作时间、剩余行走<br/>结束恢复保存状态"]
+  VictoryStart["VictoryStart · Victory_Start 单次<br/>强制面向屏幕"]
+  VictoryEnd["VictoryEnd · Victory_End × 3<br/>全过程强制面向屏幕"]
+  Death["Death · Vital_Death 单次"]
+  Retreat["Retreat · Vital_Retreat 单次<br/>显示方向 +180°；上升屏幕外<br/>位移按 t² 先慢后快"]
+  cafe["退出战斗 → 咖啡厅"]
+  interrupt["跨状态入口<br/>见优先级图"]
+  saved["被 EX 打断的普通状态<br/>及其播放进度"]
+  entry --> Idle
+  Idle -->|"按键或已缓存按键；存在 Start"| AttackStart
+  Idle -->|"按键；缺少 Start"| Attack
+  AttackStart -->|"准备结束；执行首次攻击"| Attack
+  Attack -->|"攻击完成；若缺 Delay 则 Idle"| AttackDelay
+  AttackDelay -->|"新按键 / 缓存攻击"| Attack
+  AttackDelay -->|"无键盘 ≥ keyboardIdle"| AttackEnd
+  AttackDelay -->|"有换弹请求且存在 End"| AttackEnd
+  AttackDelay -->|"换弹请求；缺少 End"| Reload
+  AttackEnd -->|"结束后有请求且存在 Reload"| Reload
+  AttackEnd -->|"结束后无换弹请求"| Idle
+  Reload -->|"单次结束"| Idle
+  Idle -->|"鼠标抬键事件；当选且概率成功"| Callsign
+  Callsign -->|"结束；保持选中姿态"| Idle
+  Idle -->|"允许走动；间隔到期 + 输入/无输入条件"| Moving
+  Moving -->|"可跨越屏幕/可见窗口；存在 Jump"| Jump
+  Jump -->|"落地后仍有路程且允许走动"| Moving
+  Jump -->|"落地后路程完成或走动关闭"| MoveEnd
+  Moving -->|"走完 / 禁用自动走动"| MoveEnd
+  MoveEnd -->|"站稳且结束动作完成；缺 End 用 Walk 制动"| Idle
+  interrupt -->|"拖拽"| Pickup
+  Pickup -->|"松开 / 取消拖拽"| entry
+  interrupt -->|"持续输入；EX 概率成功"| Skill
+  saved -.->|"保存"| Skill
+  Skill -.->|"播放完成：恢复"| saved
+  interrupt -->|"其他应用窗口关闭；有 Start"| VictoryStart
+  interrupt -->|"窗口关闭；缺 Start、有 End"| VictoryEnd
+  VictoryStart -->|"Start 完成；有 End"| VictoryEnd
+  VictoryStart -->|"缺少 End"| entry
+  VictoryEnd -->|"已播放次数 < 3"| VictoryEnd
+  VictoryEnd -->|"第 3 次结束"| entry
+  interrupt -->|"角色三连击；有 Death"| Death
+  interrupt -->|"三连击；缺 Death、有 Retreat"| Retreat
+  interrupt -->|"三连击；两者都无"| cafe
+  Death -->|"死亡结束；有 Retreat"| Retreat
+  Death -->|"缺 Retreat"| cafe
+  Retreat -->|"退场结束"| cafe

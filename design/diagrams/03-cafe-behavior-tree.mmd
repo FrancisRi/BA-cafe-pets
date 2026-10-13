@@ -1,0 +1,31 @@
+%% ba_cafe_lite native 0.2.5 · actual source snapshot
+flowchart TB
+  root{"ReactiveFallback<br/>每次 tick 按 1 → 6 检查"}
+  drag["1 · ReactiveSequence<br/>IsDragging → LoopAnimation<br/>Formation_Pickup"]
+  click["2 · Sequence<br/>HasPendingClick → PlayAnimation<br/>Cafe_Reaction；消费一次点击"]
+  home["3 · ReturnHome<br/>散步后恢复输入且未开启位置跟随<br/>Cafe_Walk；直线返回本轮起点"]
+  legacy["4 · 旧视线 Sequence（未启用）<br/>ActiveInputChance → FaceCursor<br/>原生宿主 trackingEnabled=false"]
+  wander{"5 · ReactiveSequence<br/>UserInactive 达标 + 允许散步"}
+  cooldown["Sequence<br/>IdleCooldownReady<br/>间隔 × 随机时间幅度"]
+  walk["WalkRandom → Cafe_Walk<br/>8 方向加权选择；距离带随机<br/>上行权重 0.4、路程倍率 2.5"]
+  idle["6 · LoopAnimation<br/>Cafe_Idle<br/>纯待机动画速度 75%"]
+  finish["单次动作 / 返回 / 散步完成<br/>重置冷却，重新从根节点评估"]
+  cap["导入时按能力修剪<br/>无 Reaction：移除点击分支<br/>无 Walk：移除返程和散步分支"]
+  override["宿主覆盖层（见移动/视线图）<br/>输入活跃 + 位置跟随会抑制随机散步<br/>跟随仍以基础 Idle 为宿主状态"]
+  fallback["XML 每 0.5s 检查更新<br/>无效更新保留旧树<br/>首次无效 / 执行异常 → SafeIdle"]
+  root -->|"1"| drag
+  root -->|"2"| click
+  root -->|"3"| home
+  root -.->|"4"| legacy
+  root -->|"5"| wander
+  root -->|"6"| idle
+  wander -->|"无输入 ≥ input_idle"| cooldown
+  cooldown -->|"待机冷却达到间隔"| walk
+  drag -->|"松开/取消拖拽"| root
+  click -->|"动作结束"| finish
+  home -->|"到达起点；面向屏幕"| finish
+  walk -->|"路程完成 / 输入恢复中断"| finish
+  finish --> root
+  cap -.->|"动作映射与修剪"| root
+  override -.->|"宿主约束"| root
+  fallback -.->|"安全待机"| idle

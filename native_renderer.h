@@ -8,6 +8,7 @@ class NativeRenderer {
     int width=0,height=0;float scale=2;uint64_t generation=UINT64_MAX;double sampledAt=0;
     double statsAt=0,meshMs=0,readMs=0,presentMs=0,maskMs=0,layerMs=0;unsigned frames=0;
     double smallCropAt=0;int smallCropWidth=0,smallCropHeight=0;
+    uint64_t shrunkGeneration=UINT64_MAX;
     unsigned reusedFrames=0,reusedMasks=0;double changedMeshes=0;
     HFONT hintFont{};std::vector<RECT> inputRegion;std::vector<unsigned char> regionBytes;
     HWND regionWindow{};int regionWidth=0,regionHeight=0;
@@ -25,6 +26,7 @@ public:
     NativeRenderer();~NativeRenderer();
     void load(const std::filesystem::path&,const std::function<void(int,const std::string&)>&);
     void prepareCpu(double now); // No OpenGL, HWND or shared raylib state.
+    void resume(){sampledAt=statsAt=0;cpuPrepared=frameValid=false;frames=reusedFrames=reusedMasks=0;meshMs=readMs=presentMs=maskMs=layerMs=changedMeshes=uploadMs=0;}
     void render(HWND display,HWND input,bool screenshot=false,const std::filesystem::path& output={});
 };
 }

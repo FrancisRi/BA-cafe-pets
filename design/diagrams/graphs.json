@@ -1,0 +1,1842 @@
+[
+  {
+    "key": "01-architecture",
+    "title": "代码框架与线程边界",
+    "description": "每个角色独立保存动作与位置；所有角色共享输入、设置和历史。只有 CPU 动画/蒙皮并行，OpenGL 与 Win32 提交始终在主线程。",
+    "nodes": [
+      {
+        "id": "launch",
+        "label": "单 EXE 启动器\nrelease_launcher.cpp\n解包缓存 → 启动原生核心",
+        "kind": "state"
+      },
+      {
+        "id": "entry",
+        "label": "wWinMain / GraphicsContext\nmain.cpp\n隐藏 GLFW OpenGL 上下文",
+        "kind": "state"
+      },
+      {
+        "id": "scene",
+        "label": "Scene · 场景协调\nscene.h\n最多 5 个角色；深度排序与避让",
+        "kind": "state"
+      },
+      {
+        "id": "input",
+        "label": "NativeDesktopInput\nnative_input.h / input_activity.h\n异步 Raw Input；连续输入宽限 3s",
+        "kind": "state"
+      },
+      {
+        "id": "settings",
+        "label": "NativeSettings + NativePreferences\nnative_settings.h / native_preferences.h\nWin32 菜单；共享设置",
+        "kind": "state"
+      },
+      {
+        "id": "roster",
+        "label": "SceneRoster\nshared/scene_state.h\n历史 15 条；当前角色选择",
+        "kind": "state"
+      },
+      {
+        "id": "app",
+        "label": "App · 每角色宿主\nmain.cpp\n模式、交互、行为、位置、渲染状态",
+        "kind": "state"
+      },
+      {
+        "id": "cafe",
+        "label": "BehaviorTree.CPP 咖啡厅树\npet_behavior.h + template.bt.xml\n每角色 XML；热重载与安全 Idle",
+        "kind": "state"
+      },
+      {
+        "id": "battle",
+        "label": "pet::Battle 战斗状态机\nshared/pet_battle.h\n16 个 Phase；按能力降级",
+        "kind": "state"
+      },
+      {
+        "id": "motion",
+        "label": "公共移动与朝向\nPetGround / DirectedWalk\nCafeAttention / StopTurn / FootStop",
+        "kind": "state"
+      },
+      {
+        "id": "geometry",
+        "label": "DesktopGeometry / DesktopPath\n每网格待机边界；单屏停靠\nVisibleWindowEdges：可见窗口边",
+        "kind": "state"
+      },
+      {
+        "id": "playback",
+        "label": "pet::Playback\nclip / time / loop / generation\n动作请求与宿主位置汇入帧状态",
+        "kind": "state"
+      },
+      {
+        "id": "model",
+        "label": "GltfModel · 独立 cgltf 适配\ngltf_model.cpp / gltf_model.h\n原始 GLB；多 Skin 与 Morph",
+        "kind": "state"
+      },
+      {
+        "id": "jobs",
+        "label": "FrameJobs · 持久工作线程\nframe_jobs.h\n逐角色 CPU 动画 / 蒙皮",
+        "kind": "state"
+      },
+      {
+        "id": "barrier",
+        "label": "主线程等待全部 CPU 任务\n单角色内联计算\n完成后才上传/销毁模型",
+        "kind": "state"
+      },
+      {
+        "id": "renderer",
+        "label": "NativeRenderer\nnative_renderer.cpp\n动态顶点上传 → 材质/线条绘制",
+        "kind": "state"
+      },
+      {
+        "id": "fbo",
+        "label": "紧凑 FBO + 至多 2× SSAA\nGPU 回读 RGBA\n缓存姿态范围、帧和命中区域",
+        "kind": "state"
+      },
+      {
+        "id": "win",
+        "label": "Win32 透明显示 + 输入窗\nUpdateLayeredWindow + alpha Region\n置顶；透明区域鼠标穿透",
+        "kind": "state"
+      },
+      {
+        "id": "session",
+        "label": "NativeSession + NativeLoop\n125 Hz 动作计时；60 FPS 绘制\n睡眠/锁屏/熄屏暂停；消息预算",
+        "kind": "state"
+      },
+      {
+        "id": "health",
+        "label": "NativeHealth · 诊断观察线程\n主线程无进展 ≥ 8s\n保存 hang.txt / hang.dmp",
+        "kind": "state"
+      },
+      {
+        "id": "disk",
+        "label": "本地数据\nsettings.ini / characters.json\nbehavior/*.bt.xml / logs/*",
+        "kind": "data"
+      }
+    ],
+    "edges": [
+      {
+        "source": "launch",
+        "target": "entry",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "entry",
+        "target": "scene",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "input",
+        "target": "scene",
+        "label": "输入事件",
+        "kind": "normal"
+      },
+      {
+        "source": "settings",
+        "target": "scene",
+        "label": "参数 / 导入 / 列表操作",
+        "kind": "normal"
+      },
+      {
+        "source": "roster",
+        "target": "scene",
+        "label": "显示角色",
+        "kind": "normal"
+      },
+      {
+        "source": "scene",
+        "target": "app",
+        "label": "协调各角色",
+        "kind": "normal"
+      },
+      {
+        "source": "session",
+        "target": "scene",
+        "label": "消息与计时",
+        "kind": "normal"
+      },
+      {
+        "source": "app",
+        "target": "cafe",
+        "label": "咖啡厅",
+        "kind": "normal"
+      },
+      {
+        "source": "app",
+        "target": "battle",
+        "label": "战斗",
+        "kind": "normal"
+      },
+      {
+        "source": "app",
+        "target": "motion",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "motion",
+        "target": "geometry",
+        "label": "路径与落点检查",
+        "kind": "normal"
+      },
+      {
+        "source": "cafe",
+        "target": "playback",
+        "label": "动作请求",
+        "kind": "normal"
+      },
+      {
+        "source": "battle",
+        "target": "playback",
+        "label": "动作请求",
+        "kind": "normal"
+      },
+      {
+        "source": "motion",
+        "target": "playback",
+        "label": "位置 / 朝向 / 覆盖动作",
+        "kind": "normal"
+      },
+      {
+        "source": "model",
+        "target": "jobs",
+        "label": "各模型独占一个任务",
+        "kind": "normal"
+      },
+      {
+        "source": "playback",
+        "target": "jobs",
+        "label": "采样帧状态",
+        "kind": "normal"
+      },
+      {
+        "source": "jobs",
+        "target": "barrier",
+        "label": "全部 future 完成",
+        "kind": "normal"
+      },
+      {
+        "source": "barrier",
+        "target": "renderer",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "renderer",
+        "target": "fbo",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "fbo",
+        "target": "win",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "win",
+        "target": "input",
+        "label": "本角色鼠标交互",
+        "kind": "dashed"
+      },
+      {
+        "source": "settings",
+        "target": "disk",
+        "label": "保存 / 读取",
+        "kind": "dashed"
+      },
+      {
+        "source": "roster",
+        "target": "disk",
+        "label": "保存 / 读取",
+        "kind": "dashed"
+      },
+      {
+        "source": "cafe",
+        "target": "disk",
+        "label": "轮询 XML",
+        "kind": "dashed"
+      },
+      {
+        "source": "health",
+        "target": "disk",
+        "label": "诊断文件",
+        "kind": "dashed"
+      },
+      {
+        "source": "health",
+        "target": "scene",
+        "label": "观察阶段；不操作渲染",
+        "kind": "dashed"
+      }
+    ],
+    "sources": [
+      "main.cpp",
+      "scene.h",
+      "gltf_model.cpp",
+      "native_renderer.cpp",
+      "frame_jobs.h",
+      "native_session.h",
+      "native_loop.h",
+      "native_health.h"
+    ],
+    "direction": "TB"
+  },
+  {
+    "key": "02-behavior-overview",
+    "title": "角色行为总览",
+    "description": "行为并非一棵大树：咖啡厅由行为树决定基础动作；战斗由状态机决定；跟随、停靠、视线追踪在宿主中覆盖显示或移动。",
+    "nodes": [
+      {
+        "id": "start",
+        "label": "启动 / 导入 GLB",
+        "kind": "state"
+      },
+      {
+        "id": "cap",
+        "label": "分析动作能力\n咖啡厅映射；战斗姿态集合",
+        "kind": "state"
+      },
+      {
+        "id": "mode",
+        "label": "选择角色模式",
+        "kind": "decision"
+      },
+      {
+        "id": "cafe",
+        "label": "咖啡厅行为树\n拖拽 → 点击 → 返回起点\n散步 → Cafe_Idle",
+        "kind": "state"
+      },
+      {
+        "id": "battle",
+        "label": "战斗状态机\nIdle / Move / Attack / Reload\nCallsign / EX / Victory / Retreat",
+        "kind": "state"
+      },
+      {
+        "id": "input",
+        "label": "输入观测\n3s 宽限 → inputActive\n持续计时 / 无输入计时",
+        "kind": "state"
+      },
+      {
+        "id": "follow",
+        "label": "位置跟随覆盖\n仅基础 Idle + 输入活跃\n区间外启动，停在中点",
+        "kind": "state"
+      },
+      {
+        "id": "dock",
+        "label": "待机单屏停靠\n固定目标；避免 Idle 跨屏",
+        "kind": "state"
+      },
+      {
+        "id": "look",
+        "label": "咖啡厅视线覆盖\n持续输入达到阈值\n平滑转身 / 30° 阈值转身",
+        "kind": "state"
+      },
+      {
+        "id": "integrate",
+        "label": "宿主整合当前帧\n曲线朝向、脚部减速\n碰撞停止、透视大小、深度排序",
+        "kind": "state"
+      },
+      {
+        "id": "render",
+        "label": "原生渲染与透明窗口\nCPU 蒙皮 → GPU → Win32",
+        "kind": "state"
+      },
+      {
+        "id": "pause",
+        "label": "暂停门\n睡眠 / 锁屏 / 熄屏：全部暂停\n菜单：行为暂停；Jump 继续",
+        "kind": "state"
+      },
+      {
+        "id": "resume",
+        "label": "恢复桌面\n重置帧计时与缓存\n继续当前动作",
+        "kind": "state"
+      },
+      {
+        "id": "interact",
+        "label": "用户交互\n左拖移动；右拖旋转；滚轮缩放\n右键点击菜单",
+        "kind": "state"
+      },
+      {
+        "id": "exit",
+        "label": "退出\n红色退出 / 快捷键\n关闭最后角色须确认",
+        "kind": "exit"
+      }
+    ],
+    "edges": [
+      {
+        "source": "start",
+        "target": "cap",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "cap",
+        "target": "mode",
+        "label": "无战斗姿态只保留咖啡厅",
+        "kind": "normal"
+      },
+      {
+        "source": "mode",
+        "target": "cafe",
+        "label": "cafe",
+        "kind": "normal"
+      },
+      {
+        "source": "mode",
+        "target": "battle",
+        "label": "battle；有战斗能力",
+        "kind": "normal"
+      },
+      {
+        "source": "input",
+        "target": "cafe",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "input",
+        "target": "battle",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "input",
+        "target": "follow",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "input",
+        "target": "look",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "cafe",
+        "target": "battle",
+        "label": "1.2s 内角色三连击；有战斗能力",
+        "kind": "normal"
+      },
+      {
+        "source": "battle",
+        "target": "cafe",
+        "label": "死亡/退场结束；或菜单切模式",
+        "kind": "normal"
+      },
+      {
+        "source": "cafe",
+        "target": "integrate",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "battle",
+        "target": "integrate",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "follow",
+        "target": "integrate",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "dock",
+        "target": "integrate",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "look",
+        "target": "integrate",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "integrate",
+        "target": "render",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "interact",
+        "target": "integrate",
+        "label": "强制交互 / 缩放",
+        "kind": "normal"
+      },
+      {
+        "source": "interact",
+        "target": "pause",
+        "label": "打开菜单",
+        "kind": "normal"
+      },
+      {
+        "source": "pause",
+        "target": "resume",
+        "label": "桌面可用 / 关闭菜单",
+        "kind": "normal"
+      },
+      {
+        "source": "resume",
+        "target": "mode",
+        "label": "按现有模式继续",
+        "kind": "normal"
+      },
+      {
+        "source": "interact",
+        "target": "exit",
+        "label": "明确退出或关闭最后角色",
+        "kind": "normal"
+      }
+    ],
+    "sources": [
+      "main.cpp:App::tick / presentState",
+      "scene.h:Scene::tick / message",
+      "shared/pet_behavior.h",
+      "shared/pet_battle.h"
+    ],
+    "direction": "TB"
+  },
+  {
+    "key": "03-cafe-behavior-tree",
+    "title": "咖啡厅行为树 · 实际运行分支",
+    "description": "ReactiveFallback 按编号顺序选择，前面的有效分支可打断后面的运行分支。模板中旧概率视线分支仍存在，但原生宿主调用树时关闭 trackingEnabled，实际视线由 CafeAttention 处理。",
+    "nodes": [
+      {
+        "id": "root",
+        "label": "ReactiveFallback\n每次 tick 按 1 → 6 检查",
+        "kind": "decision"
+      },
+      {
+        "id": "drag",
+        "label": "1 · ReactiveSequence\nIsDragging → LoopAnimation\nFormation_Pickup",
+        "kind": "state"
+      },
+      {
+        "id": "click",
+        "label": "2 · Sequence\nHasPendingClick → PlayAnimation\nCafe_Reaction；消费一次点击",
+        "kind": "state"
+      },
+      {
+        "id": "home",
+        "label": "3 · ReturnHome\n散步后恢复输入且未开启位置跟随\nCafe_Walk；直线返回本轮起点",
+        "kind": "state"
+      },
+      {
+        "id": "legacy",
+        "label": "4 · 旧视线 Sequence（未启用）\nActiveInputChance → FaceCursor\n原生宿主 trackingEnabled=false",
+        "kind": "inactive"
+      },
+      {
+        "id": "wander",
+        "label": "5 · ReactiveSequence\nUserInactive 达标 + 允许散步",
+        "kind": "decision"
+      },
+      {
+        "id": "cooldown",
+        "label": "Sequence\nIdleCooldownReady\n间隔 × 随机时间幅度",
+        "kind": "state"
+      },
+      {
+        "id": "walk",
+        "label": "WalkRandom → Cafe_Walk\n8 方向加权选择；距离带随机\n上行权重 0.4、路程倍率 2.5",
+        "kind": "state"
+      },
+      {
+        "id": "idle",
+        "label": "6 · LoopAnimation\nCafe_Idle\n纯待机动画速度 75%",
+        "kind": "state"
+      },
+      {
+        "id": "finish",
+        "label": "单次动作 / 返回 / 散步完成\n重置冷却，重新从根节点评估",
+        "kind": "state"
+      },
+      {
+        "id": "cap",
+        "label": "导入时按能力修剪\n无 Reaction：移除点击分支\n无 Walk：移除返程和散步分支",
+        "kind": "note"
+      },
+      {
+        "id": "override",
+        "label": "宿主覆盖层（见移动/视线图）\n输入活跃 + 位置跟随会抑制随机散步\n跟随仍以基础 Idle 为宿主状态",
+        "kind": "note"
+      },
+      {
+        "id": "fallback",
+        "label": "XML 每 0.5s 检查更新\n无效更新保留旧树\n首次无效 / 执行异常 → SafeIdle",
+        "kind": "note"
+      }
+    ],
+    "edges": [
+      {
+        "source": "root",
+        "target": "drag",
+        "label": "1",
+        "kind": "normal"
+      },
+      {
+        "source": "root",
+        "target": "click",
+        "label": "2",
+        "kind": "normal"
+      },
+      {
+        "source": "root",
+        "target": "home",
+        "label": "3",
+        "kind": "normal"
+      },
+      {
+        "source": "root",
+        "target": "legacy",
+        "label": "4",
+        "kind": "dashed"
+      },
+      {
+        "source": "root",
+        "target": "wander",
+        "label": "5",
+        "kind": "normal"
+      },
+      {
+        "source": "root",
+        "target": "idle",
+        "label": "6",
+        "kind": "normal"
+      },
+      {
+        "source": "wander",
+        "target": "cooldown",
+        "label": "无输入 ≥ input_idle",
+        "kind": "normal"
+      },
+      {
+        "source": "cooldown",
+        "target": "walk",
+        "label": "待机冷却达到间隔",
+        "kind": "normal"
+      },
+      {
+        "source": "drag",
+        "target": "root",
+        "label": "松开/取消拖拽",
+        "kind": "normal"
+      },
+      {
+        "source": "click",
+        "target": "finish",
+        "label": "动作结束",
+        "kind": "normal"
+      },
+      {
+        "source": "home",
+        "target": "finish",
+        "label": "到达起点；面向屏幕",
+        "kind": "normal"
+      },
+      {
+        "source": "walk",
+        "target": "finish",
+        "label": "路程完成 / 输入恢复中断",
+        "kind": "normal"
+      },
+      {
+        "source": "finish",
+        "target": "root",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "cap",
+        "target": "root",
+        "label": "动作映射与修剪",
+        "kind": "dashed"
+      },
+      {
+        "source": "override",
+        "target": "root",
+        "label": "宿主约束",
+        "kind": "dashed"
+      },
+      {
+        "source": "fallback",
+        "target": "idle",
+        "label": "安全待机",
+        "kind": "dashed"
+      }
+    ],
+    "sources": [
+      "design/template.bt.xml",
+      "shared/pet_behavior.h",
+      "main.cpp:initializeBehavior / App::tick"
+    ],
+    "direction": "TB"
+  },
+  {
+    "key": "04-battle-state-machine",
+    "title": "战斗完整状态机 · 16 个 Phase",
+    "description": "这张图覆盖常规流转及各枚举状态；跨状态打断优先级见下一张图。姿态只从可用 Idle + Attack 配对中选择，Normal 优先，缺少其他姿态会跳过。",
+    "nodes": [
+      {
+        "id": "entry",
+        "label": "进入战斗 / 拖拽松开 / 胜利完成\n选首个可用姿态；ready=false",
+        "kind": "note"
+      },
+      {
+        "id": "Idle",
+        "label": "Idle · 姿态_Idle\n循环；键盘、点击指挥、走动入口",
+        "kind": "state"
+      },
+      {
+        "id": "Moving",
+        "label": "Moving · Move_Ing 循环\n战斗速度 = 0.792 × zoom × 3\n输入走动距离 = 正常的 50%",
+        "kind": "state"
+      },
+      {
+        "id": "Jump",
+        "label": "Jump · Move_Jump 单次\n提前起跳；边界位于动作中点\n保持方向、速度与连续位移",
+        "kind": "state"
+      },
+      {
+        "id": "MoveEnd",
+        "label": "MoveEnd · Move_End_姿态\n随机选择可用姿态；末段曲线转向\n按脚部采样减速至站稳",
+        "kind": "state"
+      },
+      {
+        "id": "AttackStart",
+        "label": "AttackStart · 姿态_Attack_Start\n准备攻击；保留首次攻击请求",
+        "kind": "state"
+      },
+      {
+        "id": "Attack",
+        "label": "Attack · 姿态_Attack_Ing\n播放一次；重复按键可缓存",
+        "kind": "state"
+      },
+      {
+        "id": "AttackDelay",
+        "label": "AttackDelay · 姿态_Attack_Delay\n循环等待；优先处理换弹请求",
+        "kind": "state"
+      },
+      {
+        "id": "AttackEnd",
+        "label": "AttackEnd · 姿态_Attack_End\n收枪；可携带 reloadPending",
+        "kind": "state"
+      },
+      {
+        "id": "Reload",
+        "label": "Reload · 姿态_Reload\n或姿态_Attack_Reload；单次\n忽略键盘及换弹；清理攻击缓存",
+        "kind": "state"
+      },
+      {
+        "id": "Callsign",
+        "label": "Callsign · 姿态_Callsign 单次\n按追踪开关面向鼠标\n全场随机一名候选再掷概率",
+        "kind": "state"
+      },
+      {
+        "id": "Pickup",
+        "label": "Pickup · Formation_Pickup 循环\n缺少时用首姿态 Idle\n拖拽覆盖任何战斗状态",
+        "kind": "state"
+      },
+      {
+        "id": "Skill",
+        "label": "Skill · Exs 单次\n保存阶段、动作时间、剩余行走\n结束恢复保存状态",
+        "kind": "state"
+      },
+      {
+        "id": "VictoryStart",
+        "label": "VictoryStart · Victory_Start 单次\n强制面向屏幕",
+        "kind": "state"
+      },
+      {
+        "id": "VictoryEnd",
+        "label": "VictoryEnd · Victory_End × 3\n全过程强制面向屏幕",
+        "kind": "state"
+      },
+      {
+        "id": "Death",
+        "label": "Death · Vital_Death 单次",
+        "kind": "state"
+      },
+      {
+        "id": "Retreat",
+        "label": "Retreat · Vital_Retreat 单次\n显示方向 +180°；上升屏幕外\n位移按 t² 先慢后快",
+        "kind": "state"
+      },
+      {
+        "id": "cafe",
+        "label": "退出战斗 → 咖啡厅",
+        "kind": "exit"
+      },
+      {
+        "id": "interrupt",
+        "label": "跨状态入口\n见优先级图",
+        "kind": "note"
+      },
+      {
+        "id": "saved",
+        "label": "被 EX 打断的普通状态\n及其播放进度",
+        "kind": "note"
+      }
+    ],
+    "edges": [
+      {
+        "source": "entry",
+        "target": "Idle",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "Idle",
+        "target": "AttackStart",
+        "label": "按键或已缓存按键；存在 Start",
+        "kind": "normal"
+      },
+      {
+        "source": "Idle",
+        "target": "Attack",
+        "label": "按键；缺少 Start",
+        "kind": "normal"
+      },
+      {
+        "source": "AttackStart",
+        "target": "Attack",
+        "label": "准备结束；执行首次攻击",
+        "kind": "normal"
+      },
+      {
+        "source": "Attack",
+        "target": "AttackDelay",
+        "label": "攻击完成；若缺 Delay 则 Idle",
+        "kind": "normal"
+      },
+      {
+        "source": "AttackDelay",
+        "target": "Attack",
+        "label": "新按键 / 缓存攻击",
+        "kind": "normal"
+      },
+      {
+        "source": "AttackDelay",
+        "target": "AttackEnd",
+        "label": "无键盘 ≥ keyboardIdle",
+        "kind": "normal"
+      },
+      {
+        "source": "AttackDelay",
+        "target": "AttackEnd",
+        "label": "有换弹请求且存在 End",
+        "kind": "normal"
+      },
+      {
+        "source": "AttackDelay",
+        "target": "Reload",
+        "label": "换弹请求；缺少 End",
+        "kind": "normal"
+      },
+      {
+        "source": "AttackEnd",
+        "target": "Reload",
+        "label": "结束后有请求且存在 Reload",
+        "kind": "normal"
+      },
+      {
+        "source": "AttackEnd",
+        "target": "Idle",
+        "label": "结束后无换弹请求",
+        "kind": "normal"
+      },
+      {
+        "source": "Reload",
+        "target": "Idle",
+        "label": "单次结束",
+        "kind": "normal"
+      },
+      {
+        "source": "Idle",
+        "target": "Callsign",
+        "label": "鼠标抬键事件；当选且概率成功",
+        "kind": "normal"
+      },
+      {
+        "source": "Callsign",
+        "target": "Idle",
+        "label": "结束；保持选中姿态",
+        "kind": "normal"
+      },
+      {
+        "source": "Idle",
+        "target": "Moving",
+        "label": "允许走动；间隔到期 + 输入/无输入条件",
+        "kind": "normal"
+      },
+      {
+        "source": "Moving",
+        "target": "Jump",
+        "label": "可跨越屏幕/可见窗口；存在 Jump",
+        "kind": "normal"
+      },
+      {
+        "source": "Jump",
+        "target": "Moving",
+        "label": "落地后仍有路程且允许走动",
+        "kind": "normal"
+      },
+      {
+        "source": "Jump",
+        "target": "MoveEnd",
+        "label": "落地后路程完成或走动关闭",
+        "kind": "normal"
+      },
+      {
+        "source": "Moving",
+        "target": "MoveEnd",
+        "label": "走完 / 禁用自动走动",
+        "kind": "normal"
+      },
+      {
+        "source": "MoveEnd",
+        "target": "Idle",
+        "label": "站稳且结束动作完成；缺 End 用 Walk 制动",
+        "kind": "normal"
+      },
+      {
+        "source": "interrupt",
+        "target": "Pickup",
+        "label": "拖拽",
+        "kind": "normal"
+      },
+      {
+        "source": "Pickup",
+        "target": "entry",
+        "label": "松开 / 取消拖拽",
+        "kind": "normal"
+      },
+      {
+        "source": "interrupt",
+        "target": "Skill",
+        "label": "持续输入；EX 概率成功",
+        "kind": "normal"
+      },
+      {
+        "source": "saved",
+        "target": "Skill",
+        "label": "保存",
+        "kind": "dashed"
+      },
+      {
+        "source": "Skill",
+        "target": "saved",
+        "label": "播放完成：恢复",
+        "kind": "dashed"
+      },
+      {
+        "source": "interrupt",
+        "target": "VictoryStart",
+        "label": "其他应用窗口关闭；有 Start",
+        "kind": "normal"
+      },
+      {
+        "source": "interrupt",
+        "target": "VictoryEnd",
+        "label": "窗口关闭；缺 Start、有 End",
+        "kind": "normal"
+      },
+      {
+        "source": "VictoryStart",
+        "target": "VictoryEnd",
+        "label": "Start 完成；有 End",
+        "kind": "normal"
+      },
+      {
+        "source": "VictoryStart",
+        "target": "entry",
+        "label": "缺少 End",
+        "kind": "normal"
+      },
+      {
+        "source": "VictoryEnd",
+        "target": "VictoryEnd",
+        "label": "已播放次数 < 3",
+        "kind": "normal"
+      },
+      {
+        "source": "VictoryEnd",
+        "target": "entry",
+        "label": "第 3 次结束",
+        "kind": "normal"
+      },
+      {
+        "source": "interrupt",
+        "target": "Death",
+        "label": "角色三连击；有 Death",
+        "kind": "normal"
+      },
+      {
+        "source": "interrupt",
+        "target": "Retreat",
+        "label": "三连击；缺 Death、有 Retreat",
+        "kind": "normal"
+      },
+      {
+        "source": "interrupt",
+        "target": "cafe",
+        "label": "三连击；两者都无",
+        "kind": "normal"
+      },
+      {
+        "source": "Death",
+        "target": "Retreat",
+        "label": "死亡结束；有 Retreat",
+        "kind": "normal"
+      },
+      {
+        "source": "Death",
+        "target": "cafe",
+        "label": "缺 Retreat",
+        "kind": "normal"
+      },
+      {
+        "source": "Retreat",
+        "target": "cafe",
+        "label": "退场结束",
+        "kind": "normal"
+      }
+    ],
+    "sources": [
+      "shared/pet_battle.h:Battle::Phase / tick",
+      "main.cpp:initializeBehavior / App::tick / presentState"
+    ],
+    "direction": "TB"
+  },
+  {
+    "key": "05-battle-priority",
+    "title": "战斗打断与请求优先级",
+    "description": "按实际 Battle::tick / App::tick 的顺序绘制。拖拽可打断 Jump；正常输入和关窗不会让跳跃途中停下。随机走动期间的按键先缓存，DirectedWalk 跟随则在非 Jump 时可被攻击打断。",
+    "nodes": [
+      {
+        "id": "event",
+        "label": "本帧输入与当前阶段",
+        "kind": "state"
+      },
+      {
+        "id": "buffer",
+        "label": "先缓存请求\n攻击请求去重 ≥ 0.12s\n四个攻击阶段记录换弹请求",
+        "kind": "state"
+      },
+      {
+        "id": "triple",
+        "label": "角色 1.2s 内三连击？",
+        "kind": "decision"
+      },
+      {
+        "id": "retire",
+        "label": "设置 Death / Retreat / 返回咖啡厅",
+        "kind": "state"
+      },
+      {
+        "id": "drag",
+        "label": "正在拖拽？",
+        "kind": "decision"
+      },
+      {
+        "id": "pickup",
+        "label": "最高优先级 → Pickup\n清理技能/换弹；拖动立即返回",
+        "kind": "state"
+      },
+      {
+        "id": "drop",
+        "label": "刚结束拖拽？",
+        "kind": "decision"
+      },
+      {
+        "id": "reset",
+        "label": "回首个姿态 Idle\n清理被打断技能状态",
+        "kind": "state"
+      },
+      {
+        "id": "close",
+        "label": "存在其他应用关窗请求？\n非 Jump、非退场、非胜利",
+        "kind": "decision"
+      },
+      {
+        "id": "victory",
+        "label": "VictoryStart / VictoryEnd\nJump 中请求延后到落地",
+        "kind": "state"
+      },
+      {
+        "id": "menu",
+        "label": "菜单打开且不在 Jump？",
+        "kind": "decision"
+      },
+      {
+        "id": "hold",
+        "label": "暂停行为\nJump 保持动画与移动",
+        "kind": "state"
+      },
+      {
+        "id": "special",
+        "label": "当前是 EX / 退场 / 胜利？",
+        "kind": "decision"
+      },
+      {
+        "id": "specialRun",
+        "label": "推进对应动画并处理结束\n不尝试新的 EX / 常规状态条件",
+        "kind": "state"
+      },
+      {
+        "id": "ex",
+        "label": "输入活跃；EX 计时达阈值？\n非 Jump、非 Reload",
+        "kind": "decision"
+      },
+      {
+        "id": "try",
+        "label": "存在 Exs 且概率成功？",
+        "kind": "decision"
+      },
+      {
+        "id": "skill",
+        "label": "保存普通状态 → Skill",
+        "kind": "state"
+      },
+      {
+        "id": "normal",
+        "label": "常规 Phase 分支\nIdle：攻击 > 指挥 > 走动\nAttackDelay：换弹 > 收枪 > 攻击",
+        "kind": "state"
+      },
+      {
+        "id": "reload",
+        "label": "Reload 特例\n屏蔽键盘/换弹，不缓存攻击\n拖拽、三连击和关窗仍可打断",
+        "kind": "note"
+      },
+      {
+        "id": "jump",
+        "label": "Jump 输入延后\n跟随 Jump：宿主缓存按键/换弹/关窗\n普通 Jump：攻击缓存、关窗延后",
+        "kind": "note"
+      }
+    ],
+    "edges": [
+      {
+        "source": "event",
+        "target": "buffer",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "buffer",
+        "target": "triple",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "triple",
+        "target": "retire",
+        "label": "是",
+        "kind": "normal"
+      },
+      {
+        "source": "triple",
+        "target": "drag",
+        "label": "否",
+        "kind": "normal"
+      },
+      {
+        "source": "retire",
+        "target": "drag",
+        "label": "拖拽仍可覆盖",
+        "kind": "normal"
+      },
+      {
+        "source": "drag",
+        "target": "pickup",
+        "label": "是",
+        "kind": "normal"
+      },
+      {
+        "source": "drag",
+        "target": "drop",
+        "label": "否",
+        "kind": "normal"
+      },
+      {
+        "source": "drop",
+        "target": "reset",
+        "label": "是",
+        "kind": "normal"
+      },
+      {
+        "source": "drop",
+        "target": "close",
+        "label": "否",
+        "kind": "normal"
+      },
+      {
+        "source": "reset",
+        "target": "close",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "close",
+        "target": "victory",
+        "label": "是",
+        "kind": "normal"
+      },
+      {
+        "source": "close",
+        "target": "menu",
+        "label": "否",
+        "kind": "normal"
+      },
+      {
+        "source": "victory",
+        "target": "menu",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "menu",
+        "target": "hold",
+        "label": "是",
+        "kind": "normal"
+      },
+      {
+        "source": "menu",
+        "target": "special",
+        "label": "否",
+        "kind": "normal"
+      },
+      {
+        "source": "special",
+        "target": "specialRun",
+        "label": "是",
+        "kind": "normal"
+      },
+      {
+        "source": "special",
+        "target": "ex",
+        "label": "否",
+        "kind": "normal"
+      },
+      {
+        "source": "ex",
+        "target": "try",
+        "label": "是；计时归零",
+        "kind": "normal"
+      },
+      {
+        "source": "ex",
+        "target": "normal",
+        "label": "否",
+        "kind": "normal"
+      },
+      {
+        "source": "try",
+        "target": "skill",
+        "label": "是",
+        "kind": "normal"
+      },
+      {
+        "source": "try",
+        "target": "normal",
+        "label": "否",
+        "kind": "normal"
+      },
+      {
+        "source": "reload",
+        "target": "buffer",
+        "label": "屏蔽键盘请求",
+        "kind": "dashed"
+      },
+      {
+        "source": "jump",
+        "target": "close",
+        "label": "延后普通请求",
+        "kind": "dashed"
+      }
+    ],
+    "sources": [
+      "shared/pet_battle.h:Battle::tick",
+      "main.cpp:App::tick",
+      "scene.h:Scene::tick"
+    ],
+    "direction": "TB"
+  },
+  {
+    "key": "06-follow-and-placement",
+    "title": "两模式公共移动 · 跟随与单屏停靠",
+    "description": "DirectedWalk 是宿主移动覆盖，不增加 Battle::Phase。跟随身位按角色本体宽度投影，屏幕可达性与其他角色碰撞优先于鼠标目标。",
+    "nodes": [
+      {
+        "id": "idle",
+        "label": "基础动作处于 Idle\n非交互、非返程、非菜单暂停",
+        "kind": "state"
+      },
+      {
+        "id": "dock",
+        "label": "待机范围跨屏且需要检查？",
+        "kind": "decision"
+      },
+      {
+        "id": "target",
+        "label": "固定单屏停靠目标\n允许散步且有 Walk：行走到目标\n否则一次放置到可停靠点",
+        "kind": "state"
+      },
+      {
+        "id": "follow",
+        "label": "开启位置跟随 + inputActive？\n有 Walk；无阻挡锁存/交互冷却",
+        "kind": "decision"
+      },
+      {
+        "id": "distance",
+        "label": "距离在 [最近, 最远] 内？",
+        "kind": "decision"
+      },
+      {
+        "id": "stay",
+        "label": "Idle 保持位置与朝向\n无需维持鼠标附近",
+        "kind": "state"
+      },
+      {
+        "id": "plan",
+        "label": "规划距离中点目标\n最近=0：只靠近、不远离\n每 0.15s 可重新规划",
+        "kind": "state"
+      },
+      {
+        "id": "valid",
+        "label": "路径可通行且落点完整在单屏？",
+        "kind": "decision"
+      },
+      {
+        "id": "walk",
+        "label": "DirectedWalk 行走覆盖\n咖啡厅 Cafe_Walk / 战斗 Move_Ing\n末端约 0.35s 距离制动",
+        "kind": "state"
+      },
+      {
+        "id": "boundary",
+        "label": "仅战斗且存在 Jump？\n边界将到动作中点；落点可达\n朝向误差 ≤ 3°；无其他角色阻挡",
+        "kind": "decision"
+      },
+      {
+        "id": "jump",
+        "label": "Move_Jump 播放一次\n方向和速度锁定、位移连续\n不重规划，不因到达距离而中断",
+        "kind": "state"
+      },
+      {
+        "id": "finish",
+        "label": "到达中点 / 固定目标？\n跨屏时先完整进入一个屏幕",
+        "kind": "decision"
+      },
+      {
+        "id": "arrive",
+        "label": "停止 DirectedWalk → 基础 Idle\n停靠可恢复进入前朝向\n跟随不强制面向鼠标",
+        "kind": "state"
+      },
+      {
+        "id": "blocked",
+        "label": "碰撞 / 路径阻挡\n立即停止并放弃目的地\n鼠标移动 >16px 才解除重试锁存",
+        "kind": "state"
+      },
+      {
+        "id": "inactive",
+        "label": "输入不活跃\n结束普通跟随；跨屏/跳跃先完成\n允许散步后由各模式决定散步",
+        "kind": "state"
+      },
+      {
+        "id": "override",
+        "label": "强制交互或基础状态改变\n拖拽/旋转：即时取消\n非 Jump 攻击切换：取消覆盖",
+        "kind": "note"
+      }
+    ],
+    "edges": [
+      {
+        "source": "idle",
+        "target": "dock",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "dock",
+        "target": "target",
+        "label": "是",
+        "kind": "normal"
+      },
+      {
+        "source": "dock",
+        "target": "follow",
+        "label": "否",
+        "kind": "normal"
+      },
+      {
+        "source": "target",
+        "target": "valid",
+        "label": "行走可用",
+        "kind": "normal"
+      },
+      {
+        "source": "target",
+        "target": "arrive",
+        "label": "直接放置",
+        "kind": "normal"
+      },
+      {
+        "source": "follow",
+        "target": "distance",
+        "label": "是",
+        "kind": "normal"
+      },
+      {
+        "source": "follow",
+        "target": "stay",
+        "label": "否",
+        "kind": "normal"
+      },
+      {
+        "source": "distance",
+        "target": "stay",
+        "label": "是且尚未移动",
+        "kind": "normal"
+      },
+      {
+        "source": "distance",
+        "target": "plan",
+        "label": "区间外；或继续向中点移动",
+        "kind": "normal"
+      },
+      {
+        "source": "plan",
+        "target": "valid",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "valid",
+        "target": "walk",
+        "label": "是",
+        "kind": "normal"
+      },
+      {
+        "source": "valid",
+        "target": "stay",
+        "label": "否；不启动不可达路径",
+        "kind": "normal"
+      },
+      {
+        "source": "walk",
+        "target": "boundary",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "boundary",
+        "target": "jump",
+        "label": "是",
+        "kind": "normal"
+      },
+      {
+        "source": "boundary",
+        "target": "finish",
+        "label": "否；咖啡厅始终否",
+        "kind": "normal"
+      },
+      {
+        "source": "jump",
+        "target": "walk",
+        "label": "落地；继续剩余行走",
+        "kind": "normal"
+      },
+      {
+        "source": "finish",
+        "target": "arrive",
+        "label": "是",
+        "kind": "normal"
+      },
+      {
+        "source": "finish",
+        "target": "walk",
+        "label": "否",
+        "kind": "normal"
+      },
+      {
+        "source": "walk",
+        "target": "blocked",
+        "label": "步进碰撞",
+        "kind": "normal"
+      },
+      {
+        "source": "blocked",
+        "target": "idle",
+        "label": "静止；等待解锁",
+        "kind": "normal"
+      },
+      {
+        "source": "stay",
+        "target": "inactive",
+        "label": "无输入达阈值",
+        "kind": "normal"
+      },
+      {
+        "source": "inactive",
+        "target": "idle",
+        "label": "散步结束",
+        "kind": "normal"
+      },
+      {
+        "source": "override",
+        "target": "arrive",
+        "label": "取消覆盖",
+        "kind": "dashed"
+      }
+    ],
+    "sources": [
+      "shared/directed_walk.h",
+      "shared/desktop_path.h",
+      "shared/desktop_geometry.h",
+      "shared/window_boundaries.h",
+      "main.cpp:App::tick / stopBlocked",
+      "scene.h:steer"
+    ],
+    "direction": "TB"
+  },
+  {
+    "key": "07-cafe-look-tracking",
+    "title": "咖啡厅视线追踪 · 与位置跟随独立",
+    "description": "这是朝向覆盖而非移动状态。满足持续输入后每个角色都可追踪，不再抽概率。眼睛高度用于计算屏幕方向，阈值模式转身时只播放 Walk，不改变地面锚点。",
+    "nodes": [
+      {
+        "id": "input",
+        "label": "inputActive 且 cafeTracking 开启？",
+        "kind": "decision"
+      },
+      {
+        "id": "reset",
+        "label": "重置追踪\n停止转身动画；保留当前朝向",
+        "kind": "state"
+      },
+      {
+        "id": "eligible",
+        "label": "基础 Cafe_Idle 且无跟随/停靠/返程\n非拖拽/旋转/点击/菜单/交互冷却？",
+        "kind": "decision"
+      },
+      {
+        "id": "wait",
+        "label": "暂停本次转身\n等待基础动作重新允许追踪",
+        "kind": "state"
+      },
+      {
+        "id": "time",
+        "label": "持续输入 ≥ activeSeconds\n且鼠标方向有效？",
+        "kind": "decision"
+      },
+      {
+        "id": "mode",
+        "label": "视线模式？",
+        "kind": "decision"
+      },
+      {
+        "id": "smooth",
+        "label": "平滑追踪\n每帧 turnToward 当前鼠标方向\n仍显示 Cafe_Idle；锚点不动",
+        "kind": "state"
+      },
+      {
+        "id": "angle",
+        "label": "当前未转身且角差 ≥ 30°？",
+        "kind": "decision"
+      },
+      {
+        "id": "still",
+        "label": "保持 Idle 与当前朝向",
+        "kind": "state"
+      },
+      {
+        "id": "turn",
+        "label": "锁定本次 targetYaw\n转身覆盖 Cafe_Walk\n朝向最多变化 240°/s；位置不变",
+        "kind": "state"
+      },
+      {
+        "id": "done",
+        "label": "与锁定方向角差 < 0.5°？",
+        "kind": "decision"
+      },
+      {
+        "id": "idle",
+        "label": "结束转身 → Cafe_Idle\n后续角差再次达到 30° 才重启",
+        "kind": "state"
+      }
+    ],
+    "edges": [
+      {
+        "source": "input",
+        "target": "reset",
+        "label": "否",
+        "kind": "normal"
+      },
+      {
+        "source": "input",
+        "target": "eligible",
+        "label": "是",
+        "kind": "normal"
+      },
+      {
+        "source": "eligible",
+        "target": "wait",
+        "label": "否",
+        "kind": "normal"
+      },
+      {
+        "source": "eligible",
+        "target": "time",
+        "label": "是",
+        "kind": "normal"
+      },
+      {
+        "source": "time",
+        "target": "wait",
+        "label": "否",
+        "kind": "normal"
+      },
+      {
+        "source": "time",
+        "target": "mode",
+        "label": "是",
+        "kind": "normal"
+      },
+      {
+        "source": "mode",
+        "target": "smooth",
+        "label": "smooth",
+        "kind": "normal"
+      },
+      {
+        "source": "mode",
+        "target": "angle",
+        "label": "threshold",
+        "kind": "normal"
+      },
+      {
+        "source": "angle",
+        "target": "still",
+        "label": "否",
+        "kind": "normal"
+      },
+      {
+        "source": "angle",
+        "target": "turn",
+        "label": "是",
+        "kind": "normal"
+      },
+      {
+        "source": "turn",
+        "target": "done",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "done",
+        "target": "turn",
+        "label": "否",
+        "kind": "normal"
+      },
+      {
+        "source": "done",
+        "target": "idle",
+        "label": "是",
+        "kind": "normal"
+      },
+      {
+        "source": "idle",
+        "target": "input",
+        "label": "下一帧",
+        "kind": "normal"
+      },
+      {
+        "source": "smooth",
+        "target": "input",
+        "label": "下一帧",
+        "kind": "normal"
+      }
+    ],
+    "sources": [
+      "shared/cafe_attention.h",
+      "shared/input_activity.h",
+      "main.cpp:App::tick / presentState",
+      "shared/pet_ground.h:faceCursor"
+    ],
+    "direction": "TB"
+  },
+  {
+    "key": "08-import-pipeline",
+    "title": "原始 GLB 导入与能力降级",
+    "description": "运行时直接解析，不转换、不写回 GLB。导入在主线程分阶段完成，Scene 按角色顺序加载；CPU 帧并行不代表导入也并行。",
+    "nodes": [
+      {
+        "id": "file",
+        "label": "用户选择 GLB\n历史最多 15 条；显示最多 5 个",
+        "kind": "state"
+      },
+      {
+        "id": "validate",
+        "label": "cgltf_parse / load_buffers / validate\nGLB 2.0；内嵌数据和 PNG/JPEG\n检查必需扩展与 accessor",
+        "kind": "state"
+      },
+      {
+        "id": "error",
+        "label": "不支持 / 数据损坏\n显示导入错误；保留已显示模型",
+        "kind": "exit"
+      },
+      {
+        "id": "nodes",
+        "label": "保留完整父节点层级\n多套 Skin、inverseBindMatrices\n节点 TRS / matrix、原始 Morph",
+        "kind": "state"
+      },
+      {
+        "id": "tracks",
+        "label": "读取原始关键帧\nSTEP / LINEAR / CUBICSPLINE\n不用 Blender 烘焙帧",
+        "kind": "state"
+      },
+      {
+        "id": "catalog",
+        "label": "关键词 / 别名 / 动作组映射\n选择一致 family + group\n歧义记录警告、跳过少数动作",
+        "kind": "state"
+      },
+      {
+        "id": "parts",
+        "label": "可选部件驱动检查\noptional + show/hide + 动画通道\n唯一塌缩 switch 面部保底",
+        "kind": "state"
+      },
+      {
+        "id": "spatial",
+        "label": "测量与缓存\n尺寸归一、眼高、本体宽度\n待机每网格边界、动作包络、脚部制动",
+        "kind": "state"
+      },
+      {
+        "id": "caps",
+        "label": "能力降级",
+        "kind": "decision"
+      },
+      {
+        "id": "cafe",
+        "label": "咖啡厅缺省映射\nIdle → 战斗 Idle / 首动作\nWalk → 战斗 Move；Pickup → Idle",
+        "kind": "state"
+      },
+      {
+        "id": "battle",
+        "label": "战斗姿态必须 Idle + Attack\n优先 Normal；少姿态不参与随机\n无姿态：不提供战斗模式",
+        "kind": "state"
+      },
+      {
+        "id": "missing",
+        "label": "可选动作不存在\nStart/End 跳过；Jump 不检查\n无 Delay 返回 Idle；无技能/换弹不触发",
+        "kind": "state"
+      },
+      {
+        "id": "runtime",
+        "label": "生成/复用每角色 .bt.xml\n创建 Behavior 与 Battle\n原生模型就绪，进度 100%",
+        "kind": "state"
+      },
+      {
+        "id": "clip",
+        "label": "运行帧\n采样 → 0.18s 内姿态混合\nMorph + 世界矩阵 + 蒙皮 → GPU",
+        "kind": "state"
+      }
+    ],
+    "edges": [
+      {
+        "source": "file",
+        "target": "validate",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "validate",
+        "target": "error",
+        "label": "校验失败",
+        "kind": "normal"
+      },
+      {
+        "source": "validate",
+        "target": "nodes",
+        "label": "合法",
+        "kind": "normal"
+      },
+      {
+        "source": "nodes",
+        "target": "tracks",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "tracks",
+        "target": "catalog",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "catalog",
+        "target": "parts",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "parts",
+        "target": "spatial",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "spatial",
+        "target": "caps",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "caps",
+        "target": "cafe",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "caps",
+        "target": "battle",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "caps",
+        "target": "missing",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "cafe",
+        "target": "runtime",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "battle",
+        "target": "runtime",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "missing",
+        "target": "runtime",
+        "label": "",
+        "kind": "normal"
+      },
+      {
+        "source": "runtime",
+        "target": "clip",
+        "label": "",
+        "kind": "normal"
+      }
+    ],
+    "sources": [
+      "gltf_model.cpp:constructor / discoverAnimations / analyze",
+      "main.cpp:requestModel / initializeBehavior",
+      "scene.h:activate / tick"
+    ],
+    "direction": "TB"
+  }
+]

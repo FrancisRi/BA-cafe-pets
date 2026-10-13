@@ -1,0 +1,41 @@
+%% ba_cafe_lite native 0.2.5 · actual source snapshot
+flowchart TB
+  idle["基础动作处于 Idle<br/>非交互、非返程、非菜单暂停"]
+  dock{"待机范围跨屏且需要检查？"}
+  target["固定单屏停靠目标<br/>允许散步且有 Walk：行走到目标<br/>否则一次放置到可停靠点"]
+  follow{"开启位置跟随 + inputActive？<br/>有 Walk；无阻挡锁存/交互冷却"}
+  distance{"距离在 [最近, 最远] 内？"}
+  stay["Idle 保持位置与朝向<br/>无需维持鼠标附近"]
+  plan["规划距离中点目标<br/>最近=0：只靠近、不远离<br/>每 0.15s 可重新规划"]
+  valid{"路径可通行且落点完整在单屏？"}
+  walk["DirectedWalk 行走覆盖<br/>咖啡厅 Cafe_Walk / 战斗 Move_Ing<br/>末端约 0.35s 距离制动"]
+  boundary{"仅战斗且存在 Jump？<br/>边界将到动作中点；落点可达<br/>朝向误差 ≤ 3°；无其他角色阻挡"}
+  jump["Move_Jump 播放一次<br/>方向和速度锁定、位移连续<br/>不重规划，不因到达距离而中断"]
+  finish{"到达中点 / 固定目标？<br/>跨屏时先完整进入一个屏幕"}
+  arrive["停止 DirectedWalk → 基础 Idle<br/>停靠可恢复进入前朝向<br/>跟随不强制面向鼠标"]
+  blocked["碰撞 / 路径阻挡<br/>立即停止并放弃目的地<br/>鼠标移动 >16px 才解除重试锁存"]
+  inactive["输入不活跃<br/>结束普通跟随；跨屏/跳跃先完成<br/>允许散步后由各模式决定散步"]
+  override["强制交互或基础状态改变<br/>拖拽/旋转：即时取消<br/>非 Jump 攻击切换：取消覆盖"]
+  idle --> dock
+  dock -->|"是"| target
+  dock -->|"否"| follow
+  target -->|"行走可用"| valid
+  target -->|"直接放置"| arrive
+  follow -->|"是"| distance
+  follow -->|"否"| stay
+  distance -->|"是且尚未移动"| stay
+  distance -->|"区间外；或继续向中点移动"| plan
+  plan --> valid
+  valid -->|"是"| walk
+  valid -->|"否；不启动不可达路径"| stay
+  walk --> boundary
+  boundary -->|"是"| jump
+  boundary -->|"否；咖啡厅始终否"| finish
+  jump -->|"落地；继续剩余行走"| walk
+  finish -->|"是"| arrive
+  finish -->|"否"| walk
+  walk -->|"步进碰撞"| blocked
+  blocked -->|"静止；等待解锁"| idle
+  stay -->|"无输入达阈值"| inactive
+  inactive -->|"散步结束"| idle
+  override -.->|"取消覆盖"| arrive
