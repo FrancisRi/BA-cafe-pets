@@ -1,4 +1,5 @@
 #include "gltf_model.h"
+#include "animation_keys.h"
 #include "rlgl.h"
 #include <algorithm>
 #include <bit>
@@ -129,7 +130,8 @@ GltfModel::GltfModel(const std::filesystem::path& file,const std::function<void(
    for(size_t j=0;j<a.channels_count;j++){const auto& channel=a.channels[j];if(!channel.target_node||!channel.sampler)continue;Track t;t.node=int(channel.target_node-raw->nodes);t.path=channel.target_path;t.interpolation=channel.sampler->interpolation;t.times=unpack(channel.sampler->input);t.values=unpack(channel.sampler->output);if(t.times.empty())continue;
     const size_t factor=t.interpolation==cgltf_interpolation_type_cubic_spline?3:1;const size_t denominator=t.times.size()*factor;if(t.values.size()%denominator)throw std::runtime_error("Invalid animation sampler dimensions");t.width=int(t.values.size()/denominator);
     if(t.width<1||(t.path!=cgltf_animation_path_type_weights&&t.width!=(t.path==cgltf_animation_path_type_rotation?4:3)))throw std::runtime_error("Unsupported animation path dimensions");
-    for(size_t k=1;k<t.times.size();k++)if(t.times[k]<=t.times[k-1])throw std::runtime_error("Animation times must increase");
+    const auto duplicates=collapseDuplicateKeys(t.times,t.values,size_t(t.width)*factor);
+    if(duplicates)TraceLog(LOG_WARNING,"GLB: %s channel %u: collapsed %u duplicate animation keys",c.name.c_str(),unsigned(j),unsigned(duplicates));
     if(nodes[t.node].matrix&&t.path!=cgltf_animation_path_type_weights)throw std::runtime_error("Animated TRS on a matrix node is not valid glTF");c.duration=std::max(c.duration,double(t.times.back()));c.tracks.push_back(std::move(t));
    }if(c.duration<=0)c.duration=1;clips.push_back(std::move(c));
   }

@@ -1,8 +1,21 @@
-# ba_cafe_lite 0.2.4 · raylib + cgltf 原生版
+# ba_cafe_lite 0.2.11 · raylib + cgltf 原生版
 
 独立 Git / CMake 工程，只包含 raylib + cgltf 原生版。模型、行为头文件和状态机均位于本仓库内，无需上级目录或旧版本源码。
 本版直接读取用户的原始 GLB，不运行 Blender，不需要 Node、Python 或 WebView2。
+导入时兼容动作中完全相同的关键帧时间戳：在内存中保留该时间最后一帧及其完整切线，不修改 GLB 或动作时长。倒序时间、非有限数据及错误维度仍会报错。
 默认 Shiroko；便携版设置和历史在程序旁的 `data/`，单 EXE 版在 `%LOCALAPPDATA%/ba_cafe_lite_native/data/`。首次使用空历史，不包含开发机用户数据。
+
+## 下载与使用
+
+从 [最新 Release](https://github.com/maxiumlee/ba-cafe-lite/releases/latest) 下载 `ba_cafe_lite-版本号-x64.exe`，双击即可运行（Windows x64）。单文件版不需要额外下载依赖；右键点击角色打开菜单，选择“导入原始 GLB”添加角色。升级时先退出旧版本，再启动新版，已有设置和角色历史保留。
+
+也可下载便携 ZIP，完整解压后启动其中的 `ba_cafe_lite.exe`；请保留同目录的 `models/`、`defaults.ini` 和 `behavior/`。Release 同时提供 SHA-256 校验文件。
+
+## 0.2.11 更新
+
+- 修复正月睦月、正月明里、泳装绫音因动作中存在重复时间戳而导入失败的问题，兼容处理适用于所有模型。
+- 对提供的 287 个 GLB 使用实际加载器完成回归，全部通过；7,135 段动作共采样 21,405 个姿势。原模型文件不修改。
+- 少数模型仍有动作缺失或命名歧义提示，沿用回退／跳过策略。此结果仅代表初步导入与采样检查通过，不代表视觉效果已经核对。详见 [检查报告](design/import-check-2026-10-15.md) 和 [版本记录](release/CHANGELOG.md)。
 
 ## 构建与启动
 
@@ -15,8 +28,17 @@ cmake --build build --target ba_cafe_lite_native -j 4
 ```
 
 或者运行 `./build.ps1`。发行打包运行 `./package.ps1`，输出单 EXE、便携 ZIP 和 SHA-256 校验文件到本仓库的 `dist/`。打包脚本使用 PowerShell 7；用户运行发行版不需要开发工具。
-打包后也会在项目根目录生成 `ba_cafe_lite.exe`，可以直接双击；此发行入口不提交到 Git。
-请一起保留 `models/Shiroko.glb`、`defaults.ini` 和 `behavior/` 文件夹。
+打包后也会在项目根目录生成 `ba_cafe_lite.exe`，可以直接双击；此发行入口不提交到 Git。直接运行构建目录里的程序时，请一起保留 `models/Shiroko.glb`、`defaults.ini` 和 `behavior/` 文件夹。
+
+批量导入检查（不显示角色、不修改用户设置或源模型）：
+
+```powershell
+cmake --build build --target ba_cafe_lite_animation_tests ba_cafe_lite_import_scan -j 4
+./build/ba_cafe_lite_animation_tests.exe
+./build/ba_cafe_lite_import_scan.exe "C:/Models" "import-report.json"
+```
+
+检查器递归加载 GLB，使用实际贴图/网格上传流程，并采样每段动作的开始、中点和接近末尾处。报告记录每个文件的结果、错误、动作数量和命名映射警告；映射警告不等于导入失败。此检查不核对视觉效果，不保证未采样的每一帧都正确。
 
 右键点击角色打开设置；右键拖动旋转，松开后不打开菜单。左键拖拽、滚轮缩放；中键拖动也可旋转。
 咖啡厅平滑朝向追踪采用时间平滑，无转向速度上限；30° 阈值模式保留原有规则。咖啡厅待机动画按 75% 速度播放；走路、点击动作及行为等待时间保持原速。菜单字体和布局间距扩大 50%。
