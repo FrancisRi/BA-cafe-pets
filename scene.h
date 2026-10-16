@@ -1,4 +1,5 @@
 #pragma once
+#include "native_topmost.h"
 // One input observer and settings menu coordinate up to five native render windows.
 struct Scene {
     std::vector<std::unique_ptr<App>> actors;
@@ -10,7 +11,7 @@ struct Scene {
     NativeDesktopInput input;
     std::filesystem::path historyFile;
     std::string error;
-    std::vector<HWND> depthOrder;
+    NativeTopmostOrder depthOrder;
     bool review=false,stopping=false,broadcasting=false;
     App& leader(){return *actors.front();}
     App* find(const std::string& id){for(auto& a:actors)if(a->actorId==id)return a.get();return nullptr;}
@@ -43,7 +44,9 @@ struct Scene {
     }
     static float radius(const App& a){return characterCollisionRadius(a.geometry.bodyWidth,a.geometry.maximum.y-a.geometry.minimum.y,a.zoom);}
     void orderDepth(){
-        std::vector<App*> visible;for(auto& a:actors)if(a->displayed&&a->loaded&&a->window&&IsWindowVisible(a->window))visible.push_back(a.get());
+        // App intent is authoritative: a shell-hidden window still needs to
+        // be restored, but a character disabled by the user must stay hidden.
+        std::vector<App*> visible;for(auto& a:actors)if(a->displayed&&a->loaded&&!a->done&&a->window)visible.push_back(a.get());
         auto depth=[](const App& a){
             double foot=(a.committedFrame?a.committedFoot:a.ground.screen(a.ground.position)).y+a.work.top;
             foot-=a.retreatDisplacement();
@@ -53,12 +56,9 @@ struct Scene {
         std::vector<HWND> desired;
         const auto* menu=leader().nativeSettings.get();if(menu&&menu->window&&IsWindowVisible(menu->window))desired.push_back(menu->window);
         for(const auto* a:visible){desired.push_back(a->inputWindow);desired.push_back(a->window);}
-        if(desired==depthOrder)return;
         // Front-to-back chain: feet lower on the desktop are in front. Native
         // window motion preserves this order, instead of promoting the last mover.
-        HWND anchor=HWND_TOPMOST;
-        for(HWND hwnd:desired){SetWindowPos(hwnd,anchor,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE|SWP_NOOWNERZORDER);anchor=hwnd;}
-        depthOrder=std::move(desired);
+        depthOrder.apply(desired,preciseSeconds());
     }
     void snapshotCrowd(){
         crowdCount=0;

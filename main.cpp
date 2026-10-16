@@ -737,6 +737,7 @@ struct App {
             case WM_NCHITTEST:return HTTRANSPARENT; // Only the separate alpha-shaped window accepts input.
             case WM_PAINT:{PAINTSTRUCT p{};BeginPaint(hwnd,&p);EndPaint(hwnd,&p);return 0;}
             case WM_MOUSEACTIVATE:return MA_NOACTIVATE;
+            case WM_SYSCOMMAND:if((w&0xfff0)==SC_MINIMIZE)return 0;return DefWindowProcW(hwnd,message,w,l);
             case WM_POWERBROADCAST:case WM_WTSSESSION_CHANGE:
                 if(app->session.event(message,w,l)){
                     if(app->sessionChanged)app->sessionChanged();
@@ -775,6 +776,7 @@ struct App {
         if(app&&app->window){
             switch(message){
             case WM_MOUSEACTIVATE:return MA_NOACTIVATE;
+            case WM_SYSCOMMAND:if((w&0xfff0)==SC_MINIMIZE)return 0;return DefWindowProcW(hwnd,message,w,l);
             case WM_LBUTTONDOWN:case WM_LBUTTONUP:case WM_RBUTTONDOWN:case WM_RBUTTONUP:
             case WM_MBUTTONDOWN:case WM_MBUTTONUP:case WM_MOUSEMOVE:case WM_MOUSEWHEEL:case WM_CAPTURECHANGED:case WM_CANCELMODE:
                 return proc(app->window,message,w,l);
@@ -809,6 +811,8 @@ struct App {
         inputWindow=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_NOREDIRECTIONBITMAP,wc.lpszClassName,L"ba_cafe_lite_native input",WS_POPUP,
             work.left+int(crop.x),work.top+int(crop.y),windowWidth,windowHeight,nullptr,nullptr,wc.hInstance,this);
         if(!inputWindow)throw std::runtime_error("Cannot create desktop pet input window");
+        const BOOL excludePeek=TRUE;
+        for(HWND hwnd:{window,inputWindow})DwmSetWindowAttribute(hwnd,DWMWA_EXCLUDED_FROM_PEEK,&excludePeek,sizeof(excludePeek));
         SetWindowRgn(inputWindow,CreateRectRgn(0,0,0,0),FALSE);
         // High-resolution waitable timer drives motion at 125 Hz on the message
         // thread. No global timer-resolution change and no extra worker thread.

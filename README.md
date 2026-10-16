@@ -1,4 +1,4 @@
-# ba_cafe_lite 0.2.11 · raylib + cgltf 原生版
+# ba_cafe_lite 0.2.12 · raylib + cgltf 原生版
 
 独立 Git / CMake 工程，只包含 raylib + cgltf 原生版。模型、行为头文件和状态机均位于本仓库内，无需上级目录或旧版本源码。
 本版直接读取用户的原始 GLB，不运行 Blender，不需要 Node、Python 或 WebView2。
@@ -10,6 +10,12 @@
 从 [最新 Release](https://github.com/maxiumlee/ba-cafe-lite/releases/latest) 下载 `ba_cafe_lite-版本号-x64.exe`，双击即可运行（Windows x64）。单文件版不需要额外下载依赖；右键点击角色打开菜单，选择“导入原始 GLB”添加角色。升级时先退出旧版本，再启动新版，已有设置和角色历史保留。
 
 也可下载便携 ZIP，完整解压后启动其中的 `ba_cafe_lite.exe`；请保留同目录的 `models/`、`defaults.ini` 和 `behavior/`。Release 同时提供 SHA-256 校验文件。
+
+## 0.2.12 更新
+
+- 角色窗口保持置顶，拒绝系统最小化请求，并从桌面 Peek 的淡出效果中排除。
+- 每 250ms 检查实际可见状态、置顶标记和窗口顺序；前台切换或状态被改变时恢复角色及其输入窗口，不抢焦点，不改变位置或大小。
+- 仍按角色脚部高度排列遮挡关系；用户关闭的角色不恢复，锁屏、熄屏及睡眠期间继续暂停。Win32 回归测试覆盖隐藏、最小化、取消置顶、顺序打乱、位置保持和焦点保持。
 
 ## 0.2.11 更新
 
