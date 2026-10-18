@@ -14,13 +14,16 @@ ba_cafe_lite · Windows x64
 咖啡厅：待机、点击反馈、随机散步和鼠标追踪。
 战斗：有对应动作的角色可启用；键盘触发攻击，标点/回车请求换弹。
 三个连续点击切换至战斗，战斗时三个连续点击触发退场。
+全局设置可选择渲染精度：省电／均衡／清晰，默认清晰。
+放大或多人时可选均衡降低显卡负担，边缘可能更粗糙。
 所有角色共享设置，最多同时显示 5 个，历史列表最多 15 条。
 导入后保留原 GLB 文件，不要删除或移动它。
 
 数据与日志
   单 EXE 版：%LOCALAPPDATA%\ba_cafe_lite_native\data\
   便携 ZIP 版：解压目录的 data\
-  settings.ini 为设置；characters.json 为角色历史；logs\ 为日志。
+  settings.ini 为设置；characters.json 为角色历史。
+  默认不写日志。排错时通过 ba_cafe_lite.exe --diagnostics 开启日志、性能统计与挂起诊断，保存在 logs\；旧日志保留。
   关闭程序后可以备份或迁移整个 data 文件夹。
   单 EXE 版缓存：%LOCALAPPDATA%\ba_cafe_lite_native\app\
   新版复用同一 data，旧缓存可在关闭程序后手动删除。

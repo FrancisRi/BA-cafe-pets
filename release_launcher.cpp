@@ -123,18 +123,17 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         uint64_t key=14695981039346656037ull;for(wchar_t ch:home.wstring()){key^=ch;key*=1099511628211ull;}
         const auto mutexName=L"Local\\BaCafeNative-"+std::to_wstring(key);mutex=CreateMutexW(nullptr,TRUE,mutexName.c_str());require(mutex!=nullptr,"Cannot create launch lock");if(GetLastError()==ERROR_ALREADY_EXISTS){CloseHandle(mutex);return 0;}
         ctx.cache=home/L"app"/widen(hex(ctx.footer.sha,16));prepare(ctx);
-        const auto data=home/L"data";fs::create_directories(data/L"logs");SetEnvironmentVariableW(L"BA_NATIVE_DATA_DIR",data.c_str());
+        const auto data=home/L"data";fs::create_directories(data);SetEnvironmentVariableW(L"BA_NATIVE_DATA_DIR",data.c_str());
         int argc=0;auto** argv=CommandLineToArgvW(GetCommandLineW(),&argc);bool prepareOnly=false;
         const auto exe=ctx.cache/L"ba_cafe_lite.exe";auto command=quote(exe.wstring());
         for(int i=1;i<argc;++i){if(std::wcscmp(argv[i],L"--prepare-only")==0)prepareOnly=true;else command+=L" "+quote(argv[i]);}LocalFree(argv);
         if(prepareOnly){ReleaseMutex(mutex);CloseHandle(mutex);return 0;}
         SECURITY_ATTRIBUTES security{sizeof(security),nullptr,TRUE};
-        HANDLE out=CreateFileW((data/L"logs/pet.log").c_str(),FILE_APPEND_DATA,FILE_SHARE_READ|FILE_SHARE_WRITE,&security,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
-        HANDLE err=CreateFileW((data/L"logs/pet.err").c_str(),FILE_APPEND_DATA,FILE_SHARE_READ|FILE_SHARE_WRITE,&security,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
-        HANDLE nul=CreateFileW(L"NUL",GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE,&security,OPEN_EXISTING,0,nullptr);
-        require(out!=INVALID_HANDLE_VALUE&&err!=INVALID_HANDLE_VALUE&&nul!=INVALID_HANDLE_VALUE,"Cannot create diagnostic logs");
-        STARTUPINFOW startup{sizeof(startup)};startup.dwFlags=STARTF_USESTDHANDLES|STARTF_USESHOWWINDOW;startup.wShowWindow=SW_HIDE;startup.hStdOutput=out;startup.hStdError=err;startup.hStdInput=nul;PROCESS_INFORMATION process{};
-        const bool started=CreateProcessW(exe.c_str(),command.data(),nullptr,nullptr,TRUE,CREATE_NO_WINDOW,nullptr,ctx.cache.c_str(),&startup,&process);CloseHandle(out);CloseHandle(err);CloseHandle(nul);require(started,"Cannot start desktop pet");
+        // The core owns opt-in diagnostics; normal launches never open log files.
+        HANDLE nul=CreateFileW(L"NUL",GENERIC_READ|GENERIC_WRITE,FILE_SHARE_READ|FILE_SHARE_WRITE,&security,OPEN_EXISTING,0,nullptr);
+        require(nul!=INVALID_HANDLE_VALUE,"Cannot open process standard streams");
+        STARTUPINFOW startup{sizeof(startup)};startup.dwFlags=STARTF_USESTDHANDLES|STARTF_USESHOWWINDOW;startup.wShowWindow=SW_HIDE;startup.hStdOutput=nul;startup.hStdError=nul;startup.hStdInput=nul;PROCESS_INFORMATION process{};
+        const bool started=CreateProcessW(exe.c_str(),command.data(),nullptr,nullptr,TRUE,CREATE_NO_WINDOW,nullptr,ctx.cache.c_str(),&startup,&process);CloseHandle(nul);require(started,"Cannot start desktop pet");
         WaitForSingleObject(process.hProcess,INFINITE);DWORD code=1;GetExitCodeProcess(process.hProcess,&code);CloseHandle(process.hThread);CloseHandle(process.hProcess);result=int(code);
     }catch(const std::exception& e){if(std::strcmp(e.what(),"Cancelled")!=0)MessageBoxW(nullptr,widen(e.what()).c_str(),L"ba_cafe_lite 启动失败",MB_ICONERROR);}
     if(mutex){ReleaseMutex(mutex);CloseHandle(mutex);}return result;

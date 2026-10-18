@@ -17,6 +17,10 @@ struct VisibleWindowEdges {
         refreshed=now;clear();std::unordered_set<HWND> visited;
         for(HWND w=GetTopWindow(nullptr);w&&visited.insert(w).second;w=GetWindow(w,GW_HWNDNEXT)) {
             if(w==petWindow||!IsWindowVisible(w)||IsIconic(w))continue;
+            // Every actor has an invisible, non-layered input HWND. Neither
+            // it nor another pet surface may occlude desktop window edges.
+            DWORD process=0;GetWindowThreadProcessId(w,&process);
+            if(process==GetCurrentProcessId())continue;
             DWORD cloaked=0;DwmGetWindowAttribute(w,DWMWA_CLOAKED,&cloaked,sizeof(cloaked));if(cloaked)continue;
             const auto style=GetWindowLongPtrW(w,GWL_EXSTYLE);
             if(style&WS_EX_TRANSPARENT)continue;

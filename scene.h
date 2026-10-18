@@ -110,6 +110,7 @@ struct Scene {
         }
     }
     void attach(App& a,bool first){
+        if(!first)a.diagnostics=leader().diagnostics;
         a.grouped=true;a.crowdId=++crowdSerial;
         a.syncRequest=[this]{sync();};a.menuRequest=[this,&a]{roster.selected=a.actorId;save();leader().nativeSettings->show(leader().window,leader().directory);};
         a.closeRequest=[this,&a]{close(a.displayed?a.actorId:roster.selected);};
@@ -264,10 +265,13 @@ struct Scene {
         const unsigned beforeWorkers=cpuJobs.count();NativeHealth::mark("CPU animation batch");
         if(leader().serialCpu)for(const auto& job:jobs)job();else cpuJobs.run(jobs);
         if(cpuJobs.count()!=beforeWorkers)TraceLog(LOG_INFO,"FRAME CPU workers: %u; OpenGL and Win32 remain on the main thread",cpuJobs.count());
-        bool drew=false;for(auto* a:renderActors){const auto before=a->renderedFrames;a->finishRender();drew|=a->renderedFrames!=before;}
+        // Submit all GPU draws before the first synchronous readback. Each
+        // actor retains its own FBO, so no extra frame buffers or frame latency.
+        for(auto* a:renderActors)a->finishRender(true);
+        bool drew=false;for(auto* a:renderActors){const auto before=a->renderedFrames;a->commitRender();drew|=a->renderedFrames!=before;}
         NativeHealth::mark("depth order");orderDepth();if(drew)rlDrawRenderBatchActive();
         const double finished=preciseSeconds();
-        if(!renderActors.empty()){
+        if(leader().diagnostics&&!renderActors.empty()){
             if(previousFrameAt)frameIntervals.push_back((finished-previousFrameAt)*1000);previousFrameAt=finished;
             frameCosts.push_back((finished-sampleAt)*1000);if(!frameStatsAt)frameStatsAt=finished;
             if(finished-frameStatsAt>=3&&!frameIntervals.empty()){

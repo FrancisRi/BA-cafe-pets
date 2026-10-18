@@ -83,7 +83,7 @@ struct App {
     std::filesystem::path storage() const {return dataDirectory.empty()?directory:dataDirectory;}
     std::string reviewClip,initialMode;double reviewTime=0,runSeconds=0;
     bool review=false,fixedPose=false,sampleSpecified=false,done=false,loaded=false,frameReady=false,capturing=false;
-    bool smooth=true,serialCpu=false;
+    bool smooth=true,serialCpu=false,diagnostics=false;
     bool grouped=false,displayed=true,modelSpecified=false,deferRendering=false,pendingRender=false;std::string actorId;
     std::shared_ptr<bool> alive=std::make_shared<bool>(true);
     std::function<void()> menuRequest,closeRequest,loadedCallback,destroyedCallback,tickCallback,settingsChanged,syncRequest,followRequest,depthRequest;
@@ -111,7 +111,7 @@ struct App {
     DesktopGeometry geometry;DirectedWalk directed;NativePreferences preferences;CafeAttention cafeAttention;
     std::unique_ptr<NativeSettings> nativeSettings;
     bool placementNeeded=true,settingsOnLoad=false,menuHintVisible=false;uint64_t placementGeneration=UINT64_MAX;
-    double interactionUntil=0,followPlanAt=0;
+    double interactionUntil=0,followPlanAt=0;POINT followPlannedCursor{};bool hasFollowPlan=false;
     std::optional<Vector2> blockedCursor;
     std::optional<float> restFacing;
     pet::BattleInput deferredInput{};bool deferredCafeClick=false;
@@ -130,10 +130,14 @@ struct App {
         if(deferRendering){pendingRender=true;return;}
         finishRender();
     }
-    void finishRender(){
+    void finishRender(bool deferred=false){
         pendingRender=false;
         if(!renderer||!loaded||!displayed||!window)return;
-        renderer->render(window,inputWindow);frameReady=true;if(renderer->didDraw)++renderedFrames;
+        renderer->render(window,inputWindow,false,{},deferred);if(!deferred)commitRender();
+    }
+    void commitRender(){
+        if(!renderer||!loaded||!displayed||!window)return;
+        renderer->present();frameReady=true;if(renderer->didDraw)++renderedFrames;
         RECT rect{};if(GetWindowRect(window,&rect)){windowPosition=committedOrigin={rect.left,rect.top};
             const auto& p=renderer->state.at("position");committedFoot=ground.screen({p[0],p[1],p[2]});committedFrame=true;}
     }
@@ -491,10 +495,12 @@ struct App {
                 if(turnPhase&&stopTurn.active&&!state.settingsOpen) {
                     state.walkYaw=stopTurn.advance(dt);yaw=float(std::remainder(stopTurn.yaw,360.0));
                 } else if(phaseBefore==pet::Battle::Phase::Moving)state.walkYaw=walkIntentYaw;
-                if(!crowd.active)battleInput.planJump(events,*battle,state,ground,float(state.walkYaw),work.left,work.top,[&](float maximum){
-                    return visibleWindows.distance(ground,float(state.walkYaw),maximum,work.left,work.top,window);
+                const float boundaryHeading=crowd.active?crowd.heading:float(state.walkYaw);
+                battleInput.planJump(events,*battle,state,ground,boundaryHeading,work.left,work.top,[&](float maximum){
+                    return visibleWindows.distance(ground,boundaryHeading,maximum,work.left,work.top,window);
                 });
-                if(events.boundary&&clearJump&&battle->clips.jump>=0&&!clearJump(float(state.walkYaw),state.walkSpeed*state.movementScale*state.clips[battle->clips.jump].duration))events.boundary=false;
+                if(events.boundary&&clearJump&&battle->clips.jump>=0&&!clearJump(boundaryHeading,state.walkSpeed*state.movementScale*(state.clips[battle->clips.jump].duration-events.jumpOffset)))events.boundary=false;
+                if(events.boundary)state.walkYaw=boundaryHeading;
                 if(dragStarted&&!dragging){auto drag=events;drag.dragging=true;drag.petClick=drag.mouseClick=drag.keyPressed=drag.windowClosed=false;battle->tick(0,drag);}
                 const bool allowWalk=state.walkEnabled;state.walkEnabled=preferences.automaticWalk(true,state.inputActive)&&(!preferences.follow||!state.inputActive)&&!directed.active;
                 const bool menuOpen=state.settingsOpen;if(directed.jumping)state.settingsOpen=true;
@@ -596,7 +602,11 @@ struct App {
                         state.log("FOLLOW distance satisfied: stop");
                     }
                 }
-                if(!blockedCursor&&preferences.follow&&(state.inputActive||directed.active&&directed.following)&&travelClip>=0&&!directed.jumping&&!directed.crossing&&preciseNow>=interactionUntil&&(!directed.active||directed.following)&&preciseNow>=followPlanAt){
+                // Replan at up to 20Hz while the cursor moves, but retain the
+                // 150ms stationary cadence for projection/path work.
+                const bool cursorMoved=!hasFollowPlan||std::hypot(double(cursor.x)-followPlannedCursor.x,double(cursor.y)-followPlannedCursor.y)>=2;
+                const bool followDue=preciseNow>=followPlanAt||(cursorMoved&&preciseNow>=followPlanAt-0.10);
+                if(!blockedCursor&&preferences.follow&&(state.inputActive||directed.active&&directed.following)&&travelClip>=0&&!directed.jumping&&!directed.crossing&&preciseNow>=interactionUntil&&(!directed.active||directed.following)&&followDue){
                     const auto foot=ground.screen(ground.position);
                     const auto center=ground.screen({ground.position.x,1.15f*zoom,ground.position.z});
                     const auto side=ground.screen({ground.position.x+geometry.bodyWidth*zoom,1.15f*zoom,ground.position.z});
@@ -613,12 +623,12 @@ struct App {
                         else if(directed.active){const double dx=world.x-ground.position.x,dz=world.z-ground.position.z;
                             if(DesktopPath::trip(ground,geometry,zoom,std::atan2(dx,dz)*RAD2DEG,std::hypot(dx,dz))){directed.target=world;directed.crossing=DesktopPath::crossing(ground,geometry,zoom,world);}}
                     }
-                    followPlanAt=preciseNow+0.15;
+                    followPlanAt=preciseNow+0.15;followPlannedCursor=cursor;hasFollowPlan=true;
                 }
                 if(directed.active){
                     const int jump=battleMode?battle->clips.jump:-1;
-                    const float jumpHeading=std::atan2(directed.target.x-ground.position.x,directed.target.z-ground.position.z)*RAD2DEG;
-                    if(jump>=0&&(!clearJump||clearJump(jumpHeading,0.792*state.movementScale*state.clips[jump].duration))&&directed.planJump(ground,0.792*state.movementScale,state.clips[jump].duration,yaw,dt,[&](float heading,float maximum){return visibleWindows.distance(ground,heading,maximum,work.left,work.top,window,true);}))state.log("FOLLOW JUMP continuous: "+state.clips[jump].name);
+                    if(jump>=0&&directed.planJump(ground,0.792*state.movementScale,state.clips[jump].duration,
+                        [&](float heading,float maximum){return visibleWindows.distance(ground,heading,maximum,work.left,work.top,window,true);},clearJump))state.log("FOLLOW JUMP continuous: "+state.clips[jump].name);
                     const bool following=directed.following;const float oldFacing=directed.finalYaw;
                     const auto steering=[&](float heading,double travel){
                         const auto choice=avoidHeading?avoidHeading(heading,travel):MovementChoice{heading};
@@ -714,7 +724,7 @@ struct App {
             {"desktop",{ground.width,ground.height}},{"viewport",{windowWidth,windowHeight}},{"crop",{crop.x,crop.y}},{"surfaceOrigin",{surfaceOrigin.x,surfaceOrigin.y}},{"position",{displayPosition.x,0,displayPosition.z}},
             {"velocity",{motionVelocity.x,0,motionVelocity.z}},{"motionRemaining",motionRemaining},{"sampleTime",lastTick*1000},{"playbackRate",playbackRate},
             {"smooth",smooth},{"menuHint",menuHintVisible&&!state.settingsOpen},
-            {"zoom",zoom},{"yaw",victory?0:displayYaw},{"outline",state.outlineEnabled},{"outlineMode",preferences.outlineMode},{"outlineWidth",preferences.outlineWidth},{"interacting",left||right},
+            {"zoom",zoom},{"yaw",victory?0:displayYaw},{"outline",state.outlineEnabled},{"outlineMode",preferences.outlineMode},{"renderQuality",preferences.renderQuality},{"outlineWidth",preferences.outlineWidth},{"interacting",left||right},
             {"resting",!left&&!right&&!state.walking&&!directed.active&&!turningWalk&&(battleMode?battle->phase==pet::Battle::Phase::Idle:state.current==cafeIdle)}});
     }
     void captureMouse(){
@@ -785,7 +795,7 @@ struct App {
         return DefWindowProcW(hwnd,message,w,l);
     }
     void initialize(bool leader=true){
-        state.log=[](const std::string& text){std::printf("%s\n",text.c_str());std::fflush(stdout);};
+        state.log=[this](const std::string& text){if(!diagnostics)return;std::printf("%s\n",text.c_str());std::fflush(stdout);};
         state.log(smooth?"VARIANT smooth transitions + braking":"VARIANT regular");
         state.canWalk=[this](double y,double d){return canStartWalk(y,d);};
         std::filesystem::create_directories(storage()/L"behavior");
@@ -826,7 +836,7 @@ struct App {
         if(leader&&!motionTimer)SetTimer(window,1,10,nullptr);
         std::printf("HOST motion timer: %s; clock=steady\n",motionTimer?"high resolution 125 Hz":"Win32 fallback");std::fflush(stdout);
         if(leader){quitHotkey=RegisterHotKey(window,1,MOD_CONTROL|MOD_ALT|MOD_SHIFT|MOD_NOREPEAT,'Q');lookHotkey=RegisterHotKey(window,2,MOD_CONTROL|MOD_ALT|MOD_SHIFT|MOD_NOREPEAT,'L');}
-        renderer=std::make_unique<nativepet::NativeRenderer>();requestModel(model);
+        renderer=std::make_unique<nativepet::NativeRenderer>();renderer->diagnostics=diagnostics;requestModel(model);
     }
     int run(){
         initialize();
@@ -861,7 +871,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     
     int result=1;
     try{
-        GraphicsContext graphics;auto owned=std::make_unique<App>();auto& app=*owned;wchar_t executable[32768]{};GetModuleFileNameW(nullptr,executable,32768);app.directory=std::filesystem::path(executable).parent_path();
+        auto owned=std::make_unique<App>();auto& app=*owned;wchar_t executable[32768]{};GetModuleFileNameW(nullptr,executable,32768);app.directory=std::filesystem::path(executable).parent_path();
         wchar_t dataRoot[32768]{};if(GetEnvironmentVariableW(L"BA_NATIVE_DATA_DIR",dataRoot,32768)>0)app.dataDirectory=std::filesystem::absolute(dataRoot);
         if(app.dataDirectory.empty())app.dataDirectory=app.directory/L"data";
         app.model=app.directory/L"models/Shiroko.glb";
@@ -877,6 +887,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
             else if(flag==L"--mode"&&i+1<argc){app.initialMode=utf8(argv[++i]);app.review=true;}
             else if(flag==L"--smooth")app.smooth=true;
             else if(flag==L"--serial-cpu")app.serialCpu=true;
+            else if(flag==L"--diagnostics")app.diagnostics=true;
             else if(flag==L"--settings")app.settingsOnLoad=true;
             else if(flag==L"--zoom"&&i+1<argc)app.zoom=std::clamp(float(std::wcstod(argv[++i],nullptr)),0.45f,1.65f);
             else if(flag==L"--snapshot"&&i+1<argc){app.snapshot=std::filesystem::absolute(argv[++i]);app.review=true;}
@@ -885,9 +896,14 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         }LocalFree(argv);
         if(!app.initialMode.empty()&&app.initialMode!="cafe"&&app.initialMode!="battle")throw std::runtime_error("Mode must be cafe or battle");
         app.fixedPose=app.review&&(app.initialMode.empty()||!app.reviewClip.empty()||app.sampleSpecified);
-        std::filesystem::create_directories(app.storage()/L"logs");
-        _wfreopen((app.storage()/L"logs/pet.log").c_str(),L"a",stdout);_wfreopen((app.storage()/L"logs/pet.err").c_str(),L"a",stderr);
-        NativeHealth health(app.storage()/L"logs");
+        std::unique_ptr<NativeHealth> health;
+        if(app.diagnostics){
+            std::filesystem::create_directories(app.storage()/L"logs");
+            _wfreopen((app.storage()/L"logs/pet.log").c_str(),L"a",stdout);_wfreopen((app.storage()/L"logs/pet.err").c_str(),L"a",stderr);
+            health=std::make_unique<NativeHealth>(app.storage()/L"logs");
+        }else{_wfreopen(L"NUL",L"w",stdout);_wfreopen(L"NUL",L"w",stderr);}
+        SetTraceLogLevel(app.diagnostics?LOG_INFO:LOG_NONE);
+        GraphicsContext graphics;
         Scene scene(std::move(owned));result=scene.run();
     }catch(const std::exception& e){std::fprintf(stderr,"Startup: %s\n",e.what());MessageBoxW(nullptr,wide(e.what()).c_str(),L"ba_cafe_lite_native",MB_ICONERROR);}
     return result;

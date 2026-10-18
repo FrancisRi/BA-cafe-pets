@@ -12,21 +12,26 @@ class NativeRenderer {
     unsigned reusedFrames=0,reusedMasks=0;double changedMeshes=0;
     HFONT hintFont{};std::vector<RECT> inputRegion;std::vector<unsigned char> regionBytes;
     HWND regionWindow{};int regionWidth=0,regionHeight=0;
-    std::array<double,20> frameKey{};bool frameValid=false;
+    std::array<double,21> frameKey{};bool frameValid=false;
     bool cpuPrepared=false,preparedChanged=false;double preparedAt=0,uploadMs=0;
+    struct PendingPresentation {
+        HWND display{},input{};bool ready=false,screenshot=false;double now=0;
+        std::filesystem::path output;std::array<double,21> key{};
+    } pending;
     void statistics(double);
     int factorLocation=-1,alphaLocation=-1,cutoffLocation=-1,hullWidthLocation=-1,texelLocation=-1,radiusLocation=-1;
     std::vector<RECT> region;
-    void resize(int,int);void drawHint(const Json&);
+    void resize(int,int,int);void drawHint(const Json&);
 public:
     // Presentation crop only. Never fed into ground position, camera or drag bounds.
     POINT surfaceOffset{};int surfaceWidth=0,surfaceHeight=0;
-    bool didDraw=false;
+    bool didDraw=false,diagnostics=false;
     std::unique_ptr<GltfModel> model;Json state;
     NativeRenderer();~NativeRenderer();
     void load(const std::filesystem::path&,const std::function<void(int,const std::string&)>&);
     void prepareCpu(double now); // No OpenGL, HWND or shared raylib state.
-    void resume(){sampledAt=statsAt=0;cpuPrepared=frameValid=false;frames=reusedFrames=reusedMasks=0;meshMs=readMs=presentMs=maskMs=layerMs=changedMeshes=uploadMs=0;}
-    void render(HWND display,HWND input,bool screenshot=false,const std::filesystem::path& output={});
+    void resume(){pending.ready=false;sampledAt=statsAt=0;cpuPrepared=frameValid=false;frames=reusedFrames=reusedMasks=0;meshMs=readMs=presentMs=maskMs=layerMs=changedMeshes=uploadMs=0;}
+    void render(HWND display,HWND input,bool screenshot=false,const std::filesystem::path& output={},bool deferPresentation=false);
+    void present(); // Same frame, after all actors have submitted their GPU work.
 };
 }

@@ -15,7 +15,7 @@ struct NativeSettings {
  static constexpr int MenuWidth=740;
  static int u(int value){return MulDiv(value,3,2);} // Menu text and spacing +50%.
  inline static const Field fields[]={
-  {"mode",L"当前角色模式",2},{"outlineMode",L"角色线条",2},{"outlineWidth",L"线条粗细（10–300%）",3},
+  {"mode",L"当前角色模式",2},{"renderQuality",L"渲染精度",2},{"outlineMode",L"角色线条",2},{"outlineWidth",L"线条粗细（10–300%）",3},
   {"wandering",L"允许散步",0},{"follow",L"位置跟随鼠标",0},{"followNear",L"最近跟随距离（身位）",1},{"followFar",L"最远跟随距离（身位）",1},
   {"idleSeconds",L"无输入等待（秒）",1},{"activeSeconds",L"持续输入时间（秒）",1},{"moveInterval",L"走动间隔（秒）",1},{"moveBodies",L"走动距离（身位）",1},
   {"walkTimeJitter",L"等待随机幅度（±%）",1},{"walkDistanceJitter",L"距离随机幅度（±%）",1},
@@ -38,12 +38,12 @@ struct NativeSettings {
    note(L"关闭最后一个角色时会确认退出；删除列表不删除 GLB。",40);
   }else{
    note(page==0?L"参数由所有角色共享，模式只应用到当前角色。":page==1?L"持续输入后追踪视线，无输入后散步。":L"按键攻击 · 特定标点换弹 · 持续输入短走或 EX",38);
-   for(size_t i=0;i<std::size(fields);i++){if((page==0&&i>=13)||(page==1&&(i<13||i>=15))||(page==2&&i<15))continue;const auto& f=fields[i];
-    if(i==0)section(L"角色与显示");if(i==3)section(L"移动与跟随");if(i==7)section(L"触发时间与随机变化");if(i==13)section(L"视线追踪");if(i==15)section(L"战斗动作");
+   for(size_t i=0;i<std::size(fields);i++){if((page==0&&i>=14)||(page==1&&(i<14||i>=16))||(page==2&&i<16))continue;const auto& f=fields[i];
+    if(i==0)section(L"角色与显示");if(i==4)section(L"移动与跟随");if(i==8)section(L"触发时间与随机变化");if(i==14)section(L"视线追踪");if(i==16)section(L"战斗动作");
     HWND input{},label{};if(f.kind==0)input=control(panel,L"BUTTON",f.title,BS_OWNERDRAW,100+int(i),18,y,464,38);
     else{label=control(panel,L"STATIC",f.title,0,0,18,y+8,282,26);content.push_back(label);input=control(panel,f.kind==3?TRACKBAR_CLASSW:f.kind==1?L"EDIT":L"COMBOBOX",L"",f.kind==3?TBS_HORZ|TBS_NOTICKS:f.kind==1?WS_BORDER|ES_AUTOHSCROLL:CBS_DROPDOWNLIST|WS_VSCROLL,100+int(i),326,y,156,f.kind==2?180:34);if(f.kind==1)SendMessageW(input,EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(u(8),u(6)));if(f.kind==3)SendMessageW(input,TBM_SETRANGE,TRUE,MAKELPARAM(10,300));
-     if(f.kind==2){const auto add=[&](const wchar_t* text){SendMessageW(input,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(text));};if(f.key=="mode"){add(L"咖啡厅");if(last.value("battleAvailable",false))add(L"战斗");}else if(f.key=="outlineMode"){add(L"无");add(L"轮廓模式");add(L"线条模式");}else{add(L"平滑");add(L"30° 再追踪");}}
-    }controls.push_back({f,input,label});content.push_back(input);y+=50;
+     if(f.kind==2){const auto add=[&](const wchar_t* text){SendMessageW(input,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(text));};if(f.key=="mode"){add(L"咖啡厅");if(last.value("battleAvailable",false))add(L"战斗");}else if(f.key=="renderQuality"){add(L"省电");add(L"均衡");add(L"清晰");}else if(f.key=="outlineMode"){add(L"无");add(L"轮廓模式");add(L"线条模式");}else{add(L"平滑");add(L"30° 再追踪");}}
+    }controls.push_back({f,input,label});content.push_back(input);y+=50;if(f.key=="renderQuality")note(L"降低精度可减轻显卡负担；放大时边缘会更粗糙。",40);
    }
    if(page==0){note(L"散步：无输入后的随机移动。跟随：区间外启动，停在中点。\n最近距离为 0 时不远离鼠标；跟随不受散步开关限制。",48);content.push_back(control(panel,L"BUTTON",L"+  导入 GLB",BS_PUSHBUTTON,2200,18,y,226,36));content.push_back(control(panel,L"BUTTON",L"恢复默认",BS_PUSHBUTTON,2201,256,y,226,36));y+=50;}
    if(page==1)note(L"平滑：连续转身。30°：达到角度阈值后转身。\n位置跟随与距离在「全局」设置。",48);

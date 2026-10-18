@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(ba_cafe_lite_native VERSION 0.2.12 LANGUAGES C CXX RC)
+project(ba_cafe_lite_native VERSION 0.2.15 LANGUAGES C CXX RC)
 if(NOT WIN32)
     message(FATAL_ERROR "This desktop prototype requires Windows")
 endif()

@@ -25,9 +25,9 @@ int main(){try{
         check(Vector3Distance(sampled,reference)<2e-6,"Frame movement must follow the render timestamp, not the last 125Hz step");
         const auto foot=ground.screen(sampled);const auto dragged=draggedFrameOrigin({320,160},{500,600},foot);check(dragged.x==320+LONG(std::lround(foot.x-500)),"Cached drag depends on committed foot, not a recentered crop");previous=foot;
     }
-    std::mt19937 rng(123);for(int width:{1,2,7,32})for(int height:{1,3,20}){
+    std::mt19937 rng(123);for(int width:{1,2,7,32,351,416})for(int height:{1,3,20,609}){
         std::vector<unsigned char> pixels(size_t(width)*height*4),dib(pixels.size());std::vector<RECT> region;
-        for(auto& value:pixels)value=unsigned(rng()%256);nativePixels(pixels.data(),dib.data(),width,height,region);
+        for(auto& value:pixels)value=unsigned(rng()%256);for(size_t i=3;i<pixels.size();i+=4)pixels[i]=static_cast<unsigned char>(rng()%25);nativePixels(pixels.data(),dib.data(),width,height,region);
         for(int y=0;y<height;++y)for(int x=0;x<width;++x){const auto* src=pixels.data()+(size_t(height-1-y)*width+x)*4;const auto* dst=dib.data()+(size_t(y)*width+x)*4;
             check(dst[0]==src[2]&&dst[1]==src[1]&&dst[2]==src[0]&&dst[3]==src[3],"Display pixels must retain exact BGRA and alpha");
             bool included=false;for(const auto& r:region)included|=x>=r.left&&x<r.right&&y>=r.top&&y<r.bottom;
