@@ -21,7 +21,7 @@ cmake --build build --target ba_cafe_lite_native -j 4
 
 CMake 会下载并校验固定版本的 raylib 6.0 与 BehaviorTree.CPP 4.8.0。可将相应源码放入 `vendor/raylib-6.0`、`vendor/BehaviorTree.CPP-4.8.0` 进行本地构建；首次下载需要网络。cgltf 位于 `shared/`。
 
-当前保留上游 CMake 版本号 `0.2.15`、可执行文件名称和用户数据目录，以维持构建及数据兼容。本分支新增功能记为 [Unreleased](../release/CHANGELOG.md)，源码推送不等于已经发布新的安装包。
+本分支从 **1.0.0** 开始独立编号，不沿用原作者版本号。`0.2.15` 仅表示源码来源基线。原生程序内部文件名及持久数据目录继续保留，以维持数据兼容；对外发行文件使用 `BA-Cafe-Pets-版本号` 命名。
 
 ## 代码入口
 
@@ -80,8 +80,8 @@ $scratch = Join-Path $PWD ('artifacts/model-library-' + [guid]::NewGuid().ToStri
 pwsh -File ./package.ps1
 ```
 
-脚本生成单 EXE、便携 ZIP、SHA-256 校验文件及发行清单，输出到 `dist/`，同时生成根目录的运行入口。只打包默认模型、程序资源和许可文件，不打包本地 `data/` 或额外模型。
+脚本生成 `BA-Cafe-Pets-版本号-x64.exe`、便携 ZIP、SHA-256 校验文件及发行清单，输出到 `dist/`，同时生成根目录的 `BA-Cafe-Pets.exe`。只打包默认模型、程序资源和许可文件，不打包本地 `data/` 或额外模型。
 
-正式发布前需更新 CMake 项目版本号和变更记录，确认二进制版本、默认配置、许可文件及空用户数据的启动结果，再将产物发布至 [本分支 Releases](https://github.com/FrancisRi/BA-cafe-pets/releases)。本次仓库初始化只发布源码。
+正式发布前需更新 CMake 项目版本号和变更记录，确认二进制版本、默认配置、许可文件及空用户数据的启动结果，再将产物发布至 [本分支 Releases](https://github.com/FrancisRi/BA-cafe-pets/releases)。Git 标签使用本分支版本号，例如 `v1.0.0`，与程序版本及发行文件名对应。
 
 单文件启动器仍使用原数据目录 `%LOCALAPPDATA%/ba_cafe_lite_native/data/`，与原版共用该位置。需要完全独立配置时，可使用便携版或通过原生程序的 `--data-dir` 指定目录。升级前退出旧进程，并在关闭程序后备份整个 `data/`。

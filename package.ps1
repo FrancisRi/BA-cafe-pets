@@ -6,15 +6,15 @@ if($project -notmatch 'project\(ba_cafe_lite_native VERSION (\d+\.\d+\.\d+)'){th
 $version=$Matches[1]
 $base=Join-Path $PSScriptRoot 'build/bin'
 $dist=Join-Path $root 'dist'
-$output=Join-Path $dist ('ba_cafe_lite-'+$version+'-x64.exe')
-$zip=Join-Path $dist ('ba_cafe_lite-'+$version+'-portable-x64.zip')
+$output=Join-Path $dist ('BA-Cafe-Pets-'+$version+'-x64.exe')
+$zip=Join-Path $dist ('BA-Cafe-Pets-'+$version+'-portable-x64.zip')
 if((Test-Path -LiteralPath $output) -or (Test-Path -LiteralPath $zip)){throw 'Release already exists; increment the native CMake project version first'}
 if(!$SkipBuild){& (Join-Path $PSScriptRoot 'build.ps1') -Jobs $Jobs -ExecutableName ba_cafe_lite_native_release -Release}
 $core=Join-Path $base 'ba_cafe_lite_native_release.exe'
 $launcher=Join-Path $base 'ba_cafe_lite_release_launcher.exe'
 foreach($binary in @($core,$launcher)){
     $info=(Get-Item -LiteralPath $binary).VersionInfo
-    if($info.ProductName -ne 'ba_cafe_lite' -or $info.ProductVersion -ne $version){throw 'Release binaries do not match the current source version'}
+    if($info.ProductName -ne 'BA Cafe Pets' -or $info.ProductVersion -ne $version){throw 'Release binaries do not match the current source version'}
 }
 $work=Join-Path $root ('artifacts/native-release-'+$version+'/'+[guid]::NewGuid().ToString('N'))
 $stage=Join-Path $work 'stage'
@@ -41,7 +41,7 @@ if($strip){
     }
 }
 $files=Get-ChildItem -LiteralPath $stage -File -Recurse | Sort-Object FullName
-$manifest=@{project='ba_cafe_lite';version=$version;architecture='x64';engine='raylib-cgltf';defaultModel='Shiroko';files=@()}
+$manifest=@{project='BA-cafe-pets';version=$version;architecture='x64';engine='raylib-cgltf';defaultModel='Shiroko';upstream='https://github.com/maxiumlee/ba-cafe-lite';files=@()}
 foreach($file in $files){
     $manifest.files+=@{path=[IO.Path]::GetRelativePath($stage,$file.FullName).Replace('\','/');size=$file.Length;sha256=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash}
 }
@@ -82,8 +82,8 @@ foreach($file in @($output,$zip)){
     $hash=(Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash
     ($hash+'  '+[IO.Path]::GetFileName($file)) | Set-Content -LiteralPath ($file+'.sha256') -Encoding ascii
 }
-Copy-Item -LiteralPath (Join-Path $stage 'README.txt') -Destination (Join-Path $dist ('ba_cafe_lite-'+$version+'-README.txt'))
-Copy-Item -LiteralPath (Join-Path $stage 'release.json') -Destination (Join-Path $dist ('ba_cafe_lite-'+$version+'-release.json'))
-$entry=if($RootExecutablePath){[IO.Path]::GetFullPath($RootExecutablePath)}else{Join-Path $root 'ba_cafe_lite.exe'}
+Copy-Item -LiteralPath (Join-Path $stage 'README.txt') -Destination (Join-Path $dist ('BA-Cafe-Pets-'+$version+'-README.txt'))
+Copy-Item -LiteralPath (Join-Path $stage 'release.json') -Destination (Join-Path $dist ('BA-Cafe-Pets-'+$version+'-release.json'))
+$entry=if($RootExecutablePath){[IO.Path]::GetFullPath($RootExecutablePath)}else{Join-Path $root 'BA-Cafe-Pets.exe'}
 Copy-Item -LiteralPath $output -Destination $entry -Force
 [pscustomobject]@{EXE=$output;RootEXE=$entry;EXEMiB=[math]::Round((Get-Item $output).Length/1MB,2);ZIP=$zip;ZIPMiB=[math]::Round((Get-Item $zip).Length/1MB,2);ExpandedMiB=[math]::Round($expanded/1MB,2);Artifacts=$work}

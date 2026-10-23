@@ -8,7 +8,7 @@
 
 **本分支维护：FrancisRi · [BA-cafe-pets](https://github.com/FrancisRi/BA-cafe-pets)**
 
-本项目基于原版 `0.2.15`（提交 `e6f5cba`）继续开发，保留原始 Git 历史及第三方声明。完整致谢见 [CREDITS.md](CREDITS.md)，许可状态见 [NOTICE.md](NOTICE.md)。
+本项目基于原版 `0.2.15`（提交 `e6f5cba`）继续开发，采用独立版本号，首个正式版为 **v1.0.0**，保留原始 Git 历史及第三方声明。完整致谢见 [CREDITS.md](CREDITS.md)，许可状态见 [NOTICE.md](NOTICE.md)。
 
 ## 本分支功能
 
@@ -25,7 +25,13 @@
 
 ## 获取与运行
 
-当前以源码构建为准。后续发行文件见[本仓库 Releases](https://github.com/FrancisRi/BA-cafe-pets/releases)；原项目的发行包对应原版功能。
+从[本仓库 Releases](https://github.com/FrancisRi/BA-cafe-pets/releases/latest)下载 Windows x64 发行包：
+
+- `BA-Cafe-Pets-1.0.0-x64.exe`：单文件版，双击运行，首次启动自动释放离线资源。
+- `BA-Cafe-Pets-1.0.0-portable-x64.zip`：便携版，完整解压后运行 `ba_cafe_lite.exe`。
+- 对应的 `.sha256` 文件：用于核对下载文件的 SHA-256。
+
+也可以按下列步骤从源码构建。
 
 运行要求：Windows 10/11 x64，显卡驱动支持 OpenGL 3.3。运行编译后的程序不需要 Blender、Node.js、Python、WebView2 或开发工具链。
 
@@ -105,7 +111,7 @@ cmake --build build --target ba_cafe_lite_native -j 4
 - 支持内嵌 PNG/JPEG 贴图与缓冲区的 GLB 2.0，不含 Draco、Meshopt、KTX2 等解码器。
 - 模型的动作完整性、命名及特殊部件会影响适配效果；导入成功不等于所有动作均已逐帧核对。
 - 目标为 60 FPS，实际性能随模型数量、大小、渲染档位及设备而变化。
-- 当前 CMake 版本号沿用上游 `0.2.15`，本分支新增功能记为 Unreleased；尚未提供自动更新。
+- 本分支从 `1.0.0` 开始独立编号，不沿用原项目版本号；尚未提供自动更新。
 
 原版算法和历史说明保留于 [docs/UPSTREAM_README.zh-CN.md](docs/UPSTREAM_README.zh-CN.md)。
 

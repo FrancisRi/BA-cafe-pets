@@ -1,12 +1,14 @@
-BA Cafe Pets · Windows x64
+BA Cafe Pets 1.0.0 · Windows x64
 
 基于 maxiumlee（Max）的 ba-cafe-lite 继续开发。
 原作者：https://github.com/maxiumlee/ba-cafe-lite
 本分支：https://github.com/FrancisRi/BA-cafe-pets
-当前保留原版的可执行文件名、0.2.15 版本基线与持久数据目录。
+本分支采用独立版本号，首个正式版为 1.0.0；原版 0.2.15 仅表示源码来源基线。
+内部程序文件名及持久数据目录继续保留，以兼容已有配置。
 
 启动
-  双击发行包中的 ba_cafe_lite.exe，默认角色 Shiroko。
+  单文件版双击 BA-Cafe-Pets-1.0.0-x64.exe；便携版解压后运行 ba_cafe_lite.exe。
+  默认角色 Shiroko。
   不需要 Blender、浏览器、WebView2、Python 或开发环境。
   便携 ZIP 请完整解压，保留 models、defaults.ini、behavior 和 licenses。
 
