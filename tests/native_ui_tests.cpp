@@ -30,6 +30,40 @@ static std::vector<unsigned char> drawButton(NativeSettings& menu,HWND button,UI
     const size_t size=size_t(rect.right)*rect.bottom*4;auto* start=static_cast<unsigned char*>(pixels);std::vector<unsigned char> image(start,start+size);
     SelectObject(memory,old);DeleteObject(bitmap);DeleteDC(memory);ReleaseDC(button,dc);return image;
 }
+struct ControlPixels {
+    HWND window;HDC dc{};HBITMAP bitmap{};HGDIOBJ previous{};unsigned char* pixels{};int width,height;
+    explicit ControlPixels(HWND hwnd):window(hwnd){
+        RECT rect{};GetClientRect(hwnd,&rect);width=rect.right;height=rect.bottom;auto source=GetDC(hwnd);dc=CreateCompatibleDC(source);
+        BITMAPINFO info{};info.bmiHeader={sizeof(BITMAPINFOHEADER),width,-height,1,32,BI_RGB};void* data{};
+        bitmap=CreateDIBSection(source,&info,DIB_RGB_COLORS,&data,nullptr,0);ReleaseDC(hwnd,source);check(bitmap&&dc,"Allocate UI pixel probe");pixels=static_cast<unsigned char*>(data);previous=SelectObject(dc,bitmap);
+    }
+    ~ControlPixels(){SelectObject(dc,previous);DeleteObject(bitmap);DeleteDC(dc);}
+    std::vector<unsigned char> read(bool print=false){
+        if(print){NativeFluent::fill(dc,{0,0,width,height},RGB(255,0,255));SendMessageW(window,WM_PRINTCLIENT,reinterpret_cast<WPARAM>(dc),PRF_CLIENT|PRF_ERASEBKGND);}
+        else{auto source=GetDC(window);check(BitBlt(dc,0,0,width,height,source,0,0,SRCCOPY),"Read actual window pixels");ReleaseDC(window,source);}
+        GdiFlush();std::vector<unsigned char> image(pixels,pixels+size_t(width)*height*4);for(size_t i=3;i<image.size();i+=4)image[i]=0;return image;
+    }
+};
+static void checkRepainting(NativeSettings& menu){
+    for(int appearance:{0,1})for(UINT dpi:{96u,144u,192u}){
+        menu.reloadTheme(menu.window,dpi,appearance);SetWindowPos(menu.window,nullptr,0,0,menu.u(920),menu.u(680),SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);menu.scrollTo(0);pump(menu);
+        RedrawWindow(menu.panel,nullptr,nullptr,RDW_INVALIDATE|RDW_ERASE|RDW_ALLCHILDREN|RDW_UPDATENOW);pump(menu);
+        const auto slider=GetDlgItem(menu.panel,103);ControlPixels track(slider);
+        const auto live=track.read(),printed=track.read(true);
+        check(live==printed,"Slider must use the same Fluent drawing for normal and composited repainting");
+        ControlPixels panel(menu.panel);
+        for(int offset:{40,192,288,96,400,240,0}){
+            menu.scrollTo(menu.u(offset));pump(menu);const auto incremental=panel.read();
+            RedrawWindow(menu.panel,nullptr,nullptr,RDW_INVALIDATE|RDW_ERASE|RDW_ALLCHILDREN|RDW_UPDATENOW);pump(menu);
+            check(incremental==panel.read(),"Scrolled settings must match a fresh repaint without stale labels or controls");
+        }
+    }
+    menu.reloadTheme(menu.window,96);menu.scrollTo(0);pump(menu);
+    const auto slider=GetDlgItem(menu.panel,103);SetFocus(slider);SendMessageW(slider,WM_KEYDOWN,VK_HOME,0);check(SendMessageW(slider,TBM_GETPOS,0,0)==10,"Styled slider retains Home navigation");SendMessageW(slider,WM_KEYDOWN,VK_END,0);check(SendMessageW(slider,TBM_GETPOS,0,0)==300,"Styled slider retains End navigation");
+    RECT channel{},bounds{};SendMessageW(slider,TBM_GETCHANNELRECT,0,reinterpret_cast<LPARAM>(&channel));GetClientRect(slider,&bounds);const int x=channel.left+(channel.right-channel.left)/4,y=bounds.bottom/2;
+    SendMessageW(slider,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(x,y));SendMessageW(slider,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(x,y));SendMessageW(slider,WM_LBUTTONUP,0,MAKELPARAM(x,y));
+    check(SendMessageW(slider,TBM_GETPOS,0,0)<300,"Styled slider retains pointer interaction");SetFocus(menu.window);
+}
 static void capture(HWND hwnd,const std::filesystem::path& path){
     RedrawWindow(hwnd,nullptr,nullptr,RDW_INVALIDATE|RDW_UPDATENOW|RDW_ALLCHILDREN|RDW_ERASE);
     RECT r{};GetWindowRect(hwnd,&r);const int width=r.right-r.left,height=r.bottom-r.top;
@@ -83,7 +117,7 @@ int main(int argc,char** argv){
         menu.quickCommand(3013);check(sent.back().at("type")=="open_models_folder","Quick menu opens the persistent model folder");
         size_t fieldCount=0;for(int p=0;p<3;++p){menu.page=p;menu.build();fieldCount+=menu.controls.size();for(const auto& c:menu.controls)check(IsWindow(c.input),"Every existing setting has a real input control");}
         check(fieldCount==21,"All twenty-one settings survive the redesign");
-        menu.page=0;menu.build();SetWindowTextW(GetDlgItem(menu.panel,108),L"not a number");const auto invalidCount=sent.size();menu.save();check(sent.size()==invalidCount,"Invalid numeric input is not submitted");
+        menu.page=0;menu.build();checkRepainting(menu);SetWindowTextW(GetDlgItem(menu.panel,108),L"not a number");const auto invalidCount=sent.size();menu.save();check(sent.size()==invalidCount,"Invalid numeric input is not submitted");
         const auto quality=GetDlgItem(menu.panel,101);wchar_t qualityLabel[80]{};SendMessageW(quality,CB_GETLBTEXT,2,reinterpret_cast<LPARAM>(qualityLabel));check(std::wstring(qualityLabel).find(L"4× MSAA")!=std::wstring::npos,"Quality choice explicitly identifies MSAA");
         const auto samplingLabel=GetDlgItem(menu.panel,2111);check(samplingLabel,"Global settings expose actual sampling status");
         const auto samplingText=[&]{wchar_t text[256]{};GetWindowTextW(samplingLabel,text,256);return std::wstring(text);};
@@ -149,6 +183,6 @@ int main(int argc,char** argv){
             menu.page=0;menu.show(nullptr,std::filesystem::current_path());menu.reloadTheme(menu.window,GetDpiForSystem(),0);pump(menu);capture(menu.window,output/L"settings-light.bmp");menu.hide();
             menu.showQuick(nullptr,std::filesystem::current_path());menu.reloadTheme(menu.quickWindow,GetDpiForSystem(),0);pump(menu);capture(menu.quickWindow,output/L"quick-light.bmp");menu.hide();
         }
-        std::cout<<"Native UI regression checks passed: quick roster, caps, mode/follow, loading, full settings, validation, visibility and DPI.\n";return 0;
+        std::cout<<"Native UI regression checks passed: incremental repaint pixels, Fluent sliders, quick roster, caps, mode/follow, loading, full settings, validation, visibility and DPI.\n";return 0;
     }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
 }

@@ -88,16 +88,24 @@ struct NativeSettings {
         // Showing the native scrollbar changes the client width. Set its range
         // before measuring the cards, including after a DPI or page change.
         SCROLLINFO info{sizeof(info),SIF_ALL,0,std::max(0,u(contentHeight)-1),UINT(r.bottom),scroll,0};SetScrollInfo(panel,SB_VERT,&info,TRUE);const int width=panelWidth();
-        for(const auto& p:placements)SetWindowPos(p.hwnd,nullptr,u(p.x),u(p.y)-scroll,u(p.stretch?width:p.w),u(p.h),SWP_NOZORDER|SWP_NOACTIVATE);
+        struct Move {HWND hwnd;int x,y,w,h;};std::vector<Move> moves;moves.reserve(placements.size()+controls.size()*3);
+        const auto place=[&](HWND hwnd,int x,int y,int w,int h){moves.push_back({hwnd,u(x),u(y)-scroll,u(w),u(h)});};
+        for(const auto& p:placements)place(p.hwnd,p.x,p.y,p.stretch?width:p.w,p.h);
         for(const auto& c:controls){const int widthInput=c.field->kind==3||std::string(c.field->key)=="renderQuality"?184:156;
-            if(c.field->kind==0)SetWindowPos(c.input,nullptr,u(16),u(c.y)-scroll,u(width),u(68),SWP_NOZORDER|SWP_NOACTIVATE);
+            if(c.field->kind==0)place(c.input,16,c.y,width,68);
             else{
-                SetWindowPos(c.label,nullptr,u(64),u(c.y+12)-scroll,u(std::max(80,width-widthInput-82)),u(22),SWP_NOZORDER|SWP_NOACTIVATE);
-                SetWindowPos(c.hint,nullptr,u(64),u(c.y+36)-scroll,u(std::max(80,width-widthInput-82)),u(20),SWP_NOZORDER|SWP_NOACTIVATE);
-                SetWindowPos(c.input,nullptr,u(width-widthInput),u(c.y+17)-scroll,u(widthInput),u(c.field->kind==2?260:34),SWP_NOZORDER|SWP_NOACTIVATE);
+                place(c.label,64,c.y+12,std::max(80,width-widthInput-82),22);
+                place(c.hint,64,c.y+36,std::max(80,width-widthInput-82),20);
+                place(c.input,width-widthInput,c.y+17,widthInput,c.field->kind==2?260:34);
             }
         }
-        InvalidateRect(panel,nullptr,TRUE);
+        // Moving siblings individually lets Win32 copy pixels from other cards.
+        // Position without copying/redrawing, then repaint the whole subtree.
+        constexpr UINT flags=SWP_NOZORDER|SWP_NOACTIVATE|SWP_NOREDRAW|SWP_NOCOPYBITS;
+        auto batch=BeginDeferWindowPos(int(moves.size()));
+        for(const auto& p:moves){if(!batch)break;batch=DeferWindowPos(batch,p.hwnd,nullptr,p.x,p.y,p.w,p.h,flags);}
+        if(!batch||!EndDeferWindowPos(batch))for(const auto& p:moves)SetWindowPos(p.hwnd,nullptr,p.x,p.y,p.w,p.h,flags);
+        RedrawWindow(panel,nullptr,nullptr,RDW_INVALIDATE|RDW_ERASE|RDW_ALLCHILDREN|RDW_UPDATENOW);
     }
     void revealModelList(){
         if(!list||!panel)return;RECT bounds{},viewport{};GetWindowRect(list,&bounds);MapWindowPoints(nullptr,panel,reinterpret_cast<POINT*>(&bounds),2);GetClientRect(panel,&viewport);
@@ -431,6 +439,7 @@ struct NativeSettings {
             SetBkMode(dc,TRANSPARENT);SetTextColor(dc,!IsWindowEnabled(child)?theme.disabled:GetPropW(child,L"FluentMuted")?theme.muted:theme.text);SetBkColor(dc,context||compact||card?theme.surface:theme.canvas);return reinterpret_cast<LRESULT>(context||compact||card?theme.surfaceBrush:theme.canvasBrush);
         }
         if(msg==WM_DRAWITEM){self->draw(*reinterpret_cast<DRAWITEMSTRUCT*>(l));return TRUE;}if(msg==WM_MEASUREITEM){auto* item=reinterpret_cast<MEASUREITEMSTRUCT*>(l);if(item->CtlType==ODT_COMBOBOX){item->itemHeight=theme.px(32);return TRUE;}if(item->CtlID==2000||item->CtlID==3200){item->itemHeight=theme.px(item->CtlID==3200?36:64);return TRUE;}}
+        if(msg==WM_PRINTCLIENT){self->paint(hwnd,reinterpret_cast<HDC>(w));return 0;}
         if(msg==WM_ERASEBKGND)return 1;if(msg==WM_PAINT){PAINTSTRUCT ps{};auto dc=BeginPaint(hwnd,&ps);self->paint(hwnd,dc);EndPaint(hwnd,&ps);return 0;}return DefWindowProcW(hwnd,msg,w,l);
     }
     void ensureFull(){

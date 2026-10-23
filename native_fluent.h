@@ -92,8 +92,11 @@ struct NativeFluent {
         if(msg==WM_KEYDOWN&&(w==VK_TAB||w==VK_LEFT||w==VK_RIGHT||w==VK_UP||w==VK_DOWN))SendMessageW(GetAncestor(hwnd,GA_ROOT),WM_CHANGEUISTATE,MAKEWPARAM(UIS_CLEAR,UISF_HIDEFOCUS),0);
         const bool combo=std::wcscmp(cls,L"ComboBox")==0,slider=std::wcscmp(cls,TRACKBAR_CLASSW)==0;
         if(theme&&combo&&msg==WM_NCPAINT)return 0;
-        if(theme&&(combo||slider)&&msg==WM_PAINT){
-            PAINTSTRUCT ps{};const auto dc=BeginPaint(hwnd,&ps);RECT r{};GetClientRect(hwnd,&r);fill(dc,r,theme->surface);
+        if(theme&&(combo||slider)&&msg==WM_ERASEBKGND){RECT r{};GetClientRect(hwnd,&r);fill(reinterpret_cast<HDC>(w),r,theme->surface);return 1;}
+        if(theme&&(combo||slider)&&(msg==WM_PAINT||msg==WM_PRINTCLIENT||msg==WM_PRINT)){
+            if(msg==WM_PRINT&&((l&PRF_CHECKVISIBLE)&&!IsWindowVisible(hwnd)))return 0;
+            if(msg==WM_PRINT&&!(l&PRF_CLIENT))return 0;
+            PAINTSTRUCT ps{};const bool printing=msg!=WM_PAINT;const auto dc=printing?reinterpret_cast<HDC>(w):BeginPaint(hwnd,&ps);RECT r{};GetClientRect(hwnd,&r);fill(dc,r,theme->surface);
             const bool enabled=IsWindowEnabled(hwnd),hot=GetPropW(hwnd,L"FluentHover")!=nullptr;
             if(combo){
                 round(dc,r,hot?theme->hover:theme->surface,theme->line,theme->px(6));
@@ -110,7 +113,7 @@ struct NativeFluent {
                 const int knob=theme->px(hot?6:5);RECT inner{cx-knob,cy-knob,cx+knob,cy+knob};round(dc,inner,enabled?theme->accent:theme->disabled,enabled?theme->accent:theme->disabled,knob*2);
                 theme->focus(dc,r,hwnd,GetFocus()==hwnd);
             }
-            EndPaint(hwnd,&ps);return 0;
+            if(!printing)EndPaint(hwnd,&ps);return 0;
         }
         if(msg==WM_MOUSEMOVE&&!GetPropW(hwnd,L"FluentHover")){
             SetPropW(hwnd,L"FluentHover",reinterpret_cast<HANDLE>(1));TRACKMOUSEEVENT track{sizeof(track),TME_LEAVE,hwnd,0};TrackMouseEvent(&track);InvalidateRect(hwnd,nullptr,FALSE);
