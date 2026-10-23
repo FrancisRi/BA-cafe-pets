@@ -84,6 +84,19 @@ int main(int argc,char** argv){
         size_t fieldCount=0;for(int p=0;p<3;++p){menu.page=p;menu.build();fieldCount+=menu.controls.size();for(const auto& c:menu.controls)check(IsWindow(c.input),"Every existing setting has a real input control");}
         check(fieldCount==21,"All twenty-one settings survive the redesign");
         menu.page=0;menu.build();SetWindowTextW(GetDlgItem(menu.panel,108),L"not a number");const auto invalidCount=sent.size();menu.save();check(sent.size()==invalidCount,"Invalid numeric input is not submitted");
+        const auto quality=GetDlgItem(menu.panel,101);wchar_t qualityLabel[80]{};SendMessageW(quality,CB_GETLBTEXT,2,reinterpret_cast<LPARAM>(qualityLabel));check(std::wstring(qualityLabel).find(L"4× MSAA")!=std::wstring::npos,"Quality choice explicitly identifies MSAA");
+        const auto samplingLabel=GetDlgItem(menu.panel,2111);check(samplingLabel,"Global settings expose actual sampling status");
+        const auto samplingText=[&]{wchar_t text[256]{};GetWindowTextW(samplingLabel,text,256);return std::wstring(text);};
+        state["renderSampling"]={{"visible",true},{"ready",false},{"scale",2},{"msaa",4}};menu.sync();check(samplingText().find(L"正在应用")!=std::wstring::npos,"Unrendered settings are not reported as enabled");
+        state["renderSampling"]["ready"]=true;menu.sync();check(samplingText().find(L"已生效：2× 超采样 + 4× MSAA")!=std::wstring::npos,"Display actual allocated sample counts");
+        state["renderSampling"]["msaa"]=0;menu.sync();check(samplingText().find(L"自动降低采样")!=std::wstring::npos,"Unsupported or oversized surfaces visibly report fallback");
+        state["renderSampling"]["visible"]=false;menu.sync();check(samplingText().find(L"已隐藏")!=std::wstring::npos,"Hidden models do not claim to be rendering");
+        state["renderSampling"]={{"visible",true},{"ready",true},{"scale",2},{"msaa",4}};menu.sync();
+        for(UINT dpi:{96u,144u,192u}){
+            menu.reloadTheme(menu.window,dpi);SetWindowPos(menu.window,nullptr,0,0,menu.u(920),menu.u(680),SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);pump(menu);
+            auto combo=GetDlgItem(menu.panel,101);RECT bounds{};GetClientRect(combo,&bounds);auto dc=GetDC(combo);auto previous=SelectObject(dc,menu.ui.font);SIZE extent{};GetTextExtentPoint32W(dc,qualityLabel,int(std::wcslen(qualityLabel)),&extent);SelectObject(dc,previous);ReleaseDC(combo,dc);check(extent.cx+menu.u(32)<bounds.right,"MSAA option fits without clipping at every DPI");
+        }
+        menu.reloadTheme(menu.window,96);
         SetWindowTextW(GetDlgItem(menu.panel,108),L"45");menu.save();check(state["value"]["idleSeconds"]==45,"Full settings still save edited numeric values");
         SendMessageW(GetDlgItem(menu.panel,101),CB_SETCURSEL,0,0);menu.command(101,CBN_SELCHANGE);check(state["value"]["renderQuality"]==0,"Styled combo preserves native selection commands");
         SendMessageW(GetDlgItem(menu.panel,103),TBM_SETPOS,TRUE,175);SendMessageW(menu.panel,WM_HSCROLL,TB_THUMBPOSITION,reinterpret_cast<LPARAM>(GetDlgItem(menu.panel,103)));check(state["value"]["outlineWidth"]==175,"Styled slider retains native value/drag behavior");

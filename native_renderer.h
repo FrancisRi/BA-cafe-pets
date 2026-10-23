@@ -7,7 +7,7 @@ class NativeRenderer {
     RenderTexture2D target{},resolved{};Shader unlit{},hull{},contour{};
     NativeAntialias antialias;
     HDC memory{};HBITMAP bitmap{};HGDIOBJ previous{};unsigned char* dib{};
-    int width=0,height=0;float scale=2;uint64_t generation=UINT64_MAX;double sampledAt=0;
+    int width=0,height=0,samplingQuality=-1;float scale=2;uint64_t generation=UINT64_MAX;double sampledAt=0;
     double statsAt=0,meshMs=0,readMs=0,presentMs=0,maskMs=0,layerMs=0;unsigned frames=0;
     double smallCropAt=0;int smallCropWidth=0,smallCropHeight=0;
     uint64_t shrunkGeneration=UINT64_MAX;
@@ -25,6 +25,8 @@ class NativeRenderer {
     std::vector<RECT> region;
     void resize(int,int,int);void drawHint(const Json&);
 public:
+    struct Sampling {int quality;float scale;int msaa;bool operator==(const Sampling&) const=default;};
+    Sampling sampling() const {return {samplingQuality,scale,antialias.samples()};}
     // Presentation crop only. Never fed into ground position, camera or drag bounds.
     POINT surfaceOffset{};int surfaceWidth=0,surfaceHeight=0;
     bool didDraw=false,diagnostics=false;

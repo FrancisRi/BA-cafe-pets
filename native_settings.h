@@ -39,7 +39,7 @@ struct NativeSettings {
     inline static constexpr const wchar_t* pageIcons[]={L"\xE713",L"\xE80F",L"\xE7FC",L"\xE716"};
     inline static constexpr Field fields[]={
         {"mode",L"动作模式",L"仅切换当前角色的动作模式",2,L"\xE768"},
-        {"renderQuality",L"渲染精度",L"均衡、清晰档增强边缘抗锯齿",2,L"\xE7F4"},
+        {"renderQuality",L"画质与抗锯齿",L"清晰档平滑模型边缘与描边",2,L"\xE7F4"},
         {"outlineMode",L"角色线条",L"描边与内部线条的显示方式",2,L"\xE790"},
         {"outlineWidth",L"线条粗细",L"描边宽度 · 10–300%",3,L"\xE70F"},
         {"wandering",L"允许散步",L"无输入时随机移动，独立于位置跟随",0,L"\xE7C1"},
@@ -89,7 +89,7 @@ struct NativeSettings {
         // before measuring the cards, including after a DPI or page change.
         SCROLLINFO info{sizeof(info),SIF_ALL,0,std::max(0,u(contentHeight)-1),UINT(r.bottom),scroll,0};SetScrollInfo(panel,SB_VERT,&info,TRUE);const int width=panelWidth();
         for(const auto& p:placements)SetWindowPos(p.hwnd,nullptr,u(p.x),u(p.y)-scroll,u(p.stretch?width:p.w),u(p.h),SWP_NOZORDER|SWP_NOACTIVATE);
-        for(const auto& c:controls){const int widthInput=c.field->kind==3?184:156;
+        for(const auto& c:controls){const int widthInput=c.field->kind==3||std::string(c.field->key)=="renderQuality"?184:156;
             if(c.field->kind==0)SetWindowPos(c.input,nullptr,u(16),u(c.y)-scroll,u(width),u(68),SWP_NOZORDER|SWP_NOACTIVATE);
             else{
                 SetWindowPos(c.label,nullptr,u(64),u(c.y+12)-scroll,u(std::max(80,width-widthInput-82)),u(22),SWP_NOZORDER|SWP_NOACTIVATE);
@@ -147,10 +147,14 @@ struct NativeSettings {
                     if(f.kind==3)SendMessageW(input,TBM_SETRANGE,TRUE,MAKELPARAM(10,300));
                     if(f.kind==2){SendMessageW(input,CB_SETITEMHEIGHT,WPARAM(-1),u(30));SendMessageW(input,CB_SETITEMHEIGHT,0,u(32));const auto add=[&](const wchar_t* text){SendMessageW(input,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(text));};
                         if(std::string(f.key)=="mode"){add(L"咖啡厅");if(last.value("battleAvailable",false))add(L"战斗");}
-                        else if(std::string(f.key)=="renderQuality"){add(L"省电 · 1×");add(L"均衡 · 1.5×");add(L"清晰 · 2×");}
+                        else if(std::string(f.key)=="renderQuality"){add(L"省电 · 无 MSAA");add(L"均衡 · 2× MSAA");add(L"清晰 · 4× MSAA");}
                         else if(std::string(f.key)=="outlineMode"){add(L"无");add(L"轮廓");add(L"逐网格线条");}else{add(L"平滑追踪");add(L"30° 后转向");}}
                 }
                 controls.push_back({&f,input,label,hint,y});content.push_back(input);y+=76;
+                if(std::string(f.key)=="renderQuality"){
+                    auto status=control(panel,L"STATIC",L"",0,2111,16,y,panelWidth(),44);
+                    SendMessageW(status,WM_SETFONT,reinterpret_cast<WPARAM>(ui.small),FALSE);SetPropW(status,L"FluentMuted",reinterpret_cast<HANDLE>(1));placeContent(status,16,y,0,44,true);y+=52;
+                }
             }
             if(page==0){y+=8;auto h=control(panel,L"BUTTON",L"恢复默认设置",BS_OWNERDRAW,2201,16,y,160,36);placeContent(h,16,y,160,36);y+=52;}
             if(page==2&&!last.value("battleAvailable",false))note(L"当前模型没有完整的战斗动画。相关选项暂不可用。",38);
@@ -185,6 +189,17 @@ struct NativeSettings {
         if(last.value("activeCount",1)==0)return L"所有模型已隐藏 · 可从列表或任务栏托盘重新显示";
         return compact?L"更改自动保存 · Esc 关闭菜单":L"更改已自动保存   ·   角色保持活动";
     }
+    std::wstring samplingText() const {
+        const auto sampling=last.value("renderSampling",Json::object());
+        if(!sampling.value("visible",false))return L"当前角色已隐藏，显示后可查看实际抗锯齿状态。";
+        if(!sampling.value("ready",false))return L"抗锯齿设置正在应用，首帧绘制后显示实际状态…";
+        auto scale=std::to_wstring(sampling.value("scale",1.0));while(scale.ends_with(L"0"))scale.pop_back();if(scale.ends_with(L"."))scale.pop_back();
+        const int msaa=sampling.value("msaa",0),quality=last.value("value",Json::object()).value("renderQuality",2);
+        auto text=L"已生效："+scale+L"× 超采样"+(msaa>0?L" + "+std::to_wstring(msaa)+L"× MSAA":L" · MSAA 关闭");
+        const int wanted=quality==2?4:quality==1?2:0;const double wantedScale=quality==2?2:quality==1?1.5:1;
+        text+=msaa<wanted||sampling.value("scale",1.0)<wantedScale?L"\n已自动降低采样，以适应当前画面大小或显卡能力。":quality>0?L"\n提高画质会增加显卡负载，可随时切换档位。":L"\n选择均衡或清晰，可进一步平滑模型边缘。";
+        return text;
+    }
     void update(){
         if(last.empty())return;syncing=true;const auto value=last.value("value",Json::object());
         if(window){
@@ -198,6 +213,7 @@ struct NativeSettings {
             }
             SetWindowTextW(GetDlgItem(window,2300),statusText().c_str());EnableWindow(GetDlgItem(window,2200),quickEnabled(3010));ShowWindow(progress,last.value("busy",false)?SW_SHOW:SW_HIDE);InvalidateRect(progress,nullptr,FALSE);
             if(auto path=GetDlgItem(panel,2110))SetWindowTextW(path,wide(last.value("modelsDirectory",std::string{})).c_str());
+            if(auto status=GetDlgItem(panel,2111))SetWindowTextW(status,samplingText().c_str());
             EnableWindow(GetDlgItem(panel,2107),!last.value("busy",false));EnableWindow(GetDlgItem(panel,2108),!last.value("busy",false)&&!last.value("modelsDirectoryDefault",false));
             if(list){fillRoster(list,false);const int n=int(SendMessageW(list,LB_GETCURSEL,0,0));const auto rows=last.value("characters",Json::array());ShowWindow(listEmpty,rows.empty()?SW_SHOW:SW_HIDE);const auto row=n>=0&&n<int(rows.size())?rows[n]:Json::object();const bool active=row.value("active",false);
                 SetWindowTextW(GetDlgItem(panel,2100),active?L"隐藏角色":L"显示角色");EnableWindow(GetDlgItem(panel,2100),n>=0&&(active||(row.value("available",false)&&last.value("activeCount",0)<5)));EnableWindow(GetDlgItem(panel,2101),n>=0&&active&&row.value("ready",false)&&highlighted!=last.value("selectedId",std::string{}));SetWindowTextW(GetDlgItem(panel,2102),row.value("managed",false)?L"删除模型":L"移除记录");EnableWindow(GetDlgItem(panel,2102),n>=0&&!row.value("loading",false));EnableWindow(GetDlgItem(panel,2103),last.value("activeCount",0)>0);EnableWindow(GetDlgItem(panel,2104),last.value("activeCount",0)>0);}

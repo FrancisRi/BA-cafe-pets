@@ -147,7 +147,9 @@ struct App {
     void finishRender(bool deferred=false){
         pendingRender=false;
         if(!renderer||!loaded||!displayed||!window)return;
+        const auto before=renderer->sampling();
         renderer->render(window,inputWindow,false,{},deferred);if(!deferred)commitRender();
+        if(renderer->sampling()!=before)syncSettings();
     }
     void commitRender(){
         if(!renderer||!loaded||!displayed||!window)return;
@@ -172,7 +174,9 @@ struct App {
     Json settingsSnapshot() const {
         auto value=preferences.json();value.update({{"look",state.trackingEnabled},{"outline",state.outlineEnabled},
             {"mode",battleMode?"battle":"cafe"},{"idleSeconds",state.inactivityThreshold()},{"activeSeconds",state.activeSecondsOverride.value_or(30)}});
+        const auto sampling=renderer?renderer->sampling():nativepet::NativeRenderer::Sampling{-1,1,0};
         return {{"type","settings"},{"name",utf8(settings->title)},{"value",value},{"battleAvailable",settings->battleAvailable},
+            {"renderSampling",{{"visible",displayed},{"ready",loaded&&sampling.quality==preferences.renderQuality},{"scale",sampling.scale},{"msaa",sampling.msaa}}},
             {"canFollow",battleMode?battle&&battle->clips.move>=0:cafeWalk>=0},{"busy",settings->importBusy},{"percent",settings->importPercent},
             {"detail",utf8(settings->progressDetail)},{"error",settingsError},{"modelsDirectory",utf8(modelLibrary().directory.wstring())},{"modelsDirectoryDefault",NativeModelStorage::same(modelLibrary().directory,modelStorageSettings->defaultDirectory())}};
     }

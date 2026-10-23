@@ -57,10 +57,11 @@ NativeRenderer::NativeRenderer(){
 NativeRenderer::~NativeRenderer(){model.reset();if(target.id)UnloadRenderTexture(target);if(resolved.id)UnloadRenderTexture(resolved);if(unlit.id)UnloadShader(unlit);if(hull.id)UnloadShader(hull);if(contour.id)UnloadShader(contour);if(hintFont)DeleteObject(hintFont);if(memory){if(previous)SelectObject(memory,previous);if(bitmap)DeleteObject(bitmap);DeleteDC(memory);}}
 void NativeRenderer::resize(int w,int h,int quality){
  const float requested=nativeRenderScale(quality,w,h);const bool resized=w!=width||h!=height;
- if(!resized&&scale==requested){antialias.resize(target.texture.width,target.texture.height,quality==0?0:quality==1?2:4);return;}if(w<=0||h<=0||w>8192||h>8192)throw std::runtime_error("Native viewport exceeds supported size");
+ if(!resized&&scale==requested){antialias.resize(target.texture.width,target.texture.height,quality==0?0:quality==1?2:4);samplingQuality=quality;return;}if(w<=0||h<=0||w>8192||h>8192)throw std::runtime_error("Native viewport exceeds supported size");
  if(target.id)UnloadRenderTexture(target);target={};if(resized){if(resolved.id)UnloadRenderTexture(resolved);resolved={};}
  width=w;height=h;scale=requested;target=LoadRenderTexture(int(std::ceil(w*scale)),int(std::ceil(h*scale)));if(!resolved.id)resolved=LoadRenderTexture(w,h);if(!target.id||!resolved.id)throw std::runtime_error("Cannot allocate native framebuffer");SetTextureFilter(target.texture,TEXTURE_FILTER_BILINEAR);
  antialias.resize(target.texture.width,target.texture.height,quality==0?0:quality==1?2:4);
+ samplingQuality=quality;
  if(!resized&&bitmap)return;
  if(previous){SelectObject(memory,previous);previous=nullptr;}if(bitmap)DeleteObject(bitmap);
  BITMAPINFO info{};info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);info.bmiHeader.biWidth=w;info.bmiHeader.biHeight=-h;info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=32;info.bmiHeader.biCompression=BI_RGB;void* bits=nullptr;bitmap=CreateDIBSection(memory,&info,DIB_RGB_COLORS,&bits,nullptr,0);if(!bitmap)throw std::runtime_error("Cannot allocate transparent window DIB");dib=static_cast<unsigned char*>(bits);previous=SelectObject(memory,bitmap);

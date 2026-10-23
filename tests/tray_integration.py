@@ -86,6 +86,13 @@ def panel():
         return True
     user.EnumChildWindows(full,visit,0)
     return result[0]
+
+def sampling_text():
+    label=user.GetDlgItem(panel(),2111)
+    assert label,'Global settings must display actual antialiasing status'
+    text=c.create_unicode_buffer(256)
+    send(label,0xD,len(text),c.addressof(text)) # WM_GETTEXT marshals across processes.
+    return text.value
 def tray_window():
     result=[]
     @CALLBACK
@@ -104,6 +111,15 @@ def registered(tray):
 try:
     full=wait_for(lambda: windows('BaCafeNativeSettings'),'settings')[0]
     pet=wait_for(lambda: windows('BaCafeNativeInput'),'pet rendered')[0]
+    wait_for(lambda: sampling_text().startswith('已生效：'),'initial GPU sampling status')
+    for quality,scale in ((0,'1×'),(1,'1.5×'),(2,'2×')):
+        combo=user.GetDlgItem(panel(),101)
+        send(combo,0x14E,quality) # CB_SETCURSEL
+        send(panel(),0x111,101|(1<<16),combo) # CBN_SELCHANGE
+        status=wait_for(lambda: (text if (text:=sampling_text()).startswith('已生效：'+scale+' 超采样') else None),'changed quality reflected after GPU rendering')
+        if quality==0:assert 'MSAA 关闭' in status
+        if quality==2:assert '4× MSAA' in status or '自动降低采样' in status
+        print('Actual rendered quality:',status.replace('\n',' / '),flush=True)
     send(pet,0x20A,120<<16)
     zoom=read_roster()['characters'][0]['zoom'];assert zoom>1,'Model size changed before hiding'
     send(full,0x111,1003)
@@ -111,6 +127,9 @@ try:
     wait_for(lambda: not windows('BaCafeNativePet') or windows('#32770'),'hide last pet')
     assert not windows('#32770'),'Hiding the final model must not prompt to exit'
     assert process.poll() is None and not any(row['active'] for row in read_roster()['characters'])
+    send(full,0x111,1000)
+    assert '已隐藏' in sampling_text(),'All-hidden state must not claim that MSAA is rendering'
+    send(full,0x111,1003)
     tray=wait_for(tray_window,'resident tray icon window')[0]
     assert registered(tray),'The icon is registered with the Windows notification area'
     missing=NotifyIcon();missing.cbSize=c.sizeof(missing);missing.hWnd=tray;missing.uID=1
