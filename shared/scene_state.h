@@ -6,7 +6,6 @@
 struct SceneEntry {std::string id,path,name,mode="cafe";bool active=false;float zoom=1;};
 struct SceneRoster {
     static constexpr size_t Maximum=5;
-    static constexpr size_t HistoryMaximum=15;
     std::vector<SceneEntry> entries;
     std::string selected;
     static std::string key(const std::filesystem::path& file){
@@ -15,7 +14,7 @@ struct SceneRoster {
     }
     SceneEntry* find(const std::string& id){for(auto& entry:entries)if(entry.id==id)return &entry;return nullptr;}
     size_t activeCount() const {return std::count_if(entries.begin(),entries.end(),[](const auto& e){return e.active;});}
-    bool remember(SceneEntry entry){if(find(entry.id))return true;if(entries.size()>=HistoryMaximum)return false;entries.push_back(std::move(entry));return true;}
+    bool remember(SceneEntry entry){if(find(entry.id))return true;entries.push_back(std::move(entry));return true;}
     bool enable(const std::string& id){auto* e=find(id);if(!e||(!e->active&&activeCount()>=Maximum))return false;e->active=true;selected=id;return true;}
     bool last(const std::string& id){const auto* e=find(id);return e&&e->active&&activeCount()==1;}
     Json json() const {Json rows=Json::array();for(const auto& e:entries)rows.push_back({{"id",e.id},{"path",e.path},{"name",e.name},{"active",e.active},{"mode",e.mode},{"zoom",e.zoom}});return {{"selected",selected},{"characters",rows}};}

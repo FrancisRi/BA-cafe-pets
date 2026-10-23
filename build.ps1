@@ -1,10 +1,13 @@
 param([int]$Jobs=4,[ValidatePattern('^[A-Za-z0-9_-]+$')][string]$ExecutableName='ba_cafe_lite_native',[switch]$Release)
 $ErrorActionPreference='Stop'
 $cmake=(Get-Command cmake -ErrorAction SilentlyContinue).Source
+if(!$cmake){$cmake=(Get-ChildItem -Path "$PSScriptRoot/.tools/cmake-*/bin/cmake.exe" -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1).FullName}
 if(!$cmake){$cmake='C:/Program Files/CMake/bin/cmake.exe'}
 $compiler=(Get-Command g++ -ErrorAction SilentlyContinue).Source
+if(!$compiler -and (Test-Path -LiteralPath "$PSScriptRoot/.tools/w64devkit/bin/g++.exe")){$compiler="$PSScriptRoot/.tools/w64devkit/bin/g++.exe"}
 if(!$compiler){$compiler=(Get-ChildItem -Path "$env:LOCALAPPDATA/Microsoft/WinGet/Packages/BrechtSanders.WinLibs.*/mingw64/bin/c++.exe" -ErrorAction SilentlyContinue | Select-Object -First 1).FullName}
 $ninja=(Get-Command ninja -ErrorAction SilentlyContinue).Source
+if(!$ninja -and (Test-Path -LiteralPath "$PSScriptRoot/.tools/ninja/ninja.exe")){$ninja="$PSScriptRoot/.tools/ninja/ninja.exe"}
 if(!$ninja){$ninja=(Get-ChildItem -Path "$env:LOCALAPPDATA/Microsoft/WinGet/Packages/Ninja-build.Ninja_*/ninja.exe" -ErrorAction SilentlyContinue | Select-Object -First 1).FullName}
 if(!$compiler -or !$ninja){throw 'Install a C++20 toolchain and Ninja before building; the built program needs neither.'}
 $env:PATH=(Split-Path $compiler)+';'+(Split-Path $ninja)+';'+$env:PATH

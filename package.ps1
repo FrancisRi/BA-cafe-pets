@@ -21,7 +21,7 @@ $stage=Join-Path $work 'stage'
 New-Item -ItemType Directory -Force -Path $stage,$dist | Out-Null
 Copy-Item -LiteralPath $core -Destination (Join-Path $stage 'ba_cafe_lite.exe')
 $allowed=@('models/Shiroko.glb','defaults.ini','behavior/template.bt.xml','behavior/battle-mode.drawio','behavior/battle-mode.mmd',
-    'README.txt','README.md','CHANGELOG.md','licenses/NOTICE.txt','licenses/raylib.txt','licenses/GLFW.txt','licenses/cgltf.txt',
+    'README.txt','README.md','CHANGELOG.md','CREDITS.md','NOTICE.md','licenses/NOTICE.txt','licenses/raylib.txt','licenses/GLFW.txt','licenses/cgltf.txt',
     'licenses/BehaviorTree.CPP.txt','licenses/tinyxml2.txt','licenses/minitrace.txt','licenses/minicoro.txt','licenses/lexy.txt',
     'licenses/GCC-GPL3.txt','licenses/GCC-runtime-exception.txt')
 foreach($relative in $allowed){

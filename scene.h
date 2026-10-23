@@ -10,22 +10,38 @@ struct Scene {
     SceneRoster roster;
     NativeDesktopInput input;
     std::filesystem::path historyFile;
-    std::string error;
+    std::string error,importNotice;
     NativeTopmostOrder depthOrder;
-    bool review=false,stopping=false,broadcasting=false;
+    bool review=false,stopping=false,broadcasting=false,importingBatch=false,modifyingModels=false;
     App& leader(){return *actors.front();}
     App* find(const std::string& id){for(auto& a:actors)if(a->actorId==id)return a.get();return nullptr;}
     App& selected(){auto* a=find(roster.selected);return a&&a->displayed?*a:leader();}
     void save(){if(!review){for(const auto& a:actors)if(auto* e=roster.find(a->actorId))e->zoom=a->zoom;roster.save(historyFile);}}
     float commonZoom(){std::vector<float> scales;for(const auto& a:actors)if(a->displayed&&a->loaded)scales.push_back(a->zoom);return scales.empty()?leader().zoom:modalCharacterZoom(scales);}
-    void sync(){if(leader().nativeSettings)leader().nativeSettings->sync();}
+    void sync(){if(!importingBatch&&leader().nativeSettings)leader().nativeSettings->sync();}
+    void refreshModels(){
+        if(modifyingModels)return;
+        try{
+            auto library=leader().modelLibrary();bool changed=false;
+            for(const auto& file:library.files()){
+                const auto id=SceneRoster::key(file);if(!roster.find(id)){roster.remember({id,utf8(file.wstring()),utf8(NativeModelLibrary::displayName(file)),"cafe",false});changed=true;}
+            }
+            const auto before=roster.entries.size();
+            roster.entries.erase(std::remove_if(roster.entries.begin(),roster.entries.end(),[&](const auto& row){return !row.active&&library.owns(wide(row.path))&&!std::filesystem::exists(wide(row.path));}),roster.entries.end());
+            changed|=before!=roster.entries.size();
+            if(!roster.find(roster.selected)){roster.selected.clear();for(const auto& row:roster.entries)if(row.active){roster.selected=row.id;break;}}
+            if(changed)save();
+        }catch(const std::exception& failure){error=std::string("模型库刷新失败：")+failure.what();}
+    }
     Json snapshot(){
         auto result=selected().settingsSnapshot();Json rows=Json::array();
-        for(const auto& e:roster.entries){const auto* a=find(e.id);rows.push_back({{"id",e.id},{"name",e.name},{"path",e.path},{"active",e.active},
+        for(const auto& e:roster.entries){const auto* a=find(e.id);rows.push_back({{"id",e.id},{"name",e.name},{"path",e.path},{"active",e.active},{"managed",leader().modelLibrary().owns(wide(e.path))},
             {"available",std::filesystem::is_regular_file(wide(e.path))},{"ready",a&&a->loaded&&a->displayed},{"failed",a&&a->done&&!a->loaded},{"loading",e.active&&(!a||(!a->loaded&&a->settings->importBusy))},{"battleAvailable",a&&a->loaded&&a->settings->battleAvailable},{"mode",e.mode}});}
-        result["characters"]=rows;result["selectedId"]=roster.selected;result["activeCount"]=roster.activeCount();result["maximum"]=SceneRoster::Maximum;result["historyMaximum"]=SceneRoster::HistoryMaximum;
+        result["characters"]=rows;result["selectedId"]=roster.selected;result["activeCount"]=roster.activeCount();result["maximum"]=SceneRoster::Maximum;
+        if(const auto* entry=roster.find(roster.selected))result["name"]=entry->name;
         if(const auto* e=roster.find(roster.selected);e&&e->active){const auto* a=find(e->id);if(!a){result["name"]=e->name;result["busy"]=true;result["percent"]=0;result["detail"]="等待加载模型";result["battleAvailable"]=false;result["value"]["mode"]=e->mode;}}
         if(!error.empty())result["error"]=error;
+        result["notice"]=importNotice;
         bool capable=false;for(const auto& a:actors)capable|=a->displayed&&a->loaded&&(a->cafeWalk>=0||(a->battle&&a->battle->clips.move>=0));
         result["canFollow"]=capable;return result;
     }
@@ -54,7 +70,11 @@ struct Scene {
         };
         std::sort(visible.begin(),visible.end(),[&](const App* a,const App* b){const auto ay=depth(*a),by=depth(*b);return ay!=by?ay>by:a->actorId<b->actorId;});
         std::vector<HWND> desired;
-        const auto* menu=leader().nativeSettings.get();if(menu&&menu->window&&IsWindowVisible(menu->window))desired.push_back(menu->window);
+        // Full settings use normal application z-order; only the pet flyout
+        // belongs to the topmost display/input chain.
+        const auto* menu=leader().nativeSettings.get();
+        if(menu&&menu->quickWindow&&IsWindowVisible(menu->quickWindow))desired.insert(desired.begin(),menu->quickWindow);
+        if(menu&&menu->modelMenu&&IsWindowVisible(menu->modelMenu))desired.insert(desired.begin(),menu->modelMenu);
         for(const auto* a:visible){desired.push_back(a->inputWindow);desired.push_back(a->window);}
         // Front-to-back chain: feet lower on the desktop are in front. Native
         // window motion preserves this order, instead of promoting the last mover.
@@ -113,6 +133,7 @@ struct Scene {
         if(!first)a.diagnostics=leader().diagnostics;
         a.grouped=true;a.crowdId=++crowdSerial;
         a.syncRequest=[this]{sync();};a.menuRequest=[this,&a]{roster.selected=a.actorId;save();leader().nativeSettings->show(leader().window,leader().directory);};
+        a.quickMenuRequest=[this,&a]{roster.selected=a.actorId;save();leader().nativeSettings->showQuick(a.window,leader().directory);};
         a.closeRequest=[this,&a]{close(a.displayed?a.actorId:roster.selected);};
         a.tickCallback=[this]{tick();};a.settingsChanged=[this,&a]{changed(a);};
         a.followRequest=[this]{auto& a=selected();a.preferences.follow=!a.preferences.follow;if(a.preferences.follow){a.blockedCursor.reset();a.followPlanAt=0;a.interactionUntil=0;}a.preferences.save(a.settings->ini);changed(a);};
@@ -138,7 +159,7 @@ struct Scene {
         bool explicitAccepted=false;
         if(!review&&first->modelSpecified){
             const auto id=SceneRoster::key(first->model);
-            if(!roster.find(id)){if(roster.entries.size()<SceneRoster::HistoryMaximum)roster.entries.push_back({id,utf8(first->model.wstring()),utf8(first->model.stem().wstring()),"cafe",false});else error="历史列表已满（15 条），请先删除一个角色。";}
+            if(!roster.find(id))roster.remember({id,utf8(first->model.wstring()),utf8(first->model.stem().wstring()),"cafe",false});
             explicitAccepted=roster.enable(id);
             if(explicitAccepted&&first->initialMode.empty())first->initialMode=roster.find(id)->mode;
             if(!explicitAccepted&&roster.find(id))error="模型已加入历史，最多同时显示 5 个角色。";
@@ -150,17 +171,19 @@ struct Scene {
             const auto* last=roster.find(roster.selected);if(last&&std::filesystem::is_regular_file(wide(last->path))){first->model=wide(last->path);first->initialMode=last->mode;}
         }
         const auto id=SceneRoster::key(first->model);
-        if(!roster.find(id)&&!roster.remember({id,utf8(first->model.wstring()),utf8(first->model.stem().wstring()),first->initialMode.empty()?"cafe":first->initialMode,false}))error="历史列表已满（15 条），请先删除一个角色。";
+        if(!roster.find(id))roster.remember({id,utf8(first->model.wstring()),utf8(first->model.stem().wstring()),first->initialMode.empty()?"cafe":first->initialMode,false});
         if(!review){std::vector<float> scales;for(const auto& e:roster.entries)if(e.active)scales.push_back(e.zoom);first->zoom=modalCharacterZoom(scales);for(auto& e:roster.entries)if(e.active)e.zoom=first->zoom;}
         roster.enable(id);first->actorId=id;actors.push_back(std::move(first));attach(leader(),true);
         auto& menu=*leader().nativeSettings;
         menu.snapshot=[this]{return snapshot();};menu.receive=[this](const Json& j){message(j);};
         menu.visibility=[this](bool visible){
             if(visible){leader().dismissMenuHint();for(auto& a:actors){a->menuHintVisible=false;a->presentState(true);}}
-            for(auto& a:actors){a->state.settingsOpen=visible;if(!visible){a->placementNeeded=true;a->interactionUntil=a->preferences.follow?0:preciseSeconds()+0.5;}}
+        };
+        menu.pauseChanged=[this](bool paused){
+            for(auto& a:actors){a->state.settingsOpen=paused;if(!paused){a->placementNeeded=true;a->interactionUntil=a->preferences.follow?0:preciseSeconds()+0.5;}}
         };
         // Load sequentially: allocating five GLBs simultaneously would stall the desktop.
-        input.pollKeyboard=false;input.enable(true);save();
+        refreshModels();input.pollKeyboard=false;input.enable(true);save();
         frameTimer=CreateWaitableTimerExW(nullptr,nullptr,CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,TIMER_ALL_ACCESS);
         if(!frameTimer)frameTimer=CreateWaitableTimerW(nullptr,FALSE,nullptr);
         frameClock.reset(preciseSeconds());armFrame();
@@ -177,10 +200,10 @@ struct Scene {
         }
         error.clear();save();sync();
     }
-    void close(const std::string& id){
+    void close(const std::string& id,bool confirmLast=true){
         const auto* entry=roster.find(id);if(!entry||!entry->active)return;
         if(roster.last(id)){
-            if(!review&&nativeMessageBox(leader().nativeSettings->window?leader().nativeSettings->window:leader().window,
+            if(confirmLast&&!review&&nativeMessageBox(leader().nativeSettings->dialogOwner()?leader().nativeSettings->dialogOwner():leader().window,
                 L"这是最后一个角色。关闭后将退出桌宠程序，确定继续吗？",L"关闭角色",MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2)!=IDYES)return;
             roster.find(id)->active=false;save();stopping=true;PostQuitMessage(0);return;
         }
@@ -190,18 +213,74 @@ struct Scene {
         for(const auto& e:roster.entries)if(e.active){roster.selected=e.id;break;}
         save();sync();
     }
+    NativeImportBatch::Outcome importModel(const std::filesystem::path& source){
+        NativeHealth::Pause saving;
+        try{
+            auto library=leader().modelLibrary();const auto plan=library.prepare(source);const auto id=SceneRoster::key(plan.file);
+            const auto oldId=SceneRoster::key(std::filesystem::absolute(source));
+            const bool replaceLegacy=!roster.find(id)&&roster.find(oldId);
+            const bool reused=roster.find(id)||replaceLegacy;
+            const auto file=library.commit(plan);
+            // Reimporting a legacy external file upgrades that history entry in
+            // place, including its live actor, mode, zoom and current selection.
+            if(replaceLegacy){
+                auto* entry=roster.find(oldId);entry->id=id;entry->path=utf8(file.wstring());
+                if(auto* actor=find(oldId)){actor->actorId=id;actor->model=file;if(actor->pendingImport)actor->pendingModel=file;}
+                if(roster.selected==oldId)roster.selected=id;
+            }
+            if(!roster.find(id))roster.entries.push_back({id,utf8(file.wstring()),utf8(plan.name),"cafe",false});
+            const bool alreadyActive=roster.find(id)->active;
+            // Files beyond the display limit are still imported into history.
+            if(alreadyActive||roster.activeCount()<SceneRoster::Maximum)activate(id);
+            if(alreadyActive)if(auto* actor=find(id)){actor->initialMode=roster.find(id)->mode;actor->requestModel(file);}
+            save();sync();return {true,reused,roster.find(id)->active,{}};
+        }catch(const std::exception& failure){return {false,false,false,std::string("模型保存失败：")+failure.what()};}
+    }
+    void importModels(const std::vector<std::filesystem::path>& files){
+        if(files.empty())return;
+        error.clear();importNotice.clear();NativeImportBatch::Report report;
+        {
+            struct Guard {bool& flag;Guard(bool& value):flag(value){flag=true;}~Guard(){flag=false;}} guard(importingBatch);
+            report=NativeImportBatch::run(files,[this](const auto& file){return importModel(file);});
+        }
+        importNotice="导入完成：新增 "+std::to_string(report.added)+" 个，复用 "+std::to_string(report.reused)+" 个";
+        if(report.hidden)importNotice+="；"+std::to_string(report.hidden)+" 个保存在列表中未显示（同时显示上限 5 个）";
+        if(!report.failures.empty()){
+            error=importNotice+"；失败 "+std::to_string(report.failures.size())+" 个。";
+            const auto& first=report.failures.front();error+=utf8(first.source.filename().wstring())+"："+first.error;
+        }
+        sync();
+    }
     void message(const Json& j){
         const auto type=j.value("type",std::string{});
+        if(type!="import"&&type!="refresh_models")importNotice.clear();
         if(type=="exit"){save();stopping=true;PostQuitMessage(0);return;}
+        if(type=="refresh_models"){refreshModels();sync();return;}
+        if(type=="model_locate"){
+            if(const auto* row=roster.find(j.value("id",std::string{}))){
+                const auto file=wide(row->path);const auto args=L"/select,\""+std::filesystem::absolute(file).wstring()+L"\"";
+                if(reinterpret_cast<INT_PTR>(ShellExecuteW(leader().nativeSettings->dialogOwner(),L"open",L"explorer.exe",args.c_str(),nullptr,SW_SHOWNORMAL))<=32)error="无法在文件夹中定位模型";
+            }sync();return;
+        }
+        if(type=="open_models_folder"){
+            try{leader().openModelsFolder();error.clear();}catch(const std::exception& failure){error=failure.what();}sync();return;
+        }
         if(type=="roster_select"){const auto id=j.value("id",std::string{});if(auto* e=roster.find(id);e&&e->active){roster.selected=id;save();sync();}return;}
         if(type=="roster_toggle"){const auto id=j.value("id",std::string{});if(j.at("active").get<bool>())activate(id);else close(id);return;}
         if(type=="roster_retry"){if(auto* a=find(j.value("id",std::string{}));a&&a->displayed&&!a->settings->importBusy)a->requestModel(a->model);return;}
-        if(type=="roster_remove"){
+        if(type=="model_delete"){
+            if(modifyingModels)return;
             const auto id=j.value("id",std::string{});if(!roster.find(id))return;
-            if(roster.find(id)->active){close(id);if(roster.find(id)->active)return;}
-            roster.entries.erase(std::remove_if(roster.entries.begin(),roster.entries.end(),[&](const auto& e){return e.id==id;}),roster.entries.end());
-            if(roster.selected==id)roster.selected=roster.entries.empty()?"":roster.entries.front().id;
-            save();sync();return;
+            struct Guard {bool& flag;Guard(bool& value):flag(value){flag=true;}~Guard(){flag=false;}} guard(modifyingModels);
+            try{
+                if(auto* actor=find(id);actor&&actor->settings->importBusy)throw std::runtime_error("请等待模型加载完成后再删除");
+                const auto file=wide(roster.find(id)->path);auto library=leader().modelLibrary();
+                if(library.owns(file))library.recycle(file,leader().nativeSettings->dialogOwner());
+                if(auto* row=roster.find(id);row&&row->active)close(id,false);
+                roster.entries.erase(std::remove_if(roster.entries.begin(),roster.entries.end(),[&](const auto& e){return e.id==id;}),roster.entries.end());
+                if(roster.selected==id)roster.selected=roster.entries.empty()?"":roster.entries.front().id;
+                error.clear();save();sync();
+            }catch(const std::exception& failure){error=failure.what();sync();}return;
         }
         if(type=="uniform_size"){
             const float size=commonZoom();broadcasting=true;
@@ -210,16 +289,10 @@ struct Scene {
         }
         if(type=="close_character"){close(roster.selected);return;}
         if(type=="import"){
+            if(modifyingModels)return;
             NativeHealth::Pause dialogWait;
-            wchar_t path[32768]{};OPENFILENAMEW dialog{sizeof(dialog)};dialog.hwndOwner=leader().nativeSettings->window;
-            dialog.lpstrFilter=L"GLB 模型\0*.glb\0\0";dialog.lpstrFile=path;dialog.nMaxFile=32768;dialog.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR;
-            if(GetOpenFileNameW(&dialog)){
-                const auto file=std::filesystem::absolute(path);const auto id=SceneRoster::key(file);
-                if(!roster.find(id)){if(roster.entries.size()>=SceneRoster::HistoryMaximum){error="历史列表已满（15 条），请先删除一个角色。";sync();return;}roster.entries.push_back({id,utf8(file.wstring()),utf8(file.stem().wstring()),"cafe",false});}
-                const bool alreadyActive=roster.find(id)->active;
-                activate(id);if(alreadyActive)if(auto* a=find(id))a->requestModel(file);
-                save();sync();
-            }return;
+            try{importModels(NativeModelPicker::choose(leader().nativeSettings->dialogOwner()));}
+            catch(const std::exception& failure){error=failure.what();sync();}return;
         }
         if(type=="save"){
             const auto* target=find(roster.selected);if(!target||!target->loaded){error="请等待当前角色加载完成后修改设置。";sync();return;}
@@ -236,7 +309,7 @@ struct Scene {
         }
         snapshotCrowd();
         auto events=input.take(false,false,false);
-        if(leader().state.settingsOpen)events.keyPressed=events.reload=events.mouseClick=events.windowClosed=false;
+        if(leader().nativeSettings->visible())events.keyPressed=events.reload=events.mouseClick=events.windowClosed=false;
         const bool calling=std::any_of(actors.begin(),actors.end(),[](const auto& a){return a->displayed&&a->battleMode&&a->battle&&a->battle->phase==pet::Battle::Phase::Callsign;});
         std::vector<App*> candidates;
         if(events.mouseClick&&!calling)for(auto& a:actors)if(a->displayed&&a->loaded&&a->battleMode&&a->battle->canCallsign()&&!a->directed.jumping&&!a->state.settingsOpen)candidates.push_back(a.get());

@@ -1,5 +1,8 @@
 /build*/
 /vendor/
+/.tools/
+/assets/*.glb
+!/assets/Shiroko.glb
 /artifacts/
 /dist/
 /*.exe

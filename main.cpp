@@ -59,6 +59,8 @@ void replaceAll(std::string& text,const std::string& from,const std::string& to)
     size_t p=0;while((p=text.find(from,p))!=std::string::npos){text.replace(p,from.size(),to);p+=to.size();}
 }
 #include "native_preferences.h"
+#include "native_model_library.h"
+#include "native_model_import.h"
 #include "native_health.h"
 #include "native_session.h"
 #include "native_loop.h"
@@ -81,12 +83,17 @@ struct App {
     HWND window{},inputWindow{}; std::filesystem::path directory,dataDirectory,model,pendingModel,snapshot;
     NativeSession session;std::function<void()> sessionChanged;
     std::filesystem::path storage() const {return dataDirectory.empty()?directory:dataDirectory;}
+    NativeModelLibrary modelLibrary() const {return NativeModelLibrary(storage()/L"models");}
+    void openModelsFolder(){
+        const auto folder=modelLibrary().ensureDirectory();const auto result=ShellExecuteW(nativeSettings->dialogOwner(),L"open",folder.c_str(),nullptr,nullptr,SW_SHOWNORMAL);
+        if(reinterpret_cast<INT_PTR>(result)<=32)throw std::runtime_error("无法打开模型文件夹，请检查文件夹是否可访问");
+    }
     std::string reviewClip,initialMode;double reviewTime=0,runSeconds=0;
     bool review=false,fixedPose=false,sampleSpecified=false,done=false,loaded=false,frameReady=false,capturing=false;
     bool smooth=true,serialCpu=false,diagnostics=false;
     bool grouped=false,displayed=true,modelSpecified=false,deferRendering=false,pendingRender=false;std::string actorId;
     std::shared_ptr<bool> alive=std::make_shared<bool>(true);
-    std::function<void()> menuRequest,closeRequest,loadedCallback,destroyedCallback,tickCallback,settingsChanged,syncRequest,followRequest,depthRequest;
+    std::function<void()> menuRequest,quickMenuRequest,closeRequest,loadedCallback,destroyedCallback,tickCallback,settingsChanged,syncRequest,followRequest,depthRequest;
     std::function<MovementChoice(float,double)> avoidHeading;
     CrowdSteering crowd;uint64_t crowdId=0;double movementDt=0.008;float walkIntentYaw=0;
     std::function<bool(float,double)> clearJump;
@@ -160,7 +167,7 @@ struct App {
             {"mode",battleMode?"battle":"cafe"},{"idleSeconds",state.inactivityThreshold()},{"activeSeconds",state.activeSecondsOverride.value_or(30)}});
         return {{"type","settings"},{"name",utf8(settings->title)},{"value",value},{"battleAvailable",settings->battleAvailable},
             {"canFollow",battleMode?battle&&battle->clips.move>=0:cafeWalk>=0},{"busy",settings->importBusy},{"percent",settings->importPercent},
-            {"detail",utf8(settings->progressDetail)},{"error",settingsError}};
+            {"detail",utf8(settings->progressDetail)},{"error",settingsError},{"modelsDirectory",utf8(modelLibrary().directory.wstring())}};
     }
     void syncSettings(){if(syncRequest)syncRequest();else if(nativeSettings)nativeSettings->sync();}
     void dismissMenuHint(){
@@ -260,9 +267,14 @@ struct App {
         if(type=="ready"){syncSettings();state.log("SETTINGS web ready");return;}
         if(type=="close"){nativeSettings->hide();return;}
         if(type=="exit"){DestroyWindow(window);return;}
+        if(type=="open_models_folder"){
+            try{openModelsFolder();settingsError.clear();
+            }catch(const std::exception& error){settingsError=error.what();}syncSettings();return;
+        }
         if(type=="import"){
-            wchar_t path[32768]{};OPENFILENAMEW dialog{sizeof(dialog)};dialog.hwndOwner=nativeSettings->window;dialog.lpstrFilter=L"GLB 模型\0*.glb\0\0";dialog.lpstrFile=path;dialog.nMaxFile=32768;dialog.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR;
-            if(GetOpenFileNameW(&dialog))requestModel(path);return;
+            NativeHealth::Pause choosing;
+            try{for(const auto& file:NativeModelPicker::choose(nativeSettings->dialogOwner()))importLocalModel(file);}
+            catch(const std::exception& failure){settingsError=failure.what();syncSettings();}return;
         }
         if(type!="save")return;
         const auto& value=message.at("value");auto candidate=preferences;
@@ -281,6 +293,7 @@ struct App {
         if(settingsChanged)settingsChanged();
     }
     void showSettings(){if(menuRequest){menuRequest();return;}nativeSettings->show(window,directory);settings->window=nativeSettings->window;}
+    void showQuickMenu(){if(quickMenuRequest){quickMenuRequest();return;}nativeSettings->showQuick(window,directory);}
     void refreshDisplays(){
         std::vector<RECT> areas;EnumDisplayMonitors(nullptr,nullptr,[](HMONITOR m,HDC,LPRECT,LPARAM p)->BOOL{
             MONITORINFO i{sizeof(i),{},{},0};if(GetMonitorInfoW(m,&i))reinterpret_cast<std::vector<RECT>*>(p)->push_back(i.rcWork);return TRUE;
@@ -303,6 +316,10 @@ struct App {
         if(!std::filesystem::is_regular_file(file))throw std::runtime_error("Model file does not exist");
         pendingModel=std::filesystem::absolute(file);done=false;settingsError.clear();settings->importBusy=true;settings->importStarted=GetTickCount64();progress(0,L"读取原始 GLB");pendingImport=true;
         state.log("LOAD original GLB: "+utf8(pendingModel.wstring()));
+    }
+    void importLocalModel(const std::filesystem::path& file){
+        NativeHealth::Pause saving;
+        try{requestModel(modelLibrary().store(file));}catch(const std::exception& error){settingsError=error.what();syncSettings();}
     }
     bool selectMode(bool enabled,bool persist=false){
         if(!behavior || !battle)return false;
@@ -433,7 +450,7 @@ struct App {
         }
         const auto before=ground.position;motionVelocity={};motionRemaining=0;
         int endingClip=-1;double endingFrom=0,endingTo=0;
-        if(!settings->importSource.empty()){const auto file=settings->importSource;settings->importSource.clear();requestModel(file);}
+        if(!settings->importSource.empty()){const auto file=settings->importSource;settings->importSource.clear();importLocalModel(file);}
         if(review&&(fixedPose||runSeconds>0||!snapshot.empty())&&now-started>25000){std::fprintf(stderr,"Preview timed out\n");exitCode=1;DestroyWindow(window);return;}
         if(!loaded||!behavior||!displayed)return;
         if(settings->modeRequest){selectMode(*settings->modeRequest,true);settings->modeRequest.reset();}
@@ -768,7 +785,7 @@ struct App {
                 }
                 if(app->left)app->moveCachedDrag();return 0;
             case WM_LBUTTONUP:if(app->left){app->click=!app->dragged;app->releaseMouse();}return 0;
-            case WM_RBUTTONUP:if(app->menuPressed){const bool openMenu=!app->rightDragged;app->releaseMouse();if(BattleDesktopInput::instance)BattleDesktopInput::instance->mouseClick=false;if(openMenu)app->showSettings();}return 0;
+            case WM_RBUTTONUP:if(app->menuPressed){const bool openMenu=!app->rightDragged;app->releaseMouse();if(BattleDesktopInput::instance)BattleDesktopInput::instance->mouseClick=false;if(openMenu)app->showQuickMenu();}return 0;
             case WM_MBUTTONUP:if(app->right&&!app->menuPressed)app->releaseMouse();return 0;
             case WM_CAPTURECHANGED:app->left=app->right=app->menuPressed=app->rightDragged=false;app->presentState(true);return 0;
             case WM_CANCELMODE:app->releaseMouse();return 0;
@@ -806,7 +823,8 @@ struct App {
         settings->outlineTitle=L"角色线条";settings->outlineDescription=L"Wiki 网格描边，保留内部贴图线条";
         settings->modesEnabled=true;preferences.load(settings->ini);state.outlineEnabled=preferences.outlineMode!=0;
         nativeSettings=std::make_unique<NativeSettings>();nativeSettings->snapshot=[this]{return settingsSnapshot();};nativeSettings->receive=[this](const Json& j){settingsMessage(j);};
-        nativeSettings->visibility=[this](bool visible){state.settingsOpen=visible;if(visible)dismissMenuHint();else{placementNeeded=true;interactionUntil=preciseSeconds()+0.5;}};
+        nativeSettings->visibility=[this](bool visible){if(visible)dismissMenuHint();};
+        nativeSettings->pauseChanged=[this](bool paused){state.settingsOpen=paused;if(!paused){placementNeeded=true;interactionUntil=preciseSeconds()+0.5;}};
         settings->importBusy=true;settings->progressDetail=L"初始化模型显示窗口";
         if(!std::filesystem::exists(ini))state.outlineEnabled=true;
         refreshDisplays();ground.modelZoom=zoom;ground.measuredBounds=true;geometry.prepareViewport(ground,zoom);geometry.place(ground,{ground.width*0.72f,ground.height*0.83f},zoom);geometry.update(ground,zoom,false);const auto crop=geometry.crop;windowWidth=geometry.width;windowHeight=geometry.height;

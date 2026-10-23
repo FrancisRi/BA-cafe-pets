@@ -1,5 +1,13 @@
 ba_cafe_lite native distribution
 
+BA Cafe Pets derivative branch: https://github.com/FrancisRi/BA-cafe-pets
+Original author: maxiumlee (Max)
+Original project: https://github.com/maxiumlee/ba-cafe-lite
+Branch maintainer: FrancisRi
+Original commit history and third-party notices are retained.
+No project-wide LICENSE was present in the upstream baseline.
+See the repository's CREDITS.md and NOTICE.md for attribution and license status.
+
 raylib 6.0 (zlib): https://github.com/raysan5/raylib
 cgltf (MIT): https://github.com/jkuhlmann/cgltf
 GLFW (zlib): https://www.glfw.org/
