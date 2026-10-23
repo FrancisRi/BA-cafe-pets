@@ -60,6 +60,7 @@ void replaceAll(std::string& text,const std::string& from,const std::string& to)
 }
 #include "native_preferences.h"
 #include "native_model_library.h"
+#include "native_model_storage.h"
 #include "native_model_import.h"
 #include "native_health.h"
 #include "native_session.h"
@@ -80,10 +81,15 @@ struct GraphicsContext {
 struct App {
     static constexpr int Size=480;
     static constexpr double WalkSpeedMultiplier=1.2;
-    HWND window{},inputWindow{}; std::filesystem::path directory,dataDirectory,model,pendingModel,snapshot;
+    HWND window{},inputWindow{}; std::filesystem::path directory,programDirectory,dataDirectory,model,pendingModel,snapshot;
+    std::shared_ptr<NativeModelStorage> modelStorageSettings;
     NativeSession session;std::function<void()> sessionChanged;
     std::filesystem::path storage() const {return dataDirectory.empty()?directory:dataDirectory;}
-    NativeModelLibrary modelLibrary() const {return NativeModelLibrary(storage()/L"models");}
+    NativeModelLibrary modelLibrary() const {return NativeModelLibrary(modelStorageSettings->current);}
+    std::optional<NativeModelLibrary> managedLibrary(const std::filesystem::path& file) const {
+        if(modelStorageSettings->bundled(file,directory/L"models/Shiroko.glb"))return {};
+        for(const auto& folder:modelStorageSettings->directories()){NativeModelLibrary library(folder);if(library.owns(file))return library;}return {};
+    }
     void openModelsFolder(){
         const auto folder=modelLibrary().ensureDirectory();const auto result=ShellExecuteW(nativeSettings->dialogOwner(),L"open",folder.c_str(),nullptr,nullptr,SW_SHOWNORMAL);
         if(reinterpret_cast<INT_PTR>(result)<=32)throw std::runtime_error("无法打开模型文件夹，请检查文件夹是否可访问");
@@ -91,7 +97,7 @@ struct App {
     std::string reviewClip,initialMode;double reviewTime=0,runSeconds=0;
     bool review=false,fixedPose=false,sampleSpecified=false,done=false,loaded=false,frameReady=false,capturing=false;
     bool smooth=true,serialCpu=false,diagnostics=false;
-    bool grouped=false,displayed=true,modelSpecified=false,deferRendering=false,pendingRender=false;std::string actorId;
+    bool grouped=false,displayed=true,modelSpecified=false,dataDirectorySpecified=false,deferRendering=false,pendingRender=false;std::string actorId;
     std::shared_ptr<bool> alive=std::make_shared<bool>(true);
     std::function<void()> menuRequest,quickMenuRequest,closeRequest,loadedCallback,destroyedCallback,tickCallback,settingsChanged,syncRequest,followRequest,depthRequest;
     std::function<MovementChoice(float,double)> avoidHeading;
@@ -167,7 +173,7 @@ struct App {
             {"mode",battleMode?"battle":"cafe"},{"idleSeconds",state.inactivityThreshold()},{"activeSeconds",state.activeSecondsOverride.value_or(30)}});
         return {{"type","settings"},{"name",utf8(settings->title)},{"value",value},{"battleAvailable",settings->battleAvailable},
             {"canFollow",battleMode?battle&&battle->clips.move>=0:cafeWalk>=0},{"busy",settings->importBusy},{"percent",settings->importPercent},
-            {"detail",utf8(settings->progressDetail)},{"error",settingsError},{"modelsDirectory",utf8(modelLibrary().directory.wstring())}};
+            {"detail",utf8(settings->progressDetail)},{"error",settingsError},{"modelsDirectory",utf8(modelLibrary().directory.wstring())},{"modelsDirectoryDefault",NativeModelStorage::same(modelLibrary().directory,modelStorageSettings->programDirectory)}};
     }
     void syncSettings(){if(syncRequest)syncRequest();else if(nativeSettings)nativeSettings->sync();}
     void dismissMenuHint(){
@@ -812,6 +818,7 @@ struct App {
         return DefWindowProcW(hwnd,message,w,l);
     }
     void initialize(bool leader=true){
+        if(!modelStorageSettings)modelStorageSettings=std::make_shared<NativeModelStorage>(programDirectory.empty()?directory:programDirectory,storage(),!dataDirectorySpecified);
         state.log=[this](const std::string& text){if(!diagnostics)return;std::printf("%s\n",text.c_str());std::fflush(stdout);};
         state.log(smooth?"VARIANT smooth transitions + braking":"VARIANT regular");
         state.canWalk=[this](double y,double d){return canStartWalk(y,d);};
@@ -892,13 +899,14 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         auto owned=std::make_unique<App>();auto& app=*owned;wchar_t executable[32768]{};GetModuleFileNameW(nullptr,executable,32768);app.directory=std::filesystem::path(executable).parent_path();
         wchar_t dataRoot[32768]{};if(GetEnvironmentVariableW(L"BA_NATIVE_DATA_DIR",dataRoot,32768)>0)app.dataDirectory=std::filesystem::absolute(dataRoot);
         if(app.dataDirectory.empty())app.dataDirectory=app.directory/L"data";
+        wchar_t programRoot[32768]{};if(GetEnvironmentVariableW(L"BA_NATIVE_PROGRAM_DIR",programRoot,32768)>0)app.programDirectory=std::filesystem::absolute(programRoot);else app.programDirectory=app.directory;
         app.model=app.directory/L"models/Shiroko.glb";
         wchar_t saved[32768]{};GetPrivateProfileStringW(L"Model",L"Path",L"",saved,32768,(app.storage()/L"active-model.ini").c_str());
         if(*saved&&std::filesystem::is_regular_file(saved))app.model=saved;
         int argc=0;auto** argv=CommandLineToArgvW(GetCommandLineW(),&argc);
         for(int i=1;i<argc;i++){
             const std::wstring flag=argv[i];
-            if(flag==L"--data-dir"&&i+1<argc)app.dataDirectory=std::filesystem::absolute(argv[++i]);
+            if(flag==L"--data-dir"&&i+1<argc){app.dataDirectory=std::filesystem::absolute(argv[++i]);app.dataDirectorySpecified=true;}
             else if(flag==L"--model"&&i+1<argc){app.model=std::filesystem::absolute(argv[++i]);app.modelSpecified=true;}
             else if(flag==L"--clip"&&i+1<argc){app.reviewClip=utf8(argv[++i]);app.review=true;}
             else if(flag==L"--sample"&&i+1<argc){app.reviewTime=std::wcstod(argv[++i],nullptr);app.sampleSpecified=true;app.review=true;}
@@ -914,6 +922,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         }LocalFree(argv);
         if(!app.initialMode.empty()&&app.initialMode!="cafe"&&app.initialMode!="battle")throw std::runtime_error("Mode must be cafe or battle");
         app.fixedPose=app.review&&(app.initialMode.empty()||!app.reviewClip.empty()||app.sampleSpecified);
+        app.modelStorageSettings=std::make_shared<NativeModelStorage>(app.programDirectory,app.storage(),!app.dataDirectorySpecified);
         std::unique_ptr<NativeHealth> health;
         if(app.diagnostics){
             std::filesystem::create_directories(app.storage()/L"logs");

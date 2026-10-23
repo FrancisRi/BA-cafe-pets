@@ -32,6 +32,7 @@ CMake 会下载并校验固定版本的 raylib 6.0 与 BehaviorTree.CPP 4.8.0。
 | `native_settings.h` / `native_fluent.h` | 快捷菜单、完整界面、模型右键菜单及主题 |
 | `native_model_import.h` | Win32 多选文件结果解析及批次处理 |
 | `native_model_library.h` | 模型复制、校验、去重、文件发现与回收站删除 |
+| `native_model_storage.h` | EXE 目录解析、保存位置设置、旧模型记录恢复与备份 |
 | `native_renderer.cpp` / `gltf_model.cpp` | 渲染、GLB 解析、动画与蒙皮 |
 | `shared/` / `design/` | 行为实现、行为树与状态机 |
 | `release_launcher.cpp` / `package.ps1` | 单文件启动器和发行打包 |
@@ -41,7 +42,7 @@ CMake 会下载并校验固定版本的 raylib 6.0 与 BehaviorTree.CPP 4.8.0。
 先完成应用构建，再构建测试目标：
 
 ```powershell
-cmake --build build --target ba_cafe_lite_ui_tests ba_cafe_lite_model_library_tests ba_cafe_lite_model_import_tests ba_cafe_lite_topmost_tests -j 4
+cmake --build build --target ba_cafe_lite_ui_tests ba_cafe_lite_model_library_tests ba_cafe_lite_model_import_tests ba_cafe_lite_model_storage_tests ba_cafe_lite_topmost_tests -j 4
 ./build/ba_cafe_lite_ui_tests.exe
 ./build/ba_cafe_lite_model_import_tests.exe
 ./build/ba_cafe_lite_topmost_tests.exe
@@ -52,6 +53,13 @@ cmake --build build --target ba_cafe_lite_ui_tests ba_cafe_lite_model_library_te
 ```powershell
 $scratch = Join-Path $PWD ('artifacts/model-library-' + [guid]::NewGuid().ToString('N'))
 ./build/ba_cafe_lite_model_library_tests.exe $scratch
+./build/ba_cafe_lite_model_storage_tests.exe (Join-Path $PWD ('artifacts/model-storage-' + [guid]::NewGuid().ToString('N')))
+```
+
+打包后可用 Windows 桌面验证单文件启动器的旧记录恢复。脚本将 EXE、模型与数据复制到独立测试目录，不改动实际用户资料：
+
+```powershell
+python tests/launcher_storage_compatibility.py ./dist/BA-Cafe-Pets-1.0.1-x64.exe
 ```
 
 界面回归检查使用隔离 Windows 桌面，不把模拟模型写入实际用户数据。可选截图输出：
@@ -62,7 +70,7 @@ $scratch = Join-Path $PWD ('artifacts/model-library-' + [guid]::NewGuid().ToStri
 
 未提供历史文件时，截图使用空模型列表。可额外传入一个 `characters.json` 进行只读预览。
 
-手工验证请使用独立数据目录：
+手工验证请使用独立数据目录。模型默认写入程序所在文件夹，导入测试前应在模型管理中选择专用测试目录，或将程序及资源复制到隔离目录后运行：
 
 ```powershell
 ./build/bin/ba_cafe_lite_native.exe --data-dir ./artifacts/manual-data --settings --diagnostics

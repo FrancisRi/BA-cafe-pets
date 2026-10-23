@@ -115,6 +115,9 @@ struct NativeSettings {
             section(L"本地模型库");note(L"可多选导入；模型自动保存副本，之后可移动或删除原文件。",26);
             auto folder=control(panel,L"BUTTON",L"打开模型文件夹",BS_OWNERDRAW,2105,16,y,184,36);placeContent(folder,16,y,184,36);
             auto refresh=control(panel,L"BUTTON",L"刷新模型库",BS_OWNERDRAW,2106,212,y,132,36);placeContent(refresh,212,y,132,36);y+=48;
+            auto change=control(panel,L"BUTTON",L"更改保存位置…",BS_OWNERDRAW,2107,16,y,184,36);placeContent(change,16,y,184,36);
+            auto reset=control(panel,L"BUTTON",L"恢复默认位置",BS_OWNERDRAW,2108,212,y,162,36);placeContent(reset,212,y,162,36);y+=48;
+            note(L"默认保存在程序所在文件夹；更改仅影响后续导入，原有模型仍可使用和管理。",40);
             auto folderPath=control(panel,L"STATIC",L"",SS_PATHELLIPSIS,2110,16,y,panelWidth(),24);SendMessageW(folderPath,WM_SETFONT,reinterpret_cast<WPARAM>(ui.small),FALSE);SetPropW(folderPath,L"FluentMuted",reinterpret_cast<HANDLE>(1));placeContent(folderPath,16,y,0,24,true);y+=40;
             section(L"已导入的模型");note(L"勾选显示角色；右键模型可切换、定位或删除。模型库与本地文件同步，同时显示最多 5 个。",40);
             const int rosterHeight=last.value("characters",Json::array()).empty()?128:std::min(4,int(last["characters"].size()))*64;
@@ -189,6 +192,7 @@ struct NativeSettings {
             }
             SetWindowTextW(GetDlgItem(window,2300),statusText().c_str());EnableWindow(GetDlgItem(window,2200),quickEnabled(3010));ShowWindow(progress,last.value("busy",false)?SW_SHOW:SW_HIDE);InvalidateRect(progress,nullptr,FALSE);
             if(auto path=GetDlgItem(panel,2110))SetWindowTextW(path,wide(last.value("modelsDirectory",std::string{})).c_str());
+            EnableWindow(GetDlgItem(panel,2107),!last.value("busy",false));EnableWindow(GetDlgItem(panel,2108),!last.value("busy",false)&&!last.value("modelsDirectoryDefault",false));
             if(list){fillRoster(list,false);const int n=int(SendMessageW(list,LB_GETCURSEL,0,0));const auto rows=last.value("characters",Json::array());ShowWindow(listEmpty,rows.empty()?SW_SHOW:SW_HIDE);const auto row=n>=0&&n<int(rows.size())?rows[n]:Json::object();const bool active=row.value("active",false);
                 SetWindowTextW(GetDlgItem(panel,2100),active?L"隐藏角色":L"显示角色");EnableWindow(GetDlgItem(panel,2100),n>=0&&(active||(row.value("available",false)&&last.value("activeCount",0)<5)));EnableWindow(GetDlgItem(panel,2101),n>=0&&active&&row.value("ready",false)&&highlighted!=last.value("selectedId",std::string{}));SetWindowTextW(GetDlgItem(panel,2102),row.value("managed",false)?L"删除模型":L"移除记录");EnableWindow(GetDlgItem(panel,2102),n>=0&&!row.value("loading",false));EnableWindow(GetDlgItem(panel,2103),last.value("activeCount",0)>0);EnableWindow(GetDlgItem(panel,2104),last.value("activeCount",0)>0);}
             for(int i=0;i<4;++i)InvalidateRect(GetDlgItem(window,1000+i),nullptr,FALSE);
@@ -295,6 +299,7 @@ struct NativeSettings {
         if(id==2103){receive({{"type","uniform_size"}});return;}if(id==2104){receive({{"type","close_character"}});return;}
         if(id==2105){receive({{"type","open_models_folder"}});return;}
         if(id==2106){receive({{"type","refresh_models"}});return;}
+        if(id==2107||id==2108){receive({{"type",id==2107?"change_models_folder":"reset_models_folder"}});return;}
         if(id>=2100&&id<=2102){const int n=int(SendMessageW(list,LB_GETCURSEL,0,0));if(n<0)return;const auto row=last["characters"][n];if(id==2100)toggleRoster(n);else if(id==2101)receive({{"type","roster_select"},{"id",row["id"]}});else removeModel(row);return;}
         if(id==2200){receive({{"type","import"}});return;}
         if(id==2201){auto value=last["value"];NativePreferences defaults;const auto ini=defaultsFile.wstring();defaults.load(ini);value.update(defaults.json());value.update({{"look",GetPrivateProfileIntW(L"Behavior",L"Tracking",1,ini.c_str())!=0},{"idleSeconds",std::clamp(int(GetPrivateProfileIntW(L"Behavior",L"InputIdleSeconds",60,ini.c_str())),1,3600)},{"activeSeconds",std::clamp(int(GetPrivateProfileIntW(L"Behavior",L"ContinuedInputSeconds",30,ini.c_str())),1,3600)}});sendValue(std::move(value));}

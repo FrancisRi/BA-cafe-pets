@@ -99,6 +99,8 @@ int main(int argc,char** argv){
         check(menu.contextId=="1"&&IsWindowVisible(menu.modelMenu),"Keyboard context-menu invocation uses the selected model");
         MSG escape{};escape.hwnd=GetDlgItem(menu.modelMenu,4000);escape.message=WM_KEYDOWN;escape.wParam=VK_ESCAPE;check(menu.route(escape)&&!IsWindowVisible(menu.modelMenu)&&IsWindowVisible(menu.window),"Esc dismisses only the model context menu");
         menu.command(2106,BN_CLICKED);check(sent.back()["type"]=="refresh_models","Model management refreshes the actual local model library");
+        menu.command(2107,BN_CLICKED);check(sent.back()["type"]=="change_models_folder","Model management opens the folder selector");
+        menu.command(2108,BN_CLICKED);check(sent.back()["type"]=="reset_models_folder","Model management restores the default folder");
         state["characters"][1]["active"]=false;state["activeCount"]=1;menu.sync();
         menu.command(2105,BN_CLICKED);check(sent.back().at("type")=="open_models_folder","Model management opens the same model folder");
         state["characters"].push_back({{"name","Unimported placeholder"},{"active",false}});menu.sync();check(SendMessageW(menu.list,LB_GETCOUNT,0,0)==15,"Full roster excludes unimported placeholders");state["characters"].erase(15);

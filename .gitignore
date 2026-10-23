@@ -1,7 +1,7 @@
 /build*/
 /vendor/
 /.tools/
-/assets/*.glb
+*.glb
 !/assets/Shiroko.glb
 /artifacts/
 /dist/

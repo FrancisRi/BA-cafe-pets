@@ -22,12 +22,12 @@ struct Scene {
     void refreshModels(){
         if(modifyingModels)return;
         try{
-            auto library=leader().modelLibrary();bool changed=false;
-            for(const auto& file:library.files()){
+            bool changed=false;
+            for(const auto& folder:leader().modelStorageSettings->directories())for(const auto& file:NativeModelLibrary(folder).files()){
                 const auto id=SceneRoster::key(file);if(!roster.find(id)){roster.remember({id,utf8(file.wstring()),utf8(NativeModelLibrary::displayName(file)),"cafe",false});changed=true;}
             }
             const auto before=roster.entries.size();
-            roster.entries.erase(std::remove_if(roster.entries.begin(),roster.entries.end(),[&](const auto& row){return !row.active&&library.owns(wide(row.path))&&!std::filesystem::exists(wide(row.path));}),roster.entries.end());
+            roster.entries.erase(std::remove_if(roster.entries.begin(),roster.entries.end(),[&](const auto& row){return !row.active&&leader().managedLibrary(wide(row.path))&&!std::filesystem::exists(wide(row.path));}),roster.entries.end());
             changed|=before!=roster.entries.size();
             if(!roster.find(roster.selected)){roster.selected.clear();for(const auto& row:roster.entries)if(row.active){roster.selected=row.id;break;}}
             if(changed)save();
@@ -35,7 +35,7 @@ struct Scene {
     }
     Json snapshot(){
         auto result=selected().settingsSnapshot();Json rows=Json::array();
-        for(const auto& e:roster.entries){const auto* a=find(e.id);rows.push_back({{"id",e.id},{"name",e.name},{"path",e.path},{"active",e.active},{"managed",leader().modelLibrary().owns(wide(e.path))},
+        for(const auto& e:roster.entries){const auto* a=find(e.id);rows.push_back({{"id",e.id},{"name",e.name},{"path",e.path},{"active",e.active},{"managed",bool(leader().managedLibrary(wide(e.path)))},
             {"available",std::filesystem::is_regular_file(wide(e.path))},{"ready",a&&a->loaded&&a->displayed},{"failed",a&&a->done&&!a->loaded},{"loading",e.active&&(!a||(!a->loaded&&a->settings->importBusy))},{"battleAvailable",a&&a->loaded&&a->settings->battleAvailable},{"mode",e.mode}});}
         result["characters"]=rows;result["selectedId"]=roster.selected;result["activeCount"]=roster.activeCount();result["maximum"]=SceneRoster::Maximum;
         if(const auto* entry=roster.find(roster.selected))result["name"]=entry->name;
@@ -155,6 +155,7 @@ struct Scene {
     explicit Scene(std::unique_ptr<App> first):review(first->review){
         historyFile=first->storage()/L"characters.json";
         if(!review){try{roster.load(historyFile);}catch(const std::exception& e){error=std::string("角色历史读取失败：")+e.what();}}
+        if(!review){try{first->modelStorageSettings->recover(roster,first->directory/L"models/Shiroko.glb");}catch(const std::exception& e){error=std::string("旧模型记录恢复失败：")+e.what();}}
         for(auto& e:roster.entries)if(e.active&&!std::filesystem::is_regular_file(wide(e.path)))e.active=false;
         bool explicitAccepted=false;
         if(!review&&first->modelSpecified){
@@ -256,6 +257,14 @@ struct Scene {
         if(type!="import"&&type!="refresh_models")importNotice.clear();
         if(type=="exit"){save();stopping=true;PostQuitMessage(0);return;}
         if(type=="refresh_models"){refreshModels();sync();return;}
+        if(type=="change_models_folder"||type=="reset_models_folder"){
+            if(modifyingModels)return;NativeHealth::Pause choosing;
+            try{
+                auto& storage=*leader().modelStorageSettings;
+                const auto folder=type=="reset_models_folder"?std::optional<std::filesystem::path>(storage.programDirectory):NativeModelStorage::choose(leader().nativeSettings->dialogOwner(),storage.current);
+                if(!folder)return;storage.change(*folder);error.clear();refreshModels();sync();
+            }catch(const std::exception& failure){error=failure.what();sync();}return;
+        }
         if(type=="model_locate"){
             if(const auto* row=roster.find(j.value("id",std::string{}))){
                 const auto file=wide(row->path);const auto args=L"/select,\""+std::filesystem::absolute(file).wstring()+L"\"";
@@ -274,8 +283,8 @@ struct Scene {
             struct Guard {bool& flag;Guard(bool& value):flag(value){flag=true;}~Guard(){flag=false;}} guard(modifyingModels);
             try{
                 if(auto* actor=find(id);actor&&actor->settings->importBusy)throw std::runtime_error("请等待模型加载完成后再删除");
-                const auto file=wide(roster.find(id)->path);auto library=leader().modelLibrary();
-                if(library.owns(file))library.recycle(file,leader().nativeSettings->dialogOwner());
+                const auto file=wide(roster.find(id)->path);const auto library=leader().managedLibrary(file);
+                if(library)library->recycle(file,leader().nativeSettings->dialogOwner());
                 if(auto* row=roster.find(id);row&&row->active)close(id,false);
                 roster.entries.erase(std::remove_if(roster.entries.begin(),roster.entries.end(),[&](const auto& e){return e.id==id;}),roster.entries.end());
                 if(roster.selected==id)roster.selected=roster.entries.empty()?"":roster.entries.front().id;
@@ -303,7 +312,7 @@ struct Scene {
         if(stopping||leader().session.paused())return;
         const bool loading=std::any_of(actors.begin(),actors.end(),[](const auto& a){return a->displayed&&!a->loaded&&!a->done&&(!a->renderer||a->settings->importBusy);});
         if(!loading)for(const auto& entry:roster.entries)if(entry.active&&!find(entry.id)){
-            auto child=std::make_unique<App>();child->directory=leader().directory;child->dataDirectory=leader().dataDirectory;child->model=wide(entry.path);child->actorId=entry.id;
+            auto child=std::make_unique<App>();child->directory=leader().directory;child->programDirectory=leader().programDirectory;child->dataDirectory=leader().dataDirectory;child->modelStorageSettings=leader().modelStorageSettings;child->model=wide(entry.path);child->actorId=entry.id;
             child->initialMode=entry.mode;child->smooth=leader().smooth;child->zoom=commonZoom();
             auto& a=*child;actors.push_back(std::move(child));try{attach(a,false);}catch(const std::exception& e){a.done=true;a.displayed=false;roster.find(entry.id)->active=false;error=e.what();save();sync();}break;
         }

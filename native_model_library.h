@@ -12,9 +12,8 @@
 #include <string>
 #include <vector>
 
-// Imported GLBs live with persistent user data, outside release extraction
-// caches and build-time bundled models. Preparing an import is read-only so
-// the host can check its history cap before creating any model files.
+// Imported GLBs live in the configured library, outside release extraction
+// caches. Preparing an import is read-only; commit creates a verified copy.
 struct NativeModelLibrary {
     using Path=std::filesystem::path;
     Path directory;

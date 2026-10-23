@@ -1,4 +1,4 @@
-BA Cafe Pets 1.0.0 · Windows x64
+BA Cafe Pets 1.0.1 · Windows x64
 
 基于 maxiumlee（Max）的 ba-cafe-lite 继续开发。
 原作者：https://github.com/maxiumlee/ba-cafe-lite
@@ -7,7 +7,7 @@ BA Cafe Pets 1.0.0 · Windows x64
 内部程序文件名及持久数据目录继续保留，以兼容已有配置。
 
 启动
-  单文件版双击 BA-Cafe-Pets-1.0.0-x64.exe；便携版解压后运行 ba_cafe_lite.exe。
+  单文件版双击 BA-Cafe-Pets-1.0.1-x64.exe；便携版解压后运行 ba_cafe_lite.exe。
   默认角色 Shiroko。
   不需要 Blender、浏览器、WebView2、Python 或开发环境。
   便携 ZIP 请完整解压，保留 models、defaults.ini、behavior 和 licenses。
@@ -22,7 +22,9 @@ BA Cafe Pets 1.0.0 · Windows x64
   “退出桌宠”：保存设置并关闭全部角色。
 
 模型管理
-  导入会将模型复制、校验并保存到本地 models 文件夹；原始下载文件可移动或删除。
+  导入默认复制、校验到程序 EXE 所在文件夹，单文件版不会写入解压缓存。
+  模型管理 → “更改保存位置…”可选择目录，“恢复默认位置”返回程序所在文件夹。
+  新导入使用新目录；旧模型保留原文件并继续管理，不会自动搬动或删除。
   模型库不受旧的 15 条历史限制，最多同时显示 5 个角色。
   “刷新模型库”同步实际文件，新发现的模型不会自动显示。
   删除本地模型会将副本移入回收站，并同步移除记录、关闭相应桌宠。
@@ -32,9 +34,12 @@ BA Cafe Pets 1.0.0 · Windows x64
 数据与日志
   单 EXE 版：%LOCALAPPDATA%\ba_cafe_lite_native\data\
   便携 ZIP／原生程序：可执行文件旁的 data\
-  settings.ini 保存设置；characters.json 保存模型记录；models\ 保存模型副本。
+  settings.ini 保存设置；characters.json 保存模型记录；model-library.json 保存模型目录设置。
+  模型文件单独保存在 EXE 文件夹或自选目录，旧 data/models 继续兼容。
+  根目录 EXE 会恢复同目录 data 和 build/bin/data 中存在的旧模型记录。
+  恢复前备份为 characters.before-storage-*.json，不修改旧文件和记录。
   当前单 EXE 数据目录与原版共用。需要独立数据，可用便携版或原生程序的 --data-dir。
-  升级前退出旧版本，关闭程序后备份整个 data 文件夹。
+  升级前退出旧版本，关闭程序后同时备份 data 文件夹和模型文件。
   默认不写日志；--diagnostics 开启日志、性能统计与挂起诊断，保存在 logs\，不自动上传。
 
 要求与边界

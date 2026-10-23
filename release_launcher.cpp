@@ -124,6 +124,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         const auto mutexName=L"Local\\BaCafeNative-"+std::to_wstring(key);mutex=CreateMutexW(nullptr,TRUE,mutexName.c_str());require(mutex!=nullptr,"Cannot create launch lock");if(GetLastError()==ERROR_ALREADY_EXISTS){CloseHandle(mutex);return 0;}
         ctx.cache=home/L"app"/widen(hex(ctx.footer.sha,16));prepare(ctx);
         const auto data=home/L"data";fs::create_directories(data);SetEnvironmentVariableW(L"BA_NATIVE_DATA_DIR",data.c_str());
+        SetEnvironmentVariableW(L"BA_NATIVE_PROGRAM_DIR",ctx.self.parent_path().c_str());
         int argc=0;auto** argv=CommandLineToArgvW(GetCommandLineW(),&argc);bool prepareOnly=false;
         const auto exe=ctx.cache/L"ba_cafe_lite.exe";auto command=quote(exe.wstring());
         for(int i=1;i<argc;++i){if(std::wcscmp(argv[i],L"--prepare-only")==0)prepareOnly=true;else command+=L" "+quote(argv[i]);}LocalFree(argv);
