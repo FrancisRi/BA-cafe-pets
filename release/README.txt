@@ -1,4 +1,4 @@
-BA Cafe Pets 1.0.1 · Windows x64
+BA Cafe Pets 1.0.2 · Windows x64
 
 基于 maxiumlee（Max）的 ba-cafe-lite 继续开发。
 原作者：https://github.com/maxiumlee/ba-cafe-lite
@@ -7,7 +7,7 @@ BA Cafe Pets 1.0.1 · Windows x64
 内部程序文件名及持久数据目录继续保留，以兼容已有配置。
 
 启动
-  单文件版双击 BA-Cafe-Pets-1.0.1-x64.exe；便携版解压后运行 ba_cafe_lite.exe。
+  单文件版双击 BA-Cafe-Pets-1.0.2-x64.exe；便携版解压后运行 ba_cafe_lite.exe。
   默认角色 Shiroko。
   不需要 Blender、浏览器、WebView2、Python 或开发环境。
   便携 ZIP 请完整解压，保留 models、defaults.ini、behavior 和 licenses。
@@ -20,10 +20,11 @@ BA Cafe Pets 1.0.1 · Windows x64
   “导入模型”：选择 GLB，可按 Ctrl／Shift 一次多选多个。
   模型管理中右键点击一行：显示／隐藏、设为当前、定位或删除。
   “退出桌宠”：保存设置并关闭全部角色。
+  朝向鼠标：30° 模式转身时更新鼠标目标；头部中心附近忽略微小移动。
 
 模型管理
-  导入默认复制、校验到程序 EXE 所在文件夹，单文件版不会写入解压缓存。
-  模型管理 → “更改保存位置…”可选择目录，“恢复默认位置”返回程序所在文件夹。
+  导入默认复制、校验到 EXE 旁自动创建的 model 文件夹，单文件版不会写入解压缓存。
+  模型管理 → “更改保存位置…”可选择目录，“恢复默认位置”返回 EXE 旁的 model 文件夹。
   新导入使用新目录；旧模型保留原文件并继续管理，不会自动搬动或删除。
   模型库不受旧的 15 条历史限制，最多同时显示 5 个角色。
   “刷新模型库”同步实际文件，新发现的模型不会自动显示。
@@ -35,7 +36,7 @@ BA Cafe Pets 1.0.1 · Windows x64
   单 EXE 版：%LOCALAPPDATA%\ba_cafe_lite_native\data\
   便携 ZIP／原生程序：可执行文件旁的 data\
   settings.ini 保存设置；characters.json 保存模型记录；model-library.json 保存模型目录设置。
-  模型文件单独保存在 EXE 文件夹或自选目录，旧 data/models 继续兼容。
+  模型文件单独保存在 EXE 旁的 model 文件夹或自选目录，旧 data/models 和 EXE 旁已有的 GLB 继续兼容。
   根目录 EXE 会恢复同目录 data 和 build/bin/data 中存在的旧模型记录。
   恢复前备份为 characters.before-storage-*.json，不修改旧文件和记录。
   当前单 EXE 数据目录与原版共用。需要独立数据，可用便携版或原生程序的 --data-dir。

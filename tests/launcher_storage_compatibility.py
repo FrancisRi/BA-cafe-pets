@@ -19,6 +19,8 @@ def key(path):
     value=14695981039346656037
     for ch in str(path).lower(): value=((value^ord(ch))*1099511628211)&((1<<64)-1)
     return f'{value:x}'
+former=program/'FormerDefault.glb'
+shutil.copyfile(ROOT/'assets/Shiroko.glb',former)
 rows=[]
 for index in range(2):
     file=legacy/'models'/f'CompatibilityModel{index}.glb'
@@ -100,9 +102,11 @@ def smoke(command,expected,env,label):
 smoke([str(launcher),'--settings'],cache/'ba_cafe_lite.exe',environment,'Launcher compatibility')
 current=json.loads((WORK/'profile/data/characters.json').read_text(encoding='utf-8'))
 found={row['name']:row for row in current['characters']}
-assert {'CompatibilityModel0','CompatibilityModel1'}<=set(found), 'Legacy models missing: '+str(list(found))
+assert {'CompatibilityModel0','CompatibilityModel1','FormerDefault'}<=set(found), 'Legacy models missing: '+str(list(found))
 assert found['CompatibilityModel0']['active'] and found['CompatibilityModel0']['mode']=='battle'
 assert abs(found['CompatibilityModel0']['zoom']-0.87)<0.001
+assert (program/'model').is_dir(), 'Create the model folder beside the real EXE, outside its extraction cache'
+assert Path(found['FormerDefault']['path'])==former and former.is_file(), 'Continue managing GLBs from the former EXE-directory default'
 assert (legacy/'characters.json').read_bytes()==legacy_bytes
 assert all(Path(row['path']).is_file() for row in rows)
 print('Legacy developer models recovered by standalone launcher, with mode/visibility/zoom and original files preserved.')

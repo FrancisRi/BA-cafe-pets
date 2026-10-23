@@ -23,7 +23,8 @@ struct NativeModelStorage {
     static Path absolute(const Path& path){return std::filesystem::absolute(path).lexically_normal();}
     static bool same(const Path& a,const Path& b){const auto left=std::filesystem::weakly_canonical(a).wstring(),right=std::filesystem::weakly_canonical(b).wstring();return CompareStringOrdinal(left.c_str(),int(left.size()),right.c_str(),int(right.size()),TRUE)==CSTR_EQUAL;}
     static void append(std::vector<Path>& folders,const Path& path){if(path.empty())return;const auto value=absolute(path);if(std::none_of(folders.begin(),folders.end(),[&](const auto& item){return same(item,value);}))folders.push_back(value);}
-    NativeModelStorage(Path program,Path data,bool discover=true):programDirectory(absolute(program)),configuration(absolute(data)/L"model-library.json"),dataDirectory(absolute(data)),current(programDirectory),discoverLegacy(discover){
+    Path defaultDirectory() const {return programDirectory/L"model";}
+    NativeModelStorage(Path program,Path data,bool discover=true):programDirectory(absolute(program)),configuration(absolute(data)/L"model-library.json"),dataDirectory(absolute(data)),current(defaultDirectory()),discoverLegacy(discover){
         if(!std::filesystem::exists(configuration))return;
         std::ifstream input(configuration);const auto value=Json::parse(input);
         const auto saved=value.value("directory",std::string{});if(!saved.empty())current=resolve(saved);
@@ -41,7 +42,7 @@ struct NativeModelStorage {
         std::vector<Path> result;append(result,programDirectory/L"data");append(result,programDirectory/L"build/bin/data");return result;
     }
     std::vector<Path> directories() const {
-        std::vector<Path> result;append(result,current);append(result,dataDirectory/L"models");
+        std::vector<Path> result;append(result,current);append(result,programDirectory);append(result,dataDirectory/L"models");
         for(const auto& path:legacyDataDirectories())append(result,path/L"models");
         for(const auto& path:previous)append(result,path);return result;
     }
@@ -53,7 +54,7 @@ struct NativeModelStorage {
     }
     void persist(const Path& destination,const std::vector<Path>& history,const std::vector<Path>& recovered) const {
         Json paths=Json::array(),profiles=Json::array();for(const auto& path:history)paths.push_back(encode(path));for(const auto& path:recovered)profiles.push_back(encode(path));
-        const Json value={{"directory",same(destination,programDirectory)?std::string{}:encode(destination)},{"previousDirectories",paths},{"recoveredProfiles",profiles}};
+        const Json value={{"directory",same(destination,defaultDirectory())?std::string{}:encode(destination)},{"previousDirectories",paths},{"recoveredProfiles",profiles}};
         std::filesystem::create_directories(dataDirectory);const auto temporary=configuration.wstring()+L".tmp";
         try{
             {std::ofstream output(Path(temporary),std::ios::binary);output<<value.dump(2);if(!output)throw std::runtime_error("无法保存模型目录设置");}

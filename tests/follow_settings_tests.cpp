@@ -40,6 +40,22 @@ int main(int argc,char** argv){
   check(facing>179&&facing<180,"Smooth tracking uses the short arc across the angle wrap");
   facing=0;attentionState.lookYaw=170;CafeAttention thresholdAttention;thresholdAttention.update(attentionState,facing,.008,true,true);
   check(thresholdAttention.turning&&std::abs(facing-240*.008)<1e-5,"Threshold tracking retains its turning-walk speed cap");
+  attentionState.lookYaw=-90;const float beforeRetarget=facing;const auto turnSerial=thresholdAttention.serial;
+  thresholdAttention.update(attentionState,facing,.008,true,true);
+  check(thresholdAttention.targetYaw==-90&&facing<beforeRetarget&&thresholdAttention.serial==turnSerial,"An ongoing threshold turn follows the latest cursor without restarting its animation");
+  CafeAttention waiting;facing=0;attentionState.lookYaw=29.9;waiting.update(attentionState,facing,.008,true,true);
+  check(!waiting.turning&&facing==0,"The thirty-degree threshold still prevents unnecessary idle turns");
+  attentionState.lookYaw=90;waiting.update(attentionState,facing,.008,false,false);check(facing==0&&!waiting.turning,"Interactions and movement retain control over facing");
+  CafeAttention wrapTurn;facing=179;attentionState.lookYaw=-150;wrapTurn.update(attentionState,facing,.008,true,true);
+  check(std::abs(std::remainder(facing-179,360.f)-240*.008)<1e-4,"Threshold turning also takes the short arc across the wrap");
+  const float beforeInvalid=facing;attentionState.lookYaw=NAN;wrapTurn.update(attentionState,facing,.008,true,true);
+  check(facing==beforeInvalid&&!wrapTurn.turning,"Invalid target samples cannot poison orientation or leave a stale turning animation");
+  attentionState.lookYaw=90;wrapTurn.update(attentionState,facing,NAN,true,false);check(facing==beforeInvalid,"An invalid time sample preserves the current orientation");
+  const auto eye=ground.screen({ground.position.x,1.7f,ground.position.z});float cursorFacing=42;
+  for(float scale:{.45f,1.f,1.65f}){ground.modelZoom=scale;check(!ground.faceCursor({eye.x+2.5f,eye.y},1.7f,cursorFacing)&&cursorFacing==42,"Small pointer motions at the head do not change facing across model scales");}
+  check(ground.faceCursor({eye.x+100,eye.y},1.7f,cursorFacing)&&std::abs(cursorFacing-90)<.01,"A clear pointer direction still faces right");
+  cursorFacing=42;check(!ground.faceCursor({NAN,eye.y},1.7f,cursorFacing)&&cursorFacing==42,"An invalid pointer sample leaves the last valid direction intact");
+  ground.modelZoom=1;
   check(!DirectedWalk::outsideBand({30,0},cursor,10,1,5),"An idle character inside the band must remain still");
   check(!DirectedWalk::outsideBand({10,0},cursor,10,1,5),"The lower endpoint belongs to the band");
   check(!DirectedWalk::outsideBand({50,0},cursor,10,1,5),"The upper endpoint belongs to the band");
@@ -71,6 +87,6 @@ int main(int argc,char** argv){
   WritePrivateProfileStringW(L"Behavior",L"Walking",L"0",ini.c_str());NativePreferences migrated;migrated.load(ini);check(!migrated.wandering&&!migrated.battleWalking,"An old disabled Walking flag migrates to both toggles");
   WritePrivateProfileStringW(L"Behavior",L"Walking",L"1",ini.c_str());migrated.load(ini);check(migrated.wandering&&migrated.battleWalking,"An old enabled Walking flag migrates to both toggles");
   settings.save(ini);NativePreferences loaded;loaded.load(ini);check(loaded.followNear==0&&loaded.wandering&&!loaded.battleWalking,"Zero nearest and independent toggles survive restart");
-  std::cout<<"Follow band, midpoint, zero-nearest, independent movement flags and INI migration passed\n";return 0;
+  std::cout<<"Cursor orientation, adaptive quiet region, live threshold retargeting, angle wrap, follow bands, independent movement flags and INI migration passed\n";return 0;
  }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

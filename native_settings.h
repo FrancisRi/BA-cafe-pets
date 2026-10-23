@@ -99,6 +99,11 @@ struct NativeSettings {
         }
         InvalidateRect(panel,nullptr,TRUE);
     }
+    void revealModelList(){
+        if(!list||!panel)return;RECT bounds{},viewport{};GetWindowRect(list,&bounds);MapWindowPoints(nullptr,panel,reinterpret_cast<POINT*>(&bounds),2);GetClientRect(panel,&viewport);
+        if(bounds.bottom>viewport.bottom)scrollTo(scroll+bounds.bottom-viewport.bottom);
+        else if(bounds.top<0)scrollTo(scroll+bounds.top);
+    }
     void layout(){
         if(!window||!panel)return;RECT r{};GetClientRect(window,&r);const int w=ui.dip(r.right),h=ui.dip(r.bottom);
         const auto place=[&](int id,int x,int y,int width,int height){SetWindowPos(GetDlgItem(window,id),nullptr,u(x),u(y),u(std::max(1,width)),u(height),SWP_NOZORDER|SWP_NOACTIVATE);};
@@ -117,7 +122,7 @@ struct NativeSettings {
             auto refresh=control(panel,L"BUTTON",L"刷新模型库",BS_OWNERDRAW,2106,212,y,132,36);placeContent(refresh,212,y,132,36);y+=48;
             auto change=control(panel,L"BUTTON",L"更改保存位置…",BS_OWNERDRAW,2107,16,y,184,36);placeContent(change,16,y,184,36);
             auto reset=control(panel,L"BUTTON",L"恢复默认位置",BS_OWNERDRAW,2108,212,y,162,36);placeContent(reset,212,y,162,36);y+=48;
-            note(L"默认保存在程序所在文件夹；更改仅影响后续导入，原有模型仍可使用和管理。",40);
+            note(L"默认保存在程序旁的 model 文件夹；更改仅影响后续导入，原有模型仍可使用和管理。",40);
             auto folderPath=control(panel,L"STATIC",L"",SS_PATHELLIPSIS,2110,16,y,panelWidth(),24);SendMessageW(folderPath,WM_SETFONT,reinterpret_cast<WPARAM>(ui.small),FALSE);SetPropW(folderPath,L"FluentMuted",reinterpret_cast<HANDLE>(1));placeContent(folderPath,16,y,0,24,true);y+=40;
             section(L"已导入的模型");note(L"勾选显示角色；右键模型可切换、定位或删除。模型库与本地文件同步，同时显示最多 5 个。",40);
             const int rosterHeight=last.value("characters",Json::array()).empty()?128:std::min(4,int(last["characters"].size()))*64;
@@ -349,6 +354,18 @@ struct NativeSettings {
     }
     static LRESULT CALLBACK listProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l,UINT_PTR,DWORD_PTR data){
         auto* self=reinterpret_cast<NativeSettings*>(data);const bool compact=hwnd==self->quickList;
+        if(msg==WM_MOUSEWHEEL&&!compact){
+            RECT bounds{},viewport{};GetWindowRect(hwnd,&bounds);MapWindowPoints(nullptr,self->panel,reinterpret_cast<POINT*>(&bounds),2);GetClientRect(self->panel,&viewport);
+            const int delta=GET_WHEEL_DELTA_WPARAM(w);
+            // Scroll the outer viewport first when it clips the list in the
+            // requested direction. At a list boundary, continue down the page.
+            if((delta<0&&bounds.bottom>viewport.bottom)||(delta>0&&bounds.top<0)){SendMessageW(self->panel,msg,w,l);return 0;}
+            const auto before=SendMessageW(hwnd,LB_GETTOPINDEX,0,0);const auto result=DefSubclassProc(hwnd,msg,w,l);
+            if(SendMessageW(hwnd,LB_GETTOPINDEX,0,0)==before&&std::abs(delta)>=WHEEL_DELTA)SendMessageW(self->panel,msg,w,l);return result;
+        }
+        if(!compact&&((msg==WM_KEYDOWN&&(w==VK_UP||w==VK_DOWN||w==VK_HOME||w==VK_END||w==VK_PRIOR||w==VK_NEXT))||(msg==WM_VSCROLL&&(LOWORD(w)==SB_ENDSCROLL||LOWORD(w)==SB_BOTTOM)))){
+            const auto result=DefSubclassProc(hwnd,msg,w,l);self->revealModelList();return result;
+        }
         if(msg==WM_CONTEXTMENU&&!compact){self->showModelMenu(hwnd,l);return 0;}
         if(msg==WM_KEYDOWN&&w==VK_DELETE&&!compact){const int index=int(SendMessageW(hwnd,LB_GETCURSEL,0,0));const auto rows=self->last.value("characters",Json::array());if(index>=0&&index<int(rows.size()))self->removeModel(rows[index]);return 0;}
         if(msg==WM_LBUTTONUP){const auto result=DefSubclassProc(hwnd,msg,w,l);const auto hit=SendMessageW(hwnd,LB_ITEMFROMPOINT,0,l);if(HIWORD(hit)==0&&(compact||GET_X_LPARAM(l)<self->u(42)))self->toggleRoster(LOWORD(hit));return result;}

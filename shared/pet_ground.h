@@ -31,10 +31,14 @@ struct PetGround {
     Vector3 floorAt(Vector2 pixel) const { return planeAt(pixel, 0); }
     bool faceCursor(Vector2 pixel, float eyeHeight, float& yaw) const {
         const auto eye = screen({position.x, eyeHeight, position.z});
-        if (std::hypot(pixel.x - eye.x, pixel.y - eye.y) < 2) return false;
+        const float dx=pixel.x-eye.x,dy=pixel.y-eye.y;
+        // Near the eyes, tiny pointer movements can imply a half-turn. Scale
+        // this quiet region with the pet so it also works at small/large zoom.
+        const float quietRadius=std::clamp(6.0f*modelZoom,3.0f,12.0f);
+        if (!std::isfinite(dx)||!std::isfinite(dy)||std::hypot(dx,dy)<quietRadius) return false;
         // Screen-space direction avoids the ~5x depth amplification at 12 degrees.
         // Slightly compress vertical influence to favor three-quarter/side views.
-        yaw = std::atan2(pixel.x - eye.x, (pixel.y - eye.y)*0.65f)*RAD2DEG;
+        yaw = std::atan2(dx,dy*0.65f)*RAD2DEG;
         return std::isfinite(yaw);
     }
     static float turnToward(float current, float target, float dt) {

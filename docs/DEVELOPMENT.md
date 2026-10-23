@@ -42,10 +42,11 @@ CMake 会下载并校验固定版本的 raylib 6.0 与 BehaviorTree.CPP 4.8.0。
 先完成应用构建，再构建测试目标：
 
 ```powershell
-cmake --build build --target ba_cafe_lite_ui_tests ba_cafe_lite_model_library_tests ba_cafe_lite_model_import_tests ba_cafe_lite_model_storage_tests ba_cafe_lite_topmost_tests -j 4
+cmake --build build --target ba_cafe_lite_ui_tests ba_cafe_lite_model_library_tests ba_cafe_lite_model_import_tests ba_cafe_lite_model_storage_tests ba_cafe_lite_topmost_tests ba_cafe_lite_follow_tests -j 4
 ./build/ba_cafe_lite_ui_tests.exe
 ./build/ba_cafe_lite_model_import_tests.exe
 ./build/ba_cafe_lite_topmost_tests.exe
+./build/ba_cafe_lite_follow_tests.exe (Join-Path $PWD ('artifacts/follow-' + [guid]::NewGuid().ToString('N') + '.ini'))
 ```
 
 模型库测试会创建文件并测试回收站删除，参数必须是尚不存在的独立测试目录：
@@ -59,7 +60,7 @@ $scratch = Join-Path $PWD ('artifacts/model-library-' + [guid]::NewGuid().ToStri
 打包后可用 Windows 桌面验证单文件启动器的旧记录恢复。脚本将 EXE、模型与数据复制到独立测试目录，不改动实际用户资料：
 
 ```powershell
-python tests/launcher_storage_compatibility.py ./dist/BA-Cafe-Pets-1.0.1-x64.exe
+python tests/launcher_storage_compatibility.py ./dist/BA-Cafe-Pets-1.0.2-x64.exe
 ```
 
 界面回归检查使用隔离 Windows 桌面，不把模拟模型写入实际用户数据。可选截图输出：
@@ -70,7 +71,7 @@ python tests/launcher_storage_compatibility.py ./dist/BA-Cafe-Pets-1.0.1-x64.exe
 
 未提供历史文件时，截图使用空模型列表。可额外传入一个 `characters.json` 进行只读预览。
 
-手工验证请使用独立数据目录。模型默认写入程序所在文件夹，导入测试前应在模型管理中选择专用测试目录，或将程序及资源复制到隔离目录后运行：
+手工验证请使用独立数据目录。模型默认写入程序旁的 model 文件夹，导入测试前应在模型管理中选择专用测试目录，或将程序及资源复制到隔离目录后运行：
 
 ```powershell
 ./build/bin/ba_cafe_lite_native.exe --data-dir ./artifacts/manual-data --settings --diagnostics

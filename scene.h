@@ -156,6 +156,7 @@ struct Scene {
         historyFile=first->storage()/L"characters.json";
         if(!review){try{roster.load(historyFile);}catch(const std::exception& e){error=std::string("角色历史读取失败：")+e.what();}}
         if(!review){try{first->modelStorageSettings->recover(roster,first->directory/L"models/Shiroko.glb");}catch(const std::exception& e){error=std::string("旧模型记录恢复失败：")+e.what();}}
+        if(!review){try{first->modelLibrary().ensureDirectory();}catch(const std::exception& e){error=std::string("无法创建模型保存目录，请在模型管理中更改位置：")+e.what();}}
         for(auto& e:roster.entries)if(e.active&&!std::filesystem::is_regular_file(wide(e.path)))e.active=false;
         bool explicitAccepted=false;
         if(!review&&first->modelSpecified){
@@ -261,7 +262,7 @@ struct Scene {
             if(modifyingModels)return;NativeHealth::Pause choosing;
             try{
                 auto& storage=*leader().modelStorageSettings;
-                const auto folder=type=="reset_models_folder"?std::optional<std::filesystem::path>(storage.programDirectory):NativeModelStorage::choose(leader().nativeSettings->dialogOwner(),storage.current);
+                const auto folder=type=="reset_models_folder"?std::optional<std::filesystem::path>(storage.defaultDirectory()):NativeModelStorage::choose(leader().nativeSettings->dialogOwner(),storage.current);
                 if(!folder)return;storage.change(*folder);error.clear();refreshModels();sync();
             }catch(const std::exception& failure){error=failure.what();sync();}return;
         }

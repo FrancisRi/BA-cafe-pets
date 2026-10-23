@@ -88,6 +88,15 @@ int main(int argc,char** argv){
         SendMessageW(GetDlgItem(menu.panel,101),CB_SETCURSEL,0,0);menu.command(101,CBN_SELCHANGE);check(state["value"]["renderQuality"]==0,"Styled combo preserves native selection commands");
         SendMessageW(GetDlgItem(menu.panel,103),TBM_SETPOS,TRUE,175);SendMessageW(menu.panel,WM_HSCROLL,TB_THUMBPOSITION,reinterpret_cast<LPARAM>(GetDlgItem(menu.panel,103)));check(state["value"]["outlineWidth"]==175,"Styled slider retains native value/drag behavior");
         menu.page=3;menu.build();check(SendMessageW(menu.list,LB_GETCOUNT,0,0)==15,"Full roster preserves the entire import history");
+        const auto lastRowVisible=[&]{RECT row{},client{},viewport{};const auto count=SendMessageW(menu.list,LB_GETCOUNT,0,0);SendMessageW(menu.list,LB_GETITEMRECT,count-1,reinterpret_cast<LPARAM>(&row));GetClientRect(menu.list,&client);if(row.top<0||row.bottom>client.bottom)return false;MapWindowPoints(menu.list,menu.panel,reinterpret_cast<POINT*>(&row),2);GetClientRect(menu.panel,&viewport);return row.top>=0&&row.bottom<=viewport.bottom;};
+        for(UINT dpi:{96u,120u,144u,168u,192u}){
+            menu.reloadTheme(menu.window,dpi);SetWindowPos(menu.window,nullptr,0,0,menu.u(920),menu.u(680),SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);pump(menu);menu.scrollTo(0);
+            for(int wheel=0;wheel<20;++wheel)SendMessageW(menu.list,WM_MOUSEWHEEL,MAKEWPARAM(0,SHORT(-WHEEL_DELTA)),0);
+            check(lastRowVisible(),"Scrolling the model list to the bottom reveals the entire last row inside the page viewport");
+            menu.scrollTo(0);SendMessageW(menu.list,WM_KEYDOWN,VK_END,0);check(lastRowVisible(),"Keyboard End reveals the entire last model at every DPI");
+            menu.scrollTo(0);SendMessageW(menu.list,LB_SETTOPINDEX,0,0);SendMessageW(menu.list,WM_VSCROLL,SB_BOTTOM,0);check(lastRowVisible(),"The list scrollbar can also reveal the complete final model");
+        }
+        menu.reloadTheme(menu.window,96);menu.scrollTo(0);SendMessageW(menu.list,LB_SETCURSEL,0,0);SendMessageW(menu.list,LB_SETTOPINDEX,0,0);
         state["characters"][1]["managed"]=true;
         RECT clicked{};SendMessageW(menu.list,LB_GETITEMRECT,1,reinterpret_cast<LPARAM>(&clicked));POINT location{clicked.left+menu.u(80),clicked.top+menu.u(20)};ClientToScreen(menu.list,&location);
         SendMessageW(menu.list,WM_CONTEXTMENU,reinterpret_cast<WPARAM>(menu.list),MAKELPARAM(location.x,location.y));pump(menu);

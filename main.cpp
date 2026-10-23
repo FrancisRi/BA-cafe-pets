@@ -173,7 +173,7 @@ struct App {
             {"mode",battleMode?"battle":"cafe"},{"idleSeconds",state.inactivityThreshold()},{"activeSeconds",state.activeSecondsOverride.value_or(30)}});
         return {{"type","settings"},{"name",utf8(settings->title)},{"value",value},{"battleAvailable",settings->battleAvailable},
             {"canFollow",battleMode?battle&&battle->clips.move>=0:cafeWalk>=0},{"busy",settings->importBusy},{"percent",settings->importPercent},
-            {"detail",utf8(settings->progressDetail)},{"error",settingsError},{"modelsDirectory",utf8(modelLibrary().directory.wstring())},{"modelsDirectoryDefault",NativeModelStorage::same(modelLibrary().directory,modelStorageSettings->programDirectory)}};
+            {"detail",utf8(settings->progressDetail)},{"error",settingsError},{"modelsDirectory",utf8(modelLibrary().directory.wstring())},{"modelsDirectoryDefault",NativeModelStorage::same(modelLibrary().directory,modelStorageSettings->defaultDirectory())}};
     }
     void syncSettings(){if(syncRequest)syncRequest();else if(nativeSettings)nativeSettings->sync();}
     void dismissMenuHint(){
