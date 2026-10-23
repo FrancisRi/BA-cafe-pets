@@ -1,0 +1,160 @@
+from pathlib import Path
+import ctypes as c
+from ctypes import wintypes as w
+import json,subprocess,time,uuid,shutil,zipfile,os,sys
+ROOT=Path(__file__).resolve().parents[1]
+WORK=ROOT/'artifacts/tray'/('integration-'+uuid.uuid4().hex)
+PROGRAM=WORK/'application'
+with zipfile.ZipFile(Path(sys.argv[1]).resolve()) as bundle: bundle.extractall(PROGRAM)
+SCRATCH=WORK/'profile'
+SCRATCH.mkdir()
+user = c.WinDLL('user32', use_last_error=True)
+CALLBACK = c.WINFUNCTYPE(w.BOOL, w.HWND, w.LPARAM)
+user.EnumWindows.argtypes = [CALLBACK, w.LPARAM]
+user.GetWindowThreadProcessId.argtypes = [w.HWND, c.POINTER(w.DWORD)]
+user.GetClassNameW.argtypes = [w.HWND, w.LPWSTR, c.c_int]
+user.GetDlgItem.argtypes = [w.HWND, c.c_int]
+user.GetDlgItem.restype = w.HWND
+user.IsWindowVisible.argtypes = [w.HWND]
+user.IsWindowEnabled.argtypes = [w.HWND]
+user.SendMessageTimeoutW.argtypes = [w.HWND, w.UINT, w.WPARAM, w.LPARAM, w.UINT, w.UINT, c.POINTER(c.c_size_t)]
+user.PostMessageW.argtypes = [w.HWND, w.UINT, w.WPARAM, w.LPARAM]
+user.ShowWindow.argtypes = [w.HWND, c.c_int]
+user.EnumChildWindows.argtypes = [w.HWND, CALLBACK, w.LPARAM]
+user.GetDlgCtrlID.argtypes = [w.HWND]
+
+environment=os.environ.copy()
+environment.pop('BA_NATIVE_PROGRAM_DIR',None)
+environment.pop('BA_NATIVE_DATA_DIR',None)
+process = subprocess.Popen([str(PROGRAM/'ba_cafe_lite.exe'),'--data-dir',str(SCRATCH),'--settings','--diagnostics'],cwd=PROGRAM,env=environment)
+
+def windows(cls):
+    found = []
+    @CALLBACK
+    def visit(hwnd, unused):
+        pid = w.DWORD()
+        user.GetWindowThreadProcessId(hwnd, c.byref(pid))
+        if pid.value == process.pid:
+            name = c.create_unicode_buffer(128)
+            user.GetClassNameW(hwnd, name, 128)
+            if name.value == cls and user.IsWindowVisible(hwnd):
+                found.append(hwnd)
+        return True
+    user.EnumWindows(visit, 0)
+    return found
+
+def wait_for(check, label, seconds=12):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            raise RuntimeError(f'Host exited ({process.returncode}): {label}')
+        value = check()
+        if value:
+            return value
+        time.sleep(0.1)
+    raise RuntimeError(f'Timed out: {label}')
+
+def send(hwnd, message, wp=0, lp=0):
+    result = c.c_size_t()
+    if not user.SendMessageTimeoutW(hwnd, message, wp, lp, 2, 3000, c.byref(result)):
+        raise RuntimeError(f'Native message timed out: {message:#x}')
+    return result.value
+
+def read_roster():
+    # Windows can briefly deny a reader while the host atomically replaces its
+    # history file. Retry the polling read; never interfere with the writer.
+    deadline = time.monotonic() + 2
+    while True:
+        try:
+            return json.loads((SCRATCH / 'characters.json').read_text(encoding='utf-8'))
+        except (PermissionError, FileNotFoundError, json.JSONDecodeError):
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.01)
+
+def class_name(hwnd):
+    name = c.create_unicode_buffer(128)
+    user.GetClassNameW(hwnd, name, 128)
+    return name.value
+
+
+def panel():
+    result=[]
+    @CALLBACK
+    def visit(hwnd,_):
+        if class_name(hwnd)=='BaCafeNativeSettings':result.append(hwnd)
+        return True
+    user.EnumChildWindows(full,visit,0)
+    return result[0]
+def tray_window():
+    result=[]
+    @CALLBACK
+    def visit(hwnd,_):
+        pid=w.DWORD();user.GetWindowThreadProcessId(hwnd,c.byref(pid))
+        if pid.value==process.pid and class_name(hwnd)=='BaCafeNativeTray':result.append(hwnd)
+        return True
+    user.EnumWindows(visit,0)
+    return result
+class NotifyIcon(c.Structure):
+    _fields_=[('cbSize',w.DWORD),('hWnd',w.HWND),('uID',w.UINT),('uFlags',w.UINT),('uCallbackMessage',w.UINT),('hIcon',w.HICON),('szTip',w.WCHAR*128),('dwState',w.DWORD),('dwStateMask',w.DWORD),('szInfo',w.WCHAR*256),('uVersion',w.UINT),('szInfoTitle',w.WCHAR*64),('dwInfoFlags',w.DWORD),('guidItem',c.c_byte*16),('hBalloonIcon',w.HICON)]
+shell=c.WinDLL('shell32');shell.Shell_NotifyIconW.argtypes=[w.DWORD,c.POINTER(NotifyIcon)]
+def registered(tray):
+    data=NotifyIcon();data.cbSize=c.sizeof(data);data.hWnd=tray;data.uID=1
+    return shell.Shell_NotifyIconW(1,c.byref(data)) # Modify no attributes; verify the shell owns this icon.
+try:
+    full=wait_for(lambda: windows('BaCafeNativeSettings'),'settings')[0]
+    pet=wait_for(lambda: windows('BaCafeNativeInput'),'pet rendered')[0]
+    send(pet,0x20A,120<<16)
+    zoom=read_roster()['characters'][0]['zoom'];assert zoom>1,'Model size changed before hiding'
+    send(full,0x111,1003)
+    user.PostMessageW(panel(),0x111,2100,0)
+    wait_for(lambda: not windows('BaCafeNativePet') or windows('#32770'),'hide last pet')
+    assert not windows('#32770'),'Hiding the final model must not prompt to exit'
+    assert process.poll() is None and not any(row['active'] for row in read_roster()['characters'])
+    tray=wait_for(tray_window,'resident tray icon window')[0]
+    assert registered(tray),'The icon is registered with the Windows notification area'
+    missing=NotifyIcon();missing.cbSize=c.sizeof(missing);missing.hWnd=tray;missing.uID=1
+    assert shell.Shell_NotifyIconW(2,c.byref(missing)),'Remove this isolated test icon to simulate Explorer recreation'
+    user.RegisterWindowMessageW.argtypes=[w.LPCWSTR]
+    user.PostMessageW(tray,user.RegisterWindowMessageW('TaskbarCreated'),0,0);time.sleep(.2)
+    assert registered(tray),'Taskbar recreation keeps the notification icon available'
+    send(full,0x10)
+    user.PostMessageW(tray,0x8000+61,0,(1<<16)|0x400)
+    full=wait_for(lambda: windows('BaCafeNativeSettings'),'tray click opens full settings')[0]
+    assert not windows('BaCafeNativePet')
+    user.PostMessageW(tray,0x8000+61,0,(1<<16)|0x7B)
+    quick=wait_for(lambda: windows('BaCafeQuickMenu'),'tray context menu')[0]
+    compact=user.GetDlgItem(quick,3200)
+    send(compact,0x186,0);send(compact,0x100,0x20)
+    wait_for(lambda: windows('BaCafeNativePet'),'show pet from tray roster')
+    wait_for(lambda: user.IsWindowEnabled(user.GetDlgItem(quick,3000)),'restored pet loaded')
+    send(quick,0x111,3011)
+    send(full,0x111,1003);send(panel(),0x111,2100)
+    wait_for(lambda: not windows('BaCafeNativePet'),'hide model again')
+    send(full,0x111,2);assert process.wait(timeout=10)==0
+    process=subprocess.Popen([str(PROGRAM/'ba_cafe_lite.exe'),'--data-dir',str(SCRATCH),'--settings'],cwd=PROGRAM,env=environment)
+    full=wait_for(lambda: windows('BaCafeNativeSettings'),'restart with all models hidden')[0]
+    wait_for(lambda: user.IsWindowEnabled(user.GetDlgItem(full,2200)),'imports available in background')
+    assert tray_window() and not windows('BaCafeNativePet') and not any(row['active'] for row in read_roster()['characters'])
+    assert abs(read_roster()['characters'][0]['zoom']-round(zoom,2))<.0001,'Background restart preserves the hidden model size'
+    send(full,0x111,1003)
+    user.PostMessageW(panel(),0x111,2102,0)
+    confirm=wait_for(lambda: windows('#32770'),'remove final model record confirmation')[0]
+    user.PostMessageW(confirm,0x111,6,0)
+    wait_for(lambda: len(read_roster()['characters'])==0,'empty model library')
+    assert process.poll() is None and tray_window() and (PROGRAM/'models/Shiroko.glb').is_file()
+    send(full,0x111,2);assert process.wait(timeout=10)==0
+    process=subprocess.Popen([str(PROGRAM/'ba_cafe_lite.exe'),'--data-dir',str(SCRATCH),'--settings'],cwd=PROGRAM,env=environment)
+    full=wait_for(lambda: windows('BaCafeNativeSettings'),'restart after removing all models')[0]
+    wait_for(lambda: user.IsWindowEnabled(user.GetDlgItem(full,2200)),'empty-library imports available')
+    assert not read_roster()['characters'] and not windows('BaCafeNativePet') and tray_window()
+    user.PostMessageW(tray_window()[0],0x8000+61,0,(1<<16)|0x7B)
+    quick=wait_for(lambda: windows('BaCafeQuickMenu'),'empty-library tray exit menu')[0]
+    send(quick,0x111,3012);assert process.wait(timeout=10)==0
+    print('Tray integration passed: hide last model without exiting, tray click/context menu, restore model, persistent all-hidden state, empty library, and explicit exit.')
+finally:
+    if process.poll() is None:
+        for dialog in windows('#32770'):user.PostMessageW(dialog,0x111,2,0)
+        for hwnd in windows('BaCafeNativeSettings'):user.PostMessageW(hwnd,0x111,2,0)
+        try:process.wait(timeout=8)
+        except subprocess.TimeoutExpired:process.terminate()

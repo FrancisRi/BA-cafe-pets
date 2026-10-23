@@ -35,7 +35,7 @@ struct NativeDesktopInput : BattleDesktopInput {
     void enable(bool value){
         if(!value){
             if(enabled){RAWINPUTDEVICE devices[]{{1,2,RIDEV_REMOVE,nullptr},{1,6,RIDEV_REMOVE,nullptr}};RegisterRawInputDevices(devices,2,sizeof(RAWINPUTDEVICE));}
-            enabled=false;if(windows)UnhookWinEvent(windows);windows=nullptr;
+            enabled=false;for(auto& key:heldKeys)key=false;lastKeyboard=nextHeldRepeat=0;if(windows)UnhookWinEvent(windows);windows=nullptr;
             if(instance==this)instance=nullptr;applicationWindows.clear();clear();
             if(receiver){DestroyWindow(receiver);receiver=nullptr;}return;
         }

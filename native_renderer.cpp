@@ -42,22 +42,25 @@ static constexpr const char* hullFragment=R"(#version 330
 out vec4 finalColor;void main(){finalColor=vec4(0,0,0,1);}
 )";
 static constexpr const char* contourFragment=R"(#version 330
-in vec2 fragTexCoord;in vec4 fragColor;uniform sampler2D texture0;uniform vec2 texel;uniform float radius;out vec4 finalColor;
-void main(){vec4 c=texture(texture0,fragTexCoord);float a=c.a;for(int i=0;i<16;i++){float angle=float(i)*6.2831853/16.0;vec2 d=vec2(cos(angle),sin(angle))*texel*radius;a=max(a,texture(texture0,fragTexCoord+d).a);}finalColor=vec4(c.rgb,c.a+(1.0-c.a)*a);}
+in vec2 fragTexCoord;in vec4 fragColor;uniform sampler2D texture0;uniform vec2 texel;uniform vec2 sampleStep;uniform float radius;out vec4 finalColor;
+vec4 outlined(vec2 uv){vec4 c=texture(texture0,uv);float a=c.a;for(int i=0;i<16;i++){float angle=float(i)*6.2831853/16.0;vec2 d=vec2(cos(angle),sin(angle))*texel*radius;a=max(a,texture(texture0,uv+d).a);}return vec4(c.rgb,c.a+(1.0-c.a)*a);}
+void main(){if(sampleStep.x<=0.0){finalColor=outlined(fragTexCoord);return;}finalColor=(outlined(fragTexCoord+sampleStep*vec2(-1,-1))+outlined(fragTexCoord+sampleStep*vec2(1,-1))+outlined(fragTexCoord+sampleStep*vec2(-1,1))+outlined(fragTexCoord+sampleStep*vec2(1,1)))*0.25;}
 )";
 NativeRenderer::NativeRenderer(){
  unlit=LoadShaderFromMemory(vertex,fragment);hull=LoadShaderFromMemory(hullVertex,hullFragment);contour=LoadShaderFromMemory(nullptr,contourFragment);
  if(unlit.id==rlGetShaderIdDefault()||hull.id==rlGetShaderIdDefault()||contour.id==rlGetShaderIdDefault())throw std::runtime_error("Native shader compilation failed");
  factorLocation=GetShaderLocation(unlit,"factor");alphaLocation=GetShaderLocation(unlit,"alphaMode");cutoffLocation=GetShaderLocation(unlit,"cutoff");hullWidthLocation=GetShaderLocation(hull,"outlineWidth");texelLocation=GetShaderLocation(contour,"texel");radiusLocation=GetShaderLocation(contour,"radius");
+ contourSampleLocation=GetShaderLocation(contour,"sampleStep");
  memory=CreateCompatibleDC(nullptr);if(!memory)throw std::runtime_error("Cannot create native surface DC");
  hintFont=CreateFontW(-13,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,ANTIALIASED_QUALITY,0,L"Microsoft YaHei UI");
 }
 NativeRenderer::~NativeRenderer(){model.reset();if(target.id)UnloadRenderTexture(target);if(resolved.id)UnloadRenderTexture(resolved);if(unlit.id)UnloadShader(unlit);if(hull.id)UnloadShader(hull);if(contour.id)UnloadShader(contour);if(hintFont)DeleteObject(hintFont);if(memory){if(previous)SelectObject(memory,previous);if(bitmap)DeleteObject(bitmap);DeleteDC(memory);}}
 void NativeRenderer::resize(int w,int h,int quality){
  const float requested=nativeRenderScale(quality,w,h);const bool resized=w!=width||h!=height;
- if(!resized&&scale==requested)return;if(w<=0||h<=0||w>8192||h>8192)throw std::runtime_error("Native viewport exceeds supported size");
+ if(!resized&&scale==requested){antialias.resize(target.texture.width,target.texture.height,quality==0?0:quality==1?2:4);return;}if(w<=0||h<=0||w>8192||h>8192)throw std::runtime_error("Native viewport exceeds supported size");
  if(target.id)UnloadRenderTexture(target);target={};if(resized){if(resolved.id)UnloadRenderTexture(resolved);resolved={};}
  width=w;height=h;scale=requested;target=LoadRenderTexture(int(std::ceil(w*scale)),int(std::ceil(h*scale)));if(!resolved.id)resolved=LoadRenderTexture(w,h);if(!target.id||!resolved.id)throw std::runtime_error("Cannot allocate native framebuffer");SetTextureFilter(target.texture,TEXTURE_FILTER_BILINEAR);
+ antialias.resize(target.texture.width,target.texture.height,quality==0?0:quality==1?2:4);
  if(!resized&&bitmap)return;
  if(previous){SelectObject(memory,previous);previous=nullptr;}if(bitmap)DeleteObject(bitmap);
  BITMAPINFO info{};info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);info.bmiHeader.biWidth=w;info.bmiHeader.biHeight=-h;info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=32;info.bmiHeader.biCompression=BI_RGB;void* bits=nullptr;bitmap=CreateDIBSection(memory,&info,DIB_RGB_COLORS,&bits,nullptr,0);if(!bitmap)throw std::runtime_error("Cannot allocate transparent window DIB");dib=static_cast<unsigned char*>(bits);previous=SelectObject(memory,bitmap);
@@ -119,7 +122,7 @@ void NativeRenderer::render(HWND display,HWND input,bool screenshot,const std::f
  NativeHealth::mark("GPU / GDI surface resize");surfaceWidth=w;surfaceHeight=h;resize(w,h,s.value("renderQuality",2));
  const double clipNear=5,clipFar=s["far"],top=clipNear*std::tan(camera.fovy*DEG2RAD*0.5),fullHeight=top*2,fullWidth=fullHeight*desktop[0].get<double>()/desktop[1].get<double>();const double l=-fullWidth/2+(crop[0].get<double>()+surfaceOffset.x)/desktop[0].get<double>()*fullWidth,t=top-(crop[1].get<double>()+surfaceOffset.y)/desktop[1].get<double>()*fullHeight;
  const auto projection=MatrixFrustum(l,l+width/desktop[0].get<double>()*fullWidth,t-height/desktop[1].get<double>()*fullHeight,t,clipNear,clipFar);
- NativeHealth::mark("GPU draw");const int mode=s.value("outlineMode",2);const float line=s.value("outlineWidth",100.0f);BeginTextureMode(target);ClearBackground(BLANK);BeginMode3D(camera);rlSetMatrixProjection(projection);
+ NativeHealth::mark("GPU draw");const int mode=s.value("outlineMode",2);const float line=s.value("outlineWidth",100.0f);BeginTextureMode(target);antialias.begin();ClearBackground(BLANK);BeginMode3D(camera);rlSetMatrixProjection(projection);
  rlSetBlendFactorsSeparate(0x0302,0x0303,1,0x0303,0x8006,0x8006);BeginBlendMode(BLEND_CUSTOM_SEPARATE);
  const float outline=0.002f*std::tan(camera.fovy*DEG2RAD*0.5f)/std::tan(35*DEG2RAD*0.5f)*480/desktop[1].get<float>()*line/100;
  if(mode==2){SetShaderValue(hull,hullWidthLocation,&outline,SHADER_UNIFORM_FLOAT);rlEnableBackfaceCulling();rlSetCullFace(RL_CULL_FACE_FRONT);
@@ -129,9 +132,9 @@ void NativeRenderer::render(HWND display,HWND input,bool screenshot,const std::f
   SetShaderValue(unlit,factorLocation,part->factor.data(),SHADER_UNIFORM_VEC4);SetShaderValue(unlit,alphaLocation,&alpha,SHADER_UNIFORM_INT);SetShaderValue(unlit,cutoffLocation,&part->alphaCutoff,SHADER_UNIFORM_FLOAT);
   if(part->doubleSided)rlDisableBackfaceCulling();else rlEnableBackfaceCulling();DrawMesh(part->mesh,material,pose);
  };
- for(const auto& part:model->parts)if(!part->transparent)draw(part);rlDisableDepthMask();for(const auto& part:model->parts)if(part->transparent)draw(part);rlEnableDepthMask();rlEnableBackfaceCulling();EndBlendMode();EndMode3D();EndTextureMode();
+ for(const auto& part:model->parts)if(!part->transparent)draw(part);rlDisableDepthMask();for(const auto& part:model->parts)if(part->transparent)draw(part);rlEnableDepthMask();rlEnableBackfaceCulling();EndBlendMode();EndMode3D();antialias.resolve(target.id);EndTextureMode();
  BeginTextureMode(resolved);ClearBackground(BLANK);rlSetBlendFactors(1,0,0x8006);BeginBlendMode(BLEND_CUSTOM);
- if(mode==1){const float texel[]{1.0f/target.texture.width,1.0f/target.texture.height},radius=1.5f*line/100*scale;SetShaderValue(contour,texelLocation,texel,SHADER_UNIFORM_VEC2);SetShaderValue(contour,radiusLocation,&radius,SHADER_UNIFORM_FLOAT);BeginShaderMode(contour);}
+ if(mode==1){const float texel[]{1.0f/target.texture.width,1.0f/target.texture.height},sampleStep[]{s.value("renderQuality",2)>0?.25f/width:0,.25f/height},radius=1.5f*line/100*scale;SetShaderValue(contour,texelLocation,texel,SHADER_UNIFORM_VEC2);SetShaderValue(contour,contourSampleLocation,sampleStep,SHADER_UNIFORM_VEC2);SetShaderValue(contour,radiusLocation,&radius,SHADER_UNIFORM_FLOAT);BeginShaderMode(contour);}
  DrawTexturePro(target.texture,{0,0,float(target.texture.width),float(-target.texture.height)},{0,0,float(width),float(height)},{},0,WHITE);if(mode==1)EndShaderMode();EndBlendMode();EndTextureMode();
  pending={display,input,true,screenshot,now,output,key};
  if(!deferPresentation)present();
@@ -149,5 +152,5 @@ void NativeRenderer::present(){
  NativeHealth::mark("Win32 input window move");if(input){RECT rect{};if(!GetWindowRect(input,&rect)||rect.left!=destination.x||rect.top!=destination.y||rect.right-rect.left!=width||rect.bottom-rect.top!=height)SetWindowPos(input,nullptr,destination.x,destination.y,width,height,SWP_NOACTIVATE|SWP_NOZORDER);}
  frameKey=pending.key;pending.ready=false;frameValid=true;didDraw=true;if(diagnostics)presentMs+=(clock()-presentStart)*1000;statistics(now);
 }
-void NativeRenderer::statistics(double now){if(!diagnostics)return;++frames;if(!statsAt)statsAt=now;if(now-statsAt>=3){TraceLog(LOG_INFO,"PERF native: %.1f FPS; surface %dx%d; SSAA %.2f; mesh %.2f ms (%0.1f/%d updated); readback %.2f ms; present %.2f ms (mask %.2f, layer %.2f); cached frames %u/%u, masks %u; upload %.2f ms",frames/(now-statsAt),width,height,scale,meshMs/frames,changedMeshes/frames,int(model->parts.size()),readMs/frames,presentMs/frames,maskMs/frames,layerMs/frames,reusedFrames,frames,reusedMasks,uploadMs/frames);statsAt=now;frames=reusedFrames=reusedMasks=0;meshMs=readMs=presentMs=maskMs=layerMs=changedMeshes=uploadMs=0;}}
+void NativeRenderer::statistics(double now){if(!diagnostics)return;++frames;if(!statsAt)statsAt=now;if(now-statsAt>=3){TraceLog(LOG_INFO,"PERF native: %.1f FPS; surface %dx%d; SSAA %.2f + MSAA %dx; mesh %.2f ms (%0.1f/%d updated); readback %.2f ms; present %.2f ms (mask %.2f, layer %.2f); cached frames %u/%u, masks %u; upload %.2f ms",frames/(now-statsAt),width,height,scale,antialias.samples(),meshMs/frames,changedMeshes/frames,int(model->parts.size()),readMs/frames,presentMs/frames,maskMs/frames,layerMs/frames,reusedFrames,frames,reusedMasks,uploadMs/frames);statsAt=now;frames=reusedFrames=reusedMasks=0;meshMs=readMs=presentMs=maskMs=layerMs=changedMeshes=uploadMs=0;}}
 }

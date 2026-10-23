@@ -39,7 +39,7 @@ struct NativeSettings {
     inline static constexpr const wchar_t* pageIcons[]={L"\xE713",L"\xE80F",L"\xE7FC",L"\xE716"};
     inline static constexpr Field fields[]={
         {"mode",L"动作模式",L"仅切换当前角色的动作模式",2,L"\xE768"},
-        {"renderQuality",L"渲染精度",L"平衡画面清晰度与显卡负担",2,L"\xE7F4"},
+        {"renderQuality",L"渲染精度",L"均衡、清晰档增强边缘抗锯齿",2,L"\xE7F4"},
         {"outlineMode",L"角色线条",L"描边与内部线条的显示方式",2,L"\xE790"},
         {"outlineWidth",L"线条粗细",L"描边宽度 · 10–300%",3,L"\xE70F"},
         {"wandering",L"允许散步",L"无输入时随机移动，独立于位置跟随",0,L"\xE7C1"},
@@ -130,8 +130,8 @@ struct NativeSettings {
             SendMessageW(list,LB_SETITEMHEIGHT,0,u(64));SetWindowSubclass(list,listProc,2,reinterpret_cast<DWORD_PTR>(this));placeContent(list,16,y,0,rosterHeight,true);
             const int emptyY=y+(rosterHeight-58)/2;listEmpty=control(panel,L"STATIC",L"尚未导入模型\n点击右上角「导入模型」添加角色",SS_CENTER,0,16,emptyY,panelWidth(),58);placeContent(listEmpty,16,emptyY,0,58,true);y+=rosterHeight+16;
             int x=16;for(auto [id,text]:{std::pair{2100,L"显示角色"},{2101,L"设为当前"},{2102,L"删除模型"}}){auto h=control(panel,L"BUTTON",text,BS_OWNERDRAW,id,x,y,132,36);placeContent(h,x,y,132,36);x+=144;}y+=50;
-            section(L"显示管理");for(auto [id,text]:{std::pair{2103,L"统一角色大小"},{2104,L"关闭当前角色"}}){const int pos=id==2103?16:190;auto h=control(panel,L"BUTTON",text,BS_OWNERDRAW,id,pos,y,162,36);placeContent(h,pos,y,162,36);}y+=52;
-            note(L"删除会将本地副本移入回收站并移除列表记录。原始下载文件和自带模型保留；删除最后一个显示中的角色后退出。",40);
+            section(L"显示管理");for(auto [id,text]:{std::pair{2103,L"统一角色大小"},{2104,L"隐藏当前角色"}}){const int pos=id==2103?16:190;auto h=control(panel,L"BUTTON",text,BS_OWNERDRAW,id,pos,y,162,36);placeContent(h,pos,y,162,36);}y+=52;
+            note(L"删除会将本地副本移入回收站并移除记录。自带模型保留；隐藏或删除全部角色后，程序仍在托盘运行。",40);
         }else{
             note(page==0?L"显示与行为参数由所有角色共享，动作模式只应用于当前角色。":page==1?L"日常陪伴、视线与转向。位置跟随距离可在全局设置中调整。":L"保留按键攻击、换弹、EX、点击指挥与走动的原有规则。");
             for(size_t i=0;i<std::size(fields);++i){
@@ -182,6 +182,7 @@ struct NativeSettings {
         const auto error=last.value("error",std::string{});if(!error.empty())return wide(error);
         if(last.value("busy",false))return std::to_wstring(last.value("percent",0))+L"%  "+wide(last.value("detail",std::string{}));
         const auto notice=last.value("notice",std::string{});if(!notice.empty())return wide(notice);
+        if(last.value("activeCount",1)==0)return L"所有模型已隐藏 · 可从列表或任务栏托盘重新显示";
         return compact?L"更改自动保存 · Esc 关闭菜单":L"更改已自动保存   ·   角色保持活动";
     }
     void update(){
@@ -241,7 +242,7 @@ struct NativeSettings {
         const bool managed=row.value("managed",false);
         auto text=L"“"+wide(row.value("name",std::string{}))+L"”\n\n";
         text+=managed?L"将本地模型副本移入回收站，并从模型库中移除？原始下载文件保留。":L"从列表中移除该模型？程序自带模型和外部原始文件将保留。";
-        if(row.value("active",false)&&last.value("activeCount",0)==1)text+=L"\n\n这是最后一个显示中的角色，操作完成后将退出桌宠。";
+        if(row.value("active",false)&&last.value("activeCount",0)==1)text+=L"\n\n删除后程序继续在任务栏托盘运行，可重新导入或显示其他模型。";
         if(nativeMessageBox(window,text.c_str(),managed?L"删除模型":L"移除模型记录",MB_YESNO|MB_ICONWARNING|MB_DEFBUTTON2)==IDYES&&receive)receive({{"type","model_delete"},{"id",row.at("id")}});
     }
     void updateModelMenu(){
@@ -417,7 +418,7 @@ struct NativeSettings {
         if(msg==WM_ERASEBKGND)return 1;if(msg==WM_PAINT){PAINTSTRUCT ps{};auto dc=BeginPaint(hwnd,&ps);self->paint(hwnd,dc);EndPaint(hwnd,&ps);return 0;}return DefWindowProcW(hwnd,msg,w,l);
     }
     void ensureFull(){
-        if(window)return;INITCOMMONCONTROLSEX common{sizeof(common),ICC_BAR_CLASSES};InitCommonControlsEx(&common);WNDCLASSW wc{};wc.lpfnWndProc=proc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"BaCafeNativeSettings";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&wc);ui.load(GetDpiForSystem());
+        if(window)return;INITCOMMONCONTROLSEX common{sizeof(common),ICC_BAR_CLASSES};InitCommonControlsEx(&common);WNDCLASSW wc{};wc.lpfnWndProc=proc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"BaCafeNativeSettings";wc.hIcon=LoadIconW(wc.hInstance,MAKEINTRESOURCEW(101));wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&wc);ui.load(GetDpiForSystem());
         window=CreateWindowExW(WS_EX_APPWINDOW|WS_EX_CONTROLPARENT,wc.lpszClassName,L"BA Cafe · 设置",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,0,0,u(1040),u(780),nullptr,nullptr,wc.hInstance,this);if(!window)throw std::runtime_error("Cannot create Fluent settings window");ui.frame(window);
         auto h=control(window,L"STATIC",L"全局设置",SS_ENDELLIPSIS,10,256,24,400,40);SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(ui.title),FALSE);h=control(window,L"STATIC",L"",SS_ENDELLIPSIS,11,258,70,600,22);SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(ui.small),FALSE);SetPropW(h,L"FluentMuted",reinterpret_cast<HANDLE>(1));
         h=control(window,L"STATIC",L"BA Cafe",0,12,24,24,176,28);SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(ui.heading),FALSE);h=control(window,L"STATIC",L"桌面陪伴",0,13,24,54,176,20);SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(ui.small),FALSE);SetPropW(h,L"FluentMuted",reinterpret_cast<HANDLE>(1));

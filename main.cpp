@@ -68,6 +68,7 @@ void replaceAll(std::string& text,const std::string& from,const std::string& to)
 #include "native_frame.h"
 #include "native_settings.h"
 #include "native_renderer.h"
+#include "native_tray.h"
 #include "frame_jobs.h"
 void nativeLog(int level,const char* text,va_list args){
     if(std::strstr(text,"Pixel data retrieved successfully"))return;
@@ -851,7 +852,7 @@ struct App {
         SetWindowRgn(inputWindow,CreateRectRgn(0,0,0,0),FALSE);
         // High-resolution waitable timer drives motion at 125 Hz on the message
         // thread. No global timer-resolution change and no extra worker thread.
-        ShowWindow(window,SW_SHOWNOACTIVATE);ShowWindow(inputWindow,SW_SHOWNOACTIVATE);started=GetTickCount64();lastTick=preciseSeconds();
+        if(displayed){ShowWindow(window,SW_SHOWNOACTIVATE);ShowWindow(inputWindow,SW_SHOWNOACTIVATE);}started=GetTickCount64();lastTick=preciseSeconds();
         if(leader)session.attach(window);
         if(leader)motionTimer=CreateWaitableTimerExW(nullptr,nullptr,CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,TIMER_ALL_ACCESS);
         if(motionTimer) {

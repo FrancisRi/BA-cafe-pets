@@ -1,9 +1,11 @@
 #pragma once
 #include "gltf_model.h"
+#include "native_antialias.h"
 // Win32 is included by main.cpp; this header keeps the model layer platform-free.
 namespace nativepet {
 class NativeRenderer {
     RenderTexture2D target{},resolved{};Shader unlit{},hull{},contour{};
+    NativeAntialias antialias;
     HDC memory{};HBITMAP bitmap{};HGDIOBJ previous{};unsigned char* dib{};
     int width=0,height=0;float scale=2;uint64_t generation=UINT64_MAX;double sampledAt=0;
     double statsAt=0,meshMs=0,readMs=0,presentMs=0,maskMs=0,layerMs=0;unsigned frames=0;
@@ -19,7 +21,7 @@ class NativeRenderer {
         std::filesystem::path output;std::array<double,21> key{};
     } pending;
     void statistics(double);
-    int factorLocation=-1,alphaLocation=-1,cutoffLocation=-1,hullWidthLocation=-1,texelLocation=-1,radiusLocation=-1;
+    int factorLocation=-1,alphaLocation=-1,cutoffLocation=-1,hullWidthLocation=-1,texelLocation=-1,radiusLocation=-1,contourSampleLocation=-1;
     std::vector<RECT> region;
     void resize(int,int,int);void drawHint(const Json&);
 public:
