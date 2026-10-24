@@ -187,7 +187,7 @@ struct Scene {
         menu.pauseChanged=[this](bool paused){
             for(auto& a:actors){a->state.settingsOpen=paused;if(!paused){a->placementNeeded=true;a->interactionUntil=a->preferences.follow?0:preciseSeconds()+0.5;}}
         };
-        if(!review){tray=std::make_unique<NativeTray>([this]{leader().nativeSettings->show(leader().window,leader().directory);},[this]{leader().nativeSettings->showQuick(leader().window,leader().directory);},[this]{message({{"type","exit"}});});tray->update(int(roster.activeCount()));if(!tray->available()&&background)leader().settingsOnLoad=true;}
+        if(!review){tray=std::make_unique<NativeTray>([this]{leader().nativeSettings->show(leader().window,leader().directory);},[this]{leader().nativeSettings->showQuick(leader().window,leader().directory,false);},[this]{message({{"type","exit"}});});tray->update(int(roster.activeCount()));if(!tray->available()&&background)leader().settingsOnLoad=true;}
         // Load sequentially: allocating five GLBs simultaneously would stall the desktop.
         refreshModels();input.pollKeyboard=false;input.enable(roster.activeCount()>0);save();
         frameTimer=CreateWaitableTimerExW(nullptr,nullptr,CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,TIMER_ALL_ACCESS);
@@ -371,7 +371,9 @@ struct Scene {
         auto& host=leader();
         while(!stopping){
             NativeHealth::mark("message wait");
-            const bool paused=host.session.paused()||(actors.size()==1&&std::none_of(actors.begin(),actors.end(),[](const auto& a){return a->displayed||a->pendingImport;}));DWORD wake;HANDLE waits[2]{};DWORD count=0;int motion=-1,frame=-1;
+            // Active roster entries may still be queued without an App. Keep
+            // timers awake so tick() can create and load them from tray idle.
+            const bool paused=host.session.paused()||(!roster.activeCount()&&actors.size()==1&&std::none_of(actors.begin(),actors.end(),[](const auto& a){return a->displayed||a->pendingImport;}));DWORD wake;HANDLE waits[2]{};DWORD count=0;int motion=-1,frame=-1;
             if(!paused){if(host.motionTimer){motion=int(count);waits[count++]=host.motionTimer;}if(frameTimer){frame=int(count);waits[count++]=frameTimer;}}
             {NativeHealth::Pause idleWait;
                 wake=MsgWaitForMultipleObjectsEx(count,waits,500,QS_ALLINPUT,MWMO_INPUTAVAILABLE);}

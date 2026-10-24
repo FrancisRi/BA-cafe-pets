@@ -68,11 +68,15 @@ $scratch = Join-Path $PWD ('artifacts/model-library-' + [guid]::NewGuid().ToStri
 打包后可用 Windows 桌面验证单文件启动器的旧记录恢复。脚本将 EXE、模型与数据复制到独立测试目录，不改动实际用户资料：
 
 ```powershell
-python tests/launcher_storage_compatibility.py ./dist/BA-Cafe-Pets-1.1.1-x64.exe
-python tests/tray_integration.py ./dist/BA-Cafe-Pets-1.1.1-portable-x64.zip
+python tests/launcher_storage_compatibility.py ./dist/BA-Cafe-Pets-1.1.2-x64.exe
+python tests/tray_integration.py ./dist/BA-Cafe-Pets-1.1.2-portable-x64.zip
+python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.2-portable-x64.zip
+python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.2-x64.exe
 ```
 
 界面回归检查使用隔离 Windows 桌面，不把模拟模型写入实际用户数据。测试还比较滚动后的实际窗口像素与完整重绘结果，并核对滑块普通绘制和合成绘制一致；覆盖浅色／深色主题及 100%／150%／200% DPI，同时验证滑块拖动和键盘操作。
+
+`tray_background_regressions.py` 在独立资料中预置三个隐藏模型，验证托盘重复右键通知后菜单仍可操作、从全隐藏状态选择其他模型及连续启用多个模型。单文件测试还隔离启动器缓存，避免共享用户资料；开发时可对 ZIP 加 `--core build/bin/ba_cafe_lite_native_release.exe` 检查重建的内核，正式发布必须直接测试两个完整发行包。
 
 可选截图输出：
 

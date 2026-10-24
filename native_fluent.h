@@ -52,8 +52,10 @@ struct NativeFluent {
         DwmSetWindowAttribute(hwnd,20,&immersive,sizeof(immersive));
         DwmSetWindowAttribute(hwnd,33,&corners,sizeof(corners));
         DwmSetWindowAttribute(hwnd,38,&material,sizeof(material));
-        const COLORREF border=highContrast?text:line;DwmSetWindowAttribute(hwnd,34,&border,sizeof(border));
-        if(flyout){MARGINS margins{1,1,1,1};DwmExtendFrameIntoClientArea(hwnd,&margins);}
+        // Flyouts paint their own border. A second DWM/glass edge can become
+        // white during activation or when newer frame attributes are ignored.
+        const COLORREF border=flyout?0xFFFFFFFEu:highContrast?text:line;DwmSetWindowAttribute(hwnd,34,&border,sizeof(border));
+        if(flyout){MARGINS margins{};DwmExtendFrameIntoClientArea(hwnd,&margins);}
     }
     void themed(HWND control) const {SetWindowTheme(control,dark?L"DarkMode_Explorer":L"Explorer",nullptr);}
     static void fill(HDC dc,RECT r,COLORREF color){auto b=CreateSolidBrush(color);FillRect(dc,&r,b);DeleteObject(b);}

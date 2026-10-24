@@ -299,8 +299,8 @@ struct NativeSettings {
         const auto rows=last.value("characters",Json::array());if(index<0||index>=int(rows.size()))return;
         highlighted=contextId=rows[index]["id"];SendMessageW(source,LB_SETCURSEL,index,0);update();
         if(keyboard){RECT item{};SendMessageW(source,LB_GETITEMRECT,index,reinterpret_cast<LPARAM>(&item));point={item.left+u(44),item.bottom};ClientToScreen(source,&point);}
-        if(!modelMenu){WNDCLASSW wc{};wc.lpfnWndProc=proc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"BaCafeModelMenu";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&wc);
-            modelMenu=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_CONTROLPARENT,wc.lpszClassName,L"模型操作",WS_POPUP|WS_THICKFRAME|WS_CLIPCHILDREN,0,0,280,230,nullptr,nullptr,wc.hInstance,this);
+        if(!modelMenu){WNDCLASSW wc{};wc.lpfnWndProc=proc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"BaCafeModelMenu";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.style=CS_DROPSHADOW;RegisterClassW(&wc);
+            modelMenu=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_CONTROLPARENT,wc.lpszClassName,L"模型操作",WS_POPUP|WS_CLIPCHILDREN,0,0,280,230,nullptr,nullptr,wc.hInstance,this);
             if(!modelMenu)throw std::runtime_error("Cannot create model context menu");}
         modelUi.load(GetDpiForWindow(source));modelUi.frame(modelMenu,true);
         if(!GetDlgItem(modelMenu,4100)){
@@ -312,7 +312,7 @@ struct NativeSettings {
         MONITORINFO info{sizeof(info)};GetMonitorInfoW(MonitorFromPoint(point,MONITOR_DEFAULTTONEAREST),&info);const int width=modelUi.px(272),height=modelUi.px(208);
         const int x=std::clamp(int(point.x),int(info.rcWork.left),std::max(int(info.rcWork.left),int(info.rcWork.right)-width)),y=std::clamp(int(point.y),int(info.rcWork.top),std::max(int(info.rcWork.top),int(info.rcWork.bottom)-height));
         SendMessageW(modelMenu,WM_CHANGEUISTATE,MAKEWPARAM(keyboard?UIS_CLEAR:UIS_SET,UISF_HIDEFOCUS),0);
-        SetWindowPos(modelMenu,HWND_TOPMOST,x,y,width,height,SWP_SHOWWINDOW|SWP_FRAMECHANGED);updateModelMenu();SetForegroundWindow(modelMenu);
+        SetWindowPos(modelMenu,HWND_TOPMOST,x,y,width,height,SWP_SHOWWINDOW|SWP_FRAMECHANGED);updateModelMenu();RedrawWindow(modelMenu,nullptr,nullptr,RDW_INVALIDATE|RDW_ERASE|RDW_ALLCHILDREN|RDW_UPDATENOW);SetForegroundWindow(modelMenu);
         for(int id=4000;id<=4003;++id)if(IsWindowEnabled(GetDlgItem(modelMenu,id))){SetFocus(GetDlgItem(modelMenu,id));break;}
     }
     void quickCommand(int id){
@@ -425,7 +425,9 @@ struct NativeSettings {
         if(msg==WM_ACTIVATE&&(compact||context)&&LOWORD(w)==WA_INACTIVE){if(context)self->hideModelMenu();else self->hideQuick();return 0;}
         if(msg==WM_ACTIVATE&&hwnd==self->window&&LOWORD(w)!=WA_INACTIVE&&self->page==3)PostMessageW(hwnd,WM_APP+40,0,0);
         if(msg==WM_APP+40){if(self->receive)self->receive({{"type","refresh_models"}});return 0;}
-        if(msg==WM_NCCALCSIZE&&(compact||context)&&w)return 0;if(msg==WM_NCHITTEST&&(compact||context))return HTCLIENT;
+        if((compact||context)&&(msg==WM_NCCALCSIZE||msg==WM_NCPAINT))return 0;
+        if((compact||context)&&msg==WM_NCACTIVATE)return TRUE;
+        if(msg==WM_NCHITTEST&&(compact||context))return HTCLIENT;
         if(msg==WM_SIZE&&hwnd==self->window&&self->panel){if(w==SIZE_MINIMIZED)self->hideModelMenu();self->layout();self->notify();return 0;}if(msg==WM_GETMINMAXINFO&&hwnd==self->window){auto* info=reinterpret_cast<MINMAXINFO*>(l);info->ptMinTrackSize={self->u(800),self->u(540)};return 0;}
         if(msg==WM_DPICHANGED){const auto* r=reinterpret_cast<RECT*>(l);self->reloadTheme(hwnd,HIWORD(w));SetWindowPos(hwnd,nullptr,r->left,r->top,r->right-r->left,r->bottom-r->top,SWP_NOZORDER|SWP_NOACTIVATE);return 0;}
         if((msg==WM_SETTINGCHANGE||msg==WM_THEMECHANGED)&&hwnd!=self->panel){if(self->panel||compact)self->reloadTheme(hwnd,GetDpiForWindow(hwnd));return 0;}
@@ -440,7 +442,7 @@ struct NativeSettings {
         }
         if(msg==WM_DRAWITEM){self->draw(*reinterpret_cast<DRAWITEMSTRUCT*>(l));return TRUE;}if(msg==WM_MEASUREITEM){auto* item=reinterpret_cast<MEASUREITEMSTRUCT*>(l);if(item->CtlType==ODT_COMBOBOX){item->itemHeight=theme.px(32);return TRUE;}if(item->CtlID==2000||item->CtlID==3200){item->itemHeight=theme.px(item->CtlID==3200?36:64);return TRUE;}}
         if(msg==WM_PRINTCLIENT){self->paint(hwnd,reinterpret_cast<HDC>(w));return 0;}
-        if(msg==WM_ERASEBKGND)return 1;if(msg==WM_PAINT){PAINTSTRUCT ps{};auto dc=BeginPaint(hwnd,&ps);self->paint(hwnd,dc);EndPaint(hwnd,&ps);return 0;}return DefWindowProcW(hwnd,msg,w,l);
+        if(msg==WM_ERASEBKGND){if(compact||context)self->paint(hwnd,reinterpret_cast<HDC>(w));return 1;}if(msg==WM_PAINT){PAINTSTRUCT ps{};auto dc=BeginPaint(hwnd,&ps);self->paint(hwnd,dc);EndPaint(hwnd,&ps);return 0;}return DefWindowProcW(hwnd,msg,w,l);
     }
     void ensureFull(){
         if(window)return;INITCOMMONCONTROLSEX common{sizeof(common),ICC_BAR_CLASSES};InitCommonControlsEx(&common);WNDCLASSW wc{};wc.lpfnWndProc=proc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"BaCafeNativeSettings";wc.hIcon=LoadIconW(wc.hInstance,MAKEINTRESOURCEW(101));wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&wc);ui.load(GetDpiForSystem());
@@ -461,7 +463,7 @@ struct NativeSettings {
     }
     void ensureQuick(){
         if(quickWindow)return;INITCOMMONCONTROLSEX common{sizeof(common),ICC_STANDARD_CLASSES};InitCommonControlsEx(&common);WNDCLASSW wc{};wc.lpfnWndProc=proc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"BaCafeQuickMenu";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.style=CS_DROPSHADOW;RegisterClassW(&wc);quickUi.load(GetDpiForSystem());
-        quickWindow=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_CONTROLPARENT,wc.lpszClassName,L"BA Cafe 快捷菜单",WS_POPUP|WS_THICKFRAME|WS_CLIPCHILDREN,0,0,quickUi.px(344),quickUi.px(600),nullptr,nullptr,wc.hInstance,this);if(!quickWindow)throw std::runtime_error("Cannot create Fluent quick menu");quickUi.frame(quickWindow,true);SetWindowPos(quickWindow,nullptr,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_FRAMECHANGED);
+        quickWindow=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_CONTROLPARENT,wc.lpszClassName,L"BA Cafe 快捷菜单",WS_POPUP|WS_CLIPCHILDREN,0,0,quickUi.px(344),quickUi.px(600),nullptr,nullptr,wc.hInstance,this);if(!quickWindow)throw std::runtime_error("Cannot create Fluent quick menu");quickUi.frame(quickWindow,true);SetWindowPos(quickWindow,nullptr,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_FRAMECHANGED);
         auto h=control(quickWindow,L"STATIC",L"桌面角色",SS_ENDELLIPSIS,3100,20,14,300,24,true);SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(quickUi.heading),FALSE);h=control(quickWindow,L"STATIC",L"已导入的模型",0,3101,20,44,300,22,true);SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(quickUi.small),FALSE);SetPropW(h,L"FluentMuted",reinterpret_cast<HANDLE>(1));
         quickList=control(quickWindow,L"LISTBOX",L"勾选显示模型，空格切换，回车设为当前角色",LBS_NOTIFY|LBS_OWNERDRAWFIXED|LBS_HASSTRINGS|LBS_NOINTEGRALHEIGHT|WS_VSCROLL,3200,8,72,328,144,true);SetWindowSubclass(quickList,listProc,2,reinterpret_cast<DWORD_PTR>(this));SendMessageW(quickList,LB_SETITEMHEIGHT,0,quickUi.px(36));
         control(quickWindow,L"STATIC",L"尚未导入模型",SS_CENTER,3103,20,72,304,36,true);
@@ -475,12 +477,12 @@ struct NativeSettings {
         place(3100,20,14,300,24);place(3101,20,44,300,22);place(3200,8,72,328,quickRows*36);place(3103,20,72,304,36);SendMessageW(quickList,LB_SETITEMHEIGHT,0,quickUi.px(36));int y=72+quickRows*36+12;place(3000,12,y,156,36);place(3001,176,y,156,36);y+=48;
         for(int id:{3002,3003,3004,3005}){place(id,8,y,328,36);y+=36;}y+=12;for(int id:{3011,3013,3010,3012}){place(id,8,y,328,36);y+=36;}y+=8;place(3102,20,y,304,34);return y+44;
     }
-    void showQuick(HWND owner,const std::filesystem::path& directory){
+    void showQuick(HWND owner,const std::filesystem::path& directory,bool toggleIfVisible=true){
         hideModelMenu();if(receive)receive({{"type","refresh_models"}});
-        defaultsFile=directory/L"defaults.ini";if(quickWindow&&IsWindowVisible(quickWindow)){hideQuick();return;}if(snapshot)last=readSnapshot();highlighted=last.value("selectedId",std::string{});ensureQuick();
+        defaultsFile=directory/L"defaults.ini";if(quickWindow&&IsWindowVisible(quickWindow)){if(toggleIfVisible)hideQuick();else{SetForegroundWindow(quickWindow);SetFocus(quickList);}return;}if(snapshot)last=readSnapshot();highlighted=last.value("selectedId",std::string{});ensureQuick();
         POINT cursor{};GetCursorPos(&cursor);MONITORINFO info{sizeof(info)};GetMonitorInfoW(MonitorFromPoint(cursor,MONITOR_DEFAULTTONEAREST),&info);SetWindowPos(quickWindow,nullptr,cursor.x,cursor.y,0,0,SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE);
         const auto dpi=GetDpiForWindow(quickWindow);if(dpi!=quickUi.dpi)reloadTheme(quickWindow,dpi);const int height=quickUi.px(layoutQuick()),width=quickUi.px(344);const auto area=info.rcWork;
         const int x=std::clamp(int(cursor.x),int(area.left),std::max(int(area.left),int(area.right)-width)),y=std::clamp(int(cursor.y),int(area.top),std::max(int(area.top),int(area.bottom)-height));
-        update();SetWindowPos(quickWindow,HWND_TOPMOST,x,y,width,height,SWP_SHOWWINDOW);notify();SetForegroundWindow(quickWindow);SetFocus(quickList);
+        update();SetWindowPos(quickWindow,HWND_TOPMOST,x,y,width,height,SWP_SHOWWINDOW);RedrawWindow(quickWindow,nullptr,nullptr,RDW_INVALIDATE|RDW_ERASE|RDW_ALLCHILDREN|RDW_UPDATENOW);notify();SetForegroundWindow(quickWindow);SetFocus(quickList);
     }
 };

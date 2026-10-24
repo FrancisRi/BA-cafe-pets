@@ -64,6 +64,22 @@ static void checkRepainting(NativeSettings& menu){
     SendMessageW(slider,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(x,y));SendMessageW(slider,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(x,y));SendMessageW(slider,WM_LBUTTONUP,0,MAKELPARAM(x,y));
     check(SendMessageW(slider,TBM_GETPOS,0,0)<300,"Styled slider retains pointer interaction");SetFocus(menu.window);
 }
+static void checkFlyoutFrame(HWND window,const NativeFluent& theme){
+    ControlPixels image(window);NativeFluent::fill(image.dc,{0,0,image.width,image.height},RGB(255,0,255));
+    SendMessageW(window,WM_ERASEBKGND,reinterpret_cast<WPARAM>(image.dc),0);GdiFlush();
+    check(GetPixel(image.dc,theme.px(12),theme.px(2))==theme.surface,"Flyout erasure must paint its surface before the first frame, without a white flash");
+    check(!(GetWindowLongPtrW(window,GWL_STYLE)&(WS_THICKFRAME|WS_BORDER|WS_DLGFRAME)),"Fixed flyouts must not expose a system sizing border");
+    COLORREF border{};if(SUCCEEDED(DwmGetWindowAttribute(window,34,&border,sizeof(border))))check(border==0xFFFFFFFEu,"Flyouts use their own themed border instead of a second DWM border");
+    RECT client{},outer{};GetClientRect(window,&client);MapWindowPoints(window,nullptr,reinterpret_cast<POINT*>(&client),2);GetWindowRect(window,&outer);
+    check(EqualRect(&client,&outer),"The entire flyout is custom client content at the current DPI");
+}
+static void checkFlyoutThemes(NativeSettings& menu){
+    for(int appearance:{0,1})for(UINT dpi:{96u,144u,192u}){
+        menu.reloadTheme(menu.quickWindow,dpi,appearance);SetWindowPos(menu.quickWindow,nullptr,0,0,menu.quickUi.px(344),menu.quickUi.px(menu.layoutQuick()),SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);pump(menu);
+        for(bool active:{false,true}){SendMessageW(menu.quickWindow,WM_NCACTIVATE,active,0);SendMessageW(menu.quickWindow,WM_NCPAINT,1,0);checkFlyoutFrame(menu.quickWindow,menu.quickUi);}
+    }
+    menu.reloadTheme(menu.quickWindow,GetDpiForSystem());SetWindowPos(menu.quickWindow,nullptr,0,0,menu.quickUi.px(344),menu.quickUi.px(menu.layoutQuick()),SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);pump(menu);
+}
 static void capture(HWND hwnd,const std::filesystem::path& path){
     RedrawWindow(hwnd,nullptr,nullptr,RDW_INVALIDATE|RDW_UPDATENOW|RDW_ALLCHILDREN|RDW_ERASE);
     RECT r{};GetWindowRect(hwnd,&r);const int width=r.right-r.left,height=r.bottom-r.top;
@@ -87,6 +103,8 @@ int main(int argc,char** argv){
         menu.receive=[&](const Json& message){sent.push_back(message);const auto type=message.at("type");if(type=="save")state["value"]=message.at("value");if(type=="roster_toggle")for(auto& row:state["characters"])if(row["id"]==message["id"]){row["active"]=message["active"];state["activeCount"]=state["activeCount"].get<int>()+(message["active"].get<bool>()?1:-1);}if(type=="roster_select")state["selectedId"]=message.at("id");};
         menu.sync();check(!menu.visible(),"Initial sync creates no windows");
         menu.showQuick(nullptr,std::filesystem::current_path());pump(menu);
+        checkFlyoutFrame(menu.quickWindow,menu.quickUi);
+        checkFlyoutThemes(menu);
         check(IsWindowVisible(menu.quickWindow),"Right-click entry opens the compact interface");check(!menu.window,"Opening quick menu does not create full settings");
         check(GetWindowLongPtrW(menu.quickWindow,GWL_EXSTYLE)&WS_EX_TOPMOST,"Pet quick menu remains above topmost pets");
         check(menu.pausesPets()&&pauses==std::vector<bool>{true},"Quick menu pauses pets for stable interaction");
@@ -149,6 +167,7 @@ int main(int argc,char** argv){
         SendMessageW(menu.list,WM_CONTEXTMENU,reinterpret_cast<WPARAM>(menu.list),MAKELPARAM(location.x,location.y));pump(menu);
         check(menu.contextId=="1"&&menu.highlighted=="1"&&SendMessageW(menu.list,LB_GETCURSEL,0,0)==1,"Right-click selects the pointed model rather than the current actor");
         check(IsWindowVisible(menu.modelMenu)&&IsWindowEnabled(GetDlgItem(menu.modelMenu,4003)),"Selected local models expose deletion in the Fluent context menu");
+        checkFlyoutFrame(menu.modelMenu,menu.modelUi);
         check(!menu.pausesPets(),"Model management context menu never pauses pets");
         menu.modelCommand(4000);check(sent.back()["type"]=="roster_toggle"&&sent.back()["id"]=="1","Context actions address the right-clicked model");
         SendMessageW(menu.list,LB_SETCURSEL,1,0);SendMessageW(menu.list,WM_CONTEXTMENU,reinterpret_cast<WPARAM>(menu.list),MAKELPARAM(-1,-1));pump(menu);

@@ -6,12 +6,12 @@
 #include <string>
 
 class NativeTray {
-    NOTIFYICONDATAW data{};HICON icon{};bool added=false;int displayed=-1;
+    NOTIFYICONDATAW data{};HICON icon{};bool added=false,version4=false;int displayed=-1;
     UINT taskbarCreated=RegisterWindowMessageW(L"TaskbarCreated");
     std::function<void()> open,menu,exit;
     bool add(){
         if((added&&Shell_NotifyIconW(NIM_MODIFY,&data))||Shell_NotifyIconW(NIM_ADD,&data)){
-            added=true;data.uVersion=NOTIFYICON_VERSION_4;Shell_NotifyIconW(NIM_SETVERSION,&data);KillTimer(window,1);return true;
+            added=true;data.uVersion=NOTIFYICON_VERSION_4;version4=Shell_NotifyIconW(NIM_SETVERSION,&data)!=FALSE;KillTimer(window,1);return true;
         }
         added=false;SetTimer(window,1,5000,nullptr);return false;
     }
@@ -21,7 +21,14 @@ class NativeTray {
         if(!self)return DefWindowProcW(hwnd,msg,w,l);
         if(msg==self->taskbarCreated||msg==WM_TIMER){self->add();return 0;}
         try{
-            if(msg==Callback){const auto event=LOWORD(l);if(event==NIN_SELECT||event==NIN_KEYSELECT||event==WM_LBUTTONUP)self->open();else if(event==WM_CONTEXTMENU||event==WM_RBUTTONUP)self->menu();return 0;}
+            if(msg==Callback){
+                // Version 4 sends semantic selection/context notifications.
+                // A raw mouse-up must not open the same flyout a second time.
+                const auto event=self->version4?LOWORD(l):UINT(l);
+                if(self->version4){if(HIWORD(l)!=self->data.uID)return 0;if(event==NIN_SELECT||event==NIN_KEYSELECT)self->open();else if(event==WM_CONTEXTMENU)self->menu();}
+                else{if(UINT(w)!=self->data.uID)return 0;if(event==WM_LBUTTONUP)self->open();else if(event==WM_RBUTTONUP)self->menu();}
+                return 0;
+            }
             if(msg==WM_CLOSE){self->exit();return 0;}
         }catch(const std::exception& error){MessageBoxA(hwnd,error.what(),"BA Cafe Pets",MB_OK|MB_ICONERROR);}
         return DefWindowProcW(hwnd,msg,w,l);
