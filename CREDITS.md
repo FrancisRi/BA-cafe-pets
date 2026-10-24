@@ -19,6 +19,8 @@
 
 这是基于原项目继续开发的衍生分支。原项目与本分支的来源、作者及版本记录分别保留。
 
+Copyright (C) 2026 FrancisRi。FrancisRi 自有原创新增及修改采用 **GPL-3.0-only**，具体授权范围见 [LICENSE.md](LICENSE.md) 和 [docs/LICENSE-SCOPE.md](docs/LICENSE-SCOPE.md)。这不替原作者及第三方重新授权。
+
 ## 第三方组件与资源
 
 | 组件／资源 | 来源 | 许可或说明 |

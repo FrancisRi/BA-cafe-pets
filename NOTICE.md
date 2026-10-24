@@ -12,7 +12,9 @@
 
 公开仓库及允许 Fork 不等于授予任意使用、修改或再分发许可。要为包含上游代码的整个衍生项目设置开源许可证，需要先取得原作者及其他相关权利人的相应授权，并遵守第三方组件的许可。单纯注明原作者不能代替授权。
 
-本分支维护者可以为自己拥有版权的新增代码或修改单独选择许可证，但应明确标示适用文件或修改范围；该授权不能覆盖上游代码、第三方代码或角色资源。当前尚未为这些新增部分单独指定许可证。
+自 2026-10-24 起，**FrancisRi 拥有版权的原创新增及修改单独采用 GPL-3.0-only**，仅限 GNU GPL 第 3 版，不包含后续版本选项。授权声明见 [LICENSE.md](LICENSE.md)，具体范围见 [docs/LICENSE-SCOPE.md](docs/LICENSE-SCOPE.md)，完整许可原文见 [licenses/GPL-3.0-only.txt](licenses/GPL-3.0-only.txt)。
+
+这项授权不覆盖上游代码、第三方代码或角色资源，也不构成 GPL 例外。分发包含这些贡献的合并或衍生作品，仍须满足 GPL 适用的整体许可和对应源码等要求，并取得其他必要授权；本声明不表示整个应用已经获得 GPL 再分发授权。
 
 关于无许可证仓库及 GitHub 上查看／Fork 权利的区别，参见 [GitHub 官方许可说明](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository)。
 

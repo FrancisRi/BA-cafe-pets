@@ -68,6 +68,9 @@ add_custom_command(TARGET ba_cafe_lite_native POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${behaviortree_cpp_SOURCE_DIR}/LICENSE" "$<TARGET_FILE_DIR:ba_cafe_lite_native>/licenses/BehaviorTree.CPP.txt"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/README.md" "$<TARGET_FILE_DIR:ba_cafe_lite_native>/README.md"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/CREDITS.md" "${CMAKE_CURRENT_SOURCE_DIR}/NOTICE.md" "$<TARGET_FILE_DIR:ba_cafe_lite_native>"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md" "$<TARGET_FILE_DIR:ba_cafe_lite_native>"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:ba_cafe_lite_native>/docs"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/docs/LICENSE-SCOPE.md" "${CMAKE_CURRENT_SOURCE_DIR}/docs/DEVELOPMENT.md" "$<TARGET_FILE_DIR:ba_cafe_lite_native>/docs"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/release/README.txt" "${CMAKE_CURRENT_SOURCE_DIR}/release/CHANGELOG.md" "$<TARGET_FILE_DIR:ba_cafe_lite_native>")
 foreach(part IN ITEMS tinyxml2 minitrace minicoro lexy)
     file(GLOB notice "${behaviortree_cpp_SOURCE_DIR}/3rdparty/${part}/LICENSE*")

@@ -109,6 +109,8 @@ pwsh -File ./package.ps1
 
 脚本生成 `BA-Cafe-Pets-版本号-x64.exe`、便携 ZIP、SHA-256 校验文件及发行清单，输出到 `dist/`，同时生成根目录的 `BA-Cafe-Pets.exe`。只打包默认模型、程序资源和许可文件，不打包本地 `data/` 或额外模型。
 
+两个发行包均附 `LICENSE.md`、`docs/LICENSE-SCOPE.md` 和 `licenses/GPL-3.0-only.txt`。GPL-3.0-only 仅为 FrancisRi 自有原创新增及修改的授权；不得因此将上游整份代码标记为 GPL。分发者仍须满足 GPL 对相应作品的适用要求，并取得其他必要授权。发布时应提供实际发行对应的完整提交或源码归档，包含构建脚本、接口和必要来源；不要只指向持续变化的默认分支。
+
 正式发布前需更新 CMake 项目版本号和变更记录，确认二进制版本、默认配置、许可文件及空用户数据的启动结果，再将产物发布至 [本分支 Releases](https://github.com/FrancisRi/BA-cafe-pets/releases)。Git 标签使用本分支版本号，例如 `v1.0.0`，与程序版本及发行文件名对应。
 
 单文件启动器仍使用原数据目录 `%LOCALAPPDATA%/ba_cafe_lite_native/data/`，与原版共用该位置。需要完全独立配置时，可使用便携版或通过原生程序的 `--data-dir` 指定目录。升级前退出旧进程，并在关闭程序后备份整个 `data/`。

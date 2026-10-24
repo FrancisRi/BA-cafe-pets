@@ -137,6 +137,8 @@ MSAA 用在模型实际渲染的离屏缓冲，而非隐藏的主窗口；显卡
 
 原始代码由 **maxiumlee（Max）** 开发，来源为 [maxiumlee/ba-cafe-lite](https://github.com/maxiumlee/ba-cafe-lite)；本分支由 **FrancisRi** 维护。
 
-截至 2026-10-24，上游仍未提供项目整体的 `LICENSE`。为整份衍生代码添加 MIT／GPL 等许可证，需要先取得相关权利人的相应授权；维护者拥有版权的新增代码可以明确范围后单独授权。目前未为整个项目或新增部分指定开源许可证，注明原作者不能代替授权。第三方组件分别沿用其许可；角色、模型和贴图权利属于相应权利人。详见 [NOTICE.md](NOTICE.md)、[CREDITS.md](CREDITS.md) 和 [licenses/NOTICE.txt](licenses/NOTICE.txt)。
+**FrancisRi 拥有版权的原创新增及修改采用 GPL-3.0-only**，仅限 GNU GPL 第 3 版。授权声明见 [LICENSE.md](LICENSE.md)，基线、文件清单和排除范围见 [docs/LICENSE-SCOPE.md](docs/LICENSE-SCOPE.md)，完整条款见 [licenses/GPL-3.0-only.txt](licenses/GPL-3.0-only.txt)。
+
+上游仍未提供项目整体许可证。本次授权不替原作者、第三方组件或角色资源的权利人授权，也不构成 GPL 例外；分发包含这些贡献的合并或衍生作品仍须满足 GPL 的适用要求，并取得其他必要授权。详见 [NOTICE.md](NOTICE.md)、[CREDITS.md](CREDITS.md) 和 [licenses/NOTICE.txt](licenses/NOTICE.txt)。
 
 问题反馈请使用[本仓库 Issues](https://github.com/FrancisRi/BA-cafe-pets/issues)。参与开发请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。

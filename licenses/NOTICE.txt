@@ -1,4 +1,4 @@
-ba_cafe_lite native distribution
+BA Cafe Pets native distribution
 
 BA Cafe Pets derivative branch: https://github.com/FrancisRi/BA-cafe-pets
 Original author: maxiumlee (Max)
@@ -6,6 +6,12 @@ Original project: https://github.com/maxiumlee/ba-cafe-lite
 Branch maintainer: FrancisRi
 Original commit history and third-party notices are retained.
 No project-wide LICENSE was present in the upstream baseline.
+Copyright (C) 2026 FrancisRi.
+FrancisRi-owned original additions and modifications: GPL-3.0-only.
+This is not a relicensing of upstream code, third-party code or character assets.
+See ../LICENSE.md, ../docs/LICENSE-SCOPE.md and GPL-3.0-only.txt.
+The scope notice grants no exception to the GPL's applicable requirements
+for conveying a combined or derivative work and grants no third-party rights.
 See the repository's CREDITS.md and NOTICE.md for attribution and license status.
 
 raylib 6.0 (zlib): https://github.com/raysan5/raylib
@@ -15,6 +21,7 @@ BehaviorTree.CPP 4.8.0 (MIT): https://github.com/BehaviorTree/BehaviorTree.CPP
 BehaviorTree.CPP helper libraries: tinyxml2, minitrace, minicoro, lexy.
 Their license texts are included alongside this notice.
 GCC libstdc++/libgcc: GPLv3 with GCC Runtime Library Exception.
+The GCC exception applies to those runtime libraries, not to FrancisRi's code.
 
 Default Shiroko.glb: unchanged file from the user-provided BlueArchiveModels archive.
 Model collection: https://github.com/lihaohong6/BlueArchiveModels

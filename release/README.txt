@@ -60,5 +60,9 @@ BA Cafe Pets 1.1.3 · Windows x64
 作者与许可
   原作者：maxiumlee（Max）；本分支维护：FrancisRi。
   原始提交历史和第三方声明保留；上游基线没有提供项目整体 LICENSE。
-  完整说明见 CREDITS.md、NOTICE.md 和 licenses\NOTICE.txt。
+  Copyright (C) 2026 FrancisRi；自有原创新增及修改采用 GPL-3.0-only，仅限第 3 版。
+  授权见 LICENSE.md，范围见 docs\LICENSE-SCOPE.md，完整条款见 licenses\GPL-3.0-only.txt。
+  本授权不替上游及第三方授权，也不构成 GPL 例外；分发合并作品仍需满足适用要求并取得其他必要授权。
+  源码与构建脚本：https://github.com/FrancisRi/BA-cafe-pets （使用对应发行的完整提交或源码归档）。
+  完整来源说明见 CREDITS.md、NOTICE.md 和 licenses\NOTICE.txt。
   角色、模型及贴图权利属于各自权利人。
