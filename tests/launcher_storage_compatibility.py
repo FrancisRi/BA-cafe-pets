@@ -99,7 +99,7 @@ def smoke(command,expected,env,label):
                 process.terminate()
 
 
-smoke([str(launcher),'--settings'],cache/'ba_cafe_lite.exe',environment,'Launcher compatibility')
+smoke([str(launcher),'--settings'],cache/'BA-Cafe-Pets.exe',environment,'Launcher compatibility')
 current=json.loads((WORK/'profile/data/characters.json').read_text(encoding='utf-8'))
 found={row['name']:row for row in current['characters']}
 assert {'CompatibilityModel0','CompatibilityModel1','FormerDefault'}<=set(found), 'Legacy models missing: '+str(list(found))

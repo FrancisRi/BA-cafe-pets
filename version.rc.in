@@ -13,7 +13,7 @@ BEGIN
   BEGIN
    VALUE "FileDescription", "@BA_FILE_DESCRIPTION@\0"
    VALUE "FileVersion", "@PROJECT_VERSION@\0"
-   VALUE "InternalName", "ba_cafe_lite\0"
+   VALUE "InternalName", "BA-Cafe-Pets\0"
    VALUE "ProductName", "BA Cafe Pets\0"
    VALUE "Comments", "Based on maxiumlee/ba-cafe-lite; maintained by FrancisRi\0"
    VALUE "ProductVersion", "@PROJECT_VERSION@\0"

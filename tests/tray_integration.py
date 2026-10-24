@@ -26,7 +26,7 @@ user.GetDlgCtrlID.argtypes = [w.HWND]
 environment=os.environ.copy()
 environment.pop('BA_NATIVE_PROGRAM_DIR',None)
 environment.pop('BA_NATIVE_DATA_DIR',None)
-process = subprocess.Popen([str(PROGRAM/'ba_cafe_lite.exe'),'--data-dir',str(SCRATCH),'--settings','--diagnostics'],cwd=PROGRAM,env=environment)
+process = subprocess.Popen([str(PROGRAM/'BA-Cafe-Pets.exe'),'--data-dir',str(SCRATCH),'--settings','--diagnostics'],cwd=PROGRAM,env=environment)
 
 def windows(cls):
     found = []
@@ -151,7 +151,7 @@ try:
     send(full,0x111,1003);send(panel(),0x111,2100)
     wait_for(lambda: not windows('BaCafeNativePet'),'hide model again')
     send(full,0x111,2);assert process.wait(timeout=10)==0
-    process=subprocess.Popen([str(PROGRAM/'ba_cafe_lite.exe'),'--data-dir',str(SCRATCH),'--settings'],cwd=PROGRAM,env=environment)
+    process=subprocess.Popen([str(PROGRAM/'BA-Cafe-Pets.exe'),'--data-dir',str(SCRATCH),'--settings'],cwd=PROGRAM,env=environment)
     full=wait_for(lambda: windows('BaCafeNativeSettings'),'restart with all models hidden')[0]
     wait_for(lambda: user.IsWindowEnabled(user.GetDlgItem(full,2200)),'imports available in background')
     assert tray_window() and not windows('BaCafeNativePet') and not any(row['active'] for row in read_roster()['characters'])
@@ -163,7 +163,7 @@ try:
     wait_for(lambda: len(read_roster()['characters'])==0,'empty model library')
     assert process.poll() is None and tray_window() and (PROGRAM/'models/Shiroko.glb').is_file()
     send(full,0x111,2);assert process.wait(timeout=10)==0
-    process=subprocess.Popen([str(PROGRAM/'ba_cafe_lite.exe'),'--data-dir',str(SCRATCH),'--settings'],cwd=PROGRAM,env=environment)
+    process=subprocess.Popen([str(PROGRAM/'BA-Cafe-Pets.exe'),'--data-dir',str(SCRATCH),'--settings'],cwd=PROGRAM,env=environment)
     full=wait_for(lambda: windows('BaCafeNativeSettings'),'restart after removing all models')[0]
     wait_for(lambda: user.IsWindowEnabled(user.GetDlgItem(full,2200)),'empty-library imports available')
     assert not read_roster()['characters'] and not windows('BaCafeNativePet') and tray_window()

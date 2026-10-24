@@ -16,13 +16,13 @@ for name in ('BA_NATIVE_PROGRAM_DIR','BA_NATIVE_DATA_DIR','BA_NATIVE_HOME'):envi
 environment['BA_NATIVE_HOME']=str(WORK/'home')
 if args.package.suffix.lower()=='.zip':
     with zipfile.ZipFile(args.package.resolve()) as archive:archive.extractall(PROGRAM)
-    executable=core=PROGRAM/'ba_cafe_lite.exe'
+    executable=core=PROGRAM/'BA-Cafe-Pets.exe'
     if args.core:shutil.copyfile(args.core.resolve(),core)
 else:
     assert args.core is None,'A single-file release must be tested with its own embedded core'
     executable=PROGRAM/'BA-Cafe-Pets.exe';shutil.copyfile(args.package.resolve(),executable)
     subprocess.run([str(executable),'--prepare-only'],env=environment,check=True,timeout=40)
-    core=next((WORK/'home/app').glob('*/ba_cafe_lite.exe'))
+    core=next((WORK/'home/app').glob('*/BA-Cafe-Pets.exe'))
 
 def key(path):
     value=14695981039346656037

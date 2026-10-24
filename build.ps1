@@ -1,4 +1,4 @@
-param([int]$Jobs=4,[ValidatePattern('^[A-Za-z0-9_-]+$')][string]$ExecutableName='ba_cafe_lite_native',[switch]$Release)
+param([int]$Jobs=4,[ValidatePattern('^[A-Za-z0-9_-]+$')][string]$ExecutableName='BA-Cafe-Pets',[switch]$Release)
 $ErrorActionPreference='Stop'
 $cmake=(Get-Command cmake -ErrorAction SilentlyContinue).Source
 if(!$cmake){$cmake=(Get-ChildItem -Path "$PSScriptRoot/.tools/cmake-*/bin/cmake.exe" -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1).FullName}

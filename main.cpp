@@ -75,7 +75,7 @@ void nativeLog(int level,const char* text,va_list args){
     FILE* out=level>=LOG_WARNING?stderr:stdout;std::fprintf(out,"[%d] ",level);std::vfprintf(out,text,args);std::fputc('\n',out);std::fflush(out);
 }
 struct GraphicsContext {
-    GraphicsContext(){SetTraceLogCallback(nativeLog);SetConfigFlags(FLAG_WINDOW_HIDDEN);InitWindow(64,64,"ba_cafe_lite_native OpenGL");if(!IsWindowReady())throw std::runtime_error("Cannot initialize raylib OpenGL");SetExitKey(KEY_NULL);SetTargetFPS(0);}
+    GraphicsContext(){SetTraceLogCallback(nativeLog);SetConfigFlags(FLAG_WINDOW_HIDDEN);InitWindow(64,64,"BA Cafe Pets OpenGL");if(!IsWindowReady())throw std::runtime_error("Cannot initialize raylib OpenGL");SetExitKey(KEY_NULL);SetTargetFPS(0);}
     ~GraphicsContext(){CloseWindow();}
 };
 
@@ -842,13 +842,13 @@ struct App {
         refreshDisplays();ground.modelZoom=zoom;ground.measuredBounds=true;geometry.prepareViewport(ground,zoom);geometry.place(ground,{ground.width*0.72f,ground.height*0.83f},zoom);geometry.update(ground,zoom,false);const auto crop=geometry.crop;windowWidth=geometry.width;windowHeight=geometry.height;
         WNDCLASSW wc{};wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"BaCafeNativePet";wc.lpfnWndProc=proc;wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&wc);
         // Independent layered display and alpha-shaped input windows.
-        window=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_LAYERED|WS_EX_TRANSPARENT,wc.lpszClassName,L"ba_cafe_lite_native",WS_POPUP,
+        window=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_LAYERED|WS_EX_TRANSPARENT,wc.lpszClassName,L"BA Cafe Pets",WS_POPUP,
             work.left+int(crop.x),work.top+int(crop.y),windowWidth,windowHeight,nullptr,nullptr,wc.hInstance,this);
         if(!window)throw std::runtime_error("Cannot create desktop pet window");
         wc.lpszClassName=L"BaCafeNativeInput";wc.lpfnWndProc=inputProc;RegisterClassW(&wc);
         // No redirected bitmap, background brush or composition visual: this
         // window has no visible surface. Its region is exclusively for input.
-        inputWindow=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_NOREDIRECTIONBITMAP,wc.lpszClassName,L"ba_cafe_lite_native input",WS_POPUP,
+        inputWindow=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_NOREDIRECTIONBITMAP,wc.lpszClassName,L"BA Cafe Pets input",WS_POPUP,
             work.left+int(crop.x),work.top+int(crop.y),windowWidth,windowHeight,nullptr,nullptr,wc.hInstance,this);
         if(!inputWindow)throw std::runtime_error("Cannot create desktop pet input window");
         const BOOL excludePeek=TRUE;
@@ -937,7 +937,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         SetTraceLogLevel(app.diagnostics?LOG_INFO:LOG_NONE);
         GraphicsContext graphics;
         Scene scene(std::move(owned));result=scene.run();
-    }catch(const std::exception& e){std::fprintf(stderr,"Startup: %s\n",e.what());MessageBoxW(nullptr,wide(e.what()).c_str(),L"ba_cafe_lite_native",MB_ICONERROR);}
+    }catch(const std::exception& e){std::fprintf(stderr,"Startup: %s\n",e.what());MessageBoxW(nullptr,wide(e.what()).c_str(),L"BA Cafe Pets",MB_ICONERROR);}
     return result;
 }
 #endif

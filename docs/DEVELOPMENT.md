@@ -8,7 +8,7 @@
 
 ```powershell
 ./build.ps1
-./build/bin/ba_cafe_lite_native.exe --settings
+./build/bin/BA-Cafe-Pets.exe --settings
 ```
 
 或使用已在终端配置好的 C/C++ 编译器：
@@ -16,12 +16,12 @@
 ```powershell
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build --target ba_cafe_lite_native -j 4
-./build/bin/ba_cafe_lite_native.exe --settings
+./build/bin/BA-Cafe-Pets.exe --settings
 ```
 
 CMake 会下载并校验固定版本的 raylib 6.0 与 BehaviorTree.CPP 4.8.0。可将相应源码放入 `vendor/raylib-6.0`、`vendor/BehaviorTree.CPP-4.8.0` 进行本地构建；首次下载需要网络。cgltf 位于 `shared/`。
 
-本分支从 **1.0.0** 开始独立编号，不沿用原作者版本号。`0.2.15` 仅表示源码来源基线。原生程序内部文件名及持久数据目录继续保留，以维持数据兼容；对外发行文件使用 `BA-Cafe-Pets-版本号` 命名。
+本分支从 **1.0.0** 开始独立编号，不沿用原作者版本号。`0.2.15` 仅表示源码来源基线。默认源码构建、便携版与单文件版内部程序名统一为 `BA-Cafe-Pets.exe`；CMake 目标标识和持久数据目录保留，以维持构建与数据兼容。对外发行文件使用 `BA-Cafe-Pets-版本号` 命名。
 
 ## 代码入口
 
@@ -71,10 +71,10 @@ $scratch = Join-Path $PWD ('artifacts/model-library-' + [guid]::NewGuid().ToStri
 打包后可用 Windows 桌面验证单文件启动器的旧记录恢复。脚本将 EXE、模型与数据复制到独立测试目录，不改动实际用户资料：
 
 ```powershell
-python tests/launcher_storage_compatibility.py ./dist/BA-Cafe-Pets-1.1.3-x64.exe
-python tests/tray_integration.py ./dist/BA-Cafe-Pets-1.1.3-portable-x64.zip
-python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.3-portable-x64.zip
-python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.3-x64.exe
+python tests/launcher_storage_compatibility.py ./dist/BA-Cafe-Pets-1.1.4-x64.exe
+python tests/tray_integration.py ./dist/BA-Cafe-Pets-1.1.4-portable-x64.zip
+python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.4-portable-x64.zip
+python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.4-x64.exe
 ```
 
 界面回归检查使用隔离 Windows 桌面，不把模拟模型写入实际用户数据。测试还比较滚动后的实际窗口像素与完整重绘结果，并核对滑块普通绘制和合成绘制一致；覆盖浅色／深色主题及 100%／150%／200% DPI，同时验证滑块拖动和键盘操作。
@@ -92,7 +92,7 @@ python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.3-x64.exe
 手工验证请使用独立数据目录。模型默认写入程序旁的 model 文件夹，导入测试前应在模型管理中选择专用测试目录，或将程序及资源复制到隔离目录后运行：
 
 ```powershell
-./build/bin/ba_cafe_lite_native.exe --data-dir ./artifacts/manual-data --settings --diagnostics
+./build/bin/BA-Cafe-Pets.exe --data-dir ./artifacts/manual-data --settings --diagnostics
 ```
 
 重点检查多选导入、重复模型复用、删除取消、文件被占用、删除正在显示的角色、模型库刷新、五角色显示上限，以及完整界面打开时动画持续。隐藏或删除全部模型后继续在托盘运行；验证托盘恢复、重启保持隐藏、空模型库导入与显式退出，确认记录和本地文件均已同步。

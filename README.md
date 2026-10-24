@@ -29,8 +29,8 @@
 
 从[本仓库 Releases](https://github.com/FrancisRi/BA-cafe-pets/releases/latest)下载 Windows x64 发行包：
 
-- `BA-Cafe-Pets-1.1.3-x64.exe`：单文件版，双击运行，首次启动自动释放离线资源。
-- `BA-Cafe-Pets-1.1.3-portable-x64.zip`：便携版，完整解压后运行 `ba_cafe_lite.exe`。
+- `BA-Cafe-Pets-1.1.4-x64.exe`：单文件版，双击运行，首次启动自动释放离线资源。
+- `BA-Cafe-Pets-1.1.4-portable-x64.zip`：便携版，完整解压后运行 `BA-Cafe-Pets.exe`。
 - 对应的 `.sha256` 文件：用于核对下载文件的 SHA-256。
 
 也可以按下列步骤从源码构建。
@@ -43,7 +43,7 @@
 git clone https://github.com/FrancisRi/BA-cafe-pets.git
 cd BA-cafe-pets
 ./build.ps1
-./build/bin/ba_cafe_lite_native.exe --settings
+./build/bin/BA-Cafe-Pets.exe --settings
 ```
 
 已配置好编译器与 Ninja 的终端也可直接运行：
@@ -51,7 +51,7 @@ cd BA-cafe-pets
 ```powershell
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build --target ba_cafe_lite_native -j 4
-./build/bin/ba_cafe_lite_native.exe --settings
+./build/bin/BA-Cafe-Pets.exe --settings
 ```
 
 运行构建目录中的程序时，保留同目录的 `models/`、`defaults.ini` 和 `behavior/`。构建、测试及打包细节见 [开发说明](docs/DEVELOPMENT.md)。
@@ -113,11 +113,11 @@ MSAA 用在模型实际渲染的离屏缓冲，而非隐藏的主窗口；显卡
 
 升级到 1.0.1 后，仍读取旧的 `data/models/`。单文件版还会恢复自身目录下 `data/characters.json` 和 `build/bin/data/characters.json` 中存在的模型，解决从开发版切换到根目录 EXE 后模型不见的问题。当前没有用户模型时，会恢复旧模型的显示状态、模式与大小；已有用户模型时只合并缺失记录。首次恢复前备份当前记录为 `characters.before-storage-*.json`，原文件和旧记录不修改，同一旧资料只自动恢复一次。显式传入 `--data-dir` 时不自动合并其他资料。
 
-为兼容已有配置，当前仍沿用上游可执行文件名及数据目录。单文件启动器会与原版共用上述 AppData 目录；需要独立数据时，可使用便携版，或为原生程序指定 `--data-dir`：
+程序文件名统一为 `BA-Cafe-Pets.exe`；为兼容已有配置，仍沿用原持久数据目录。便携版升级时退出旧程序，将新包解压到原目录并运行新名称的程序即可；旧的 `ba_cafe_lite.exe` 不会自动删除，请勿再启动旧文件。单文件启动器会与原版共用上述 AppData 目录；需要独立数据时，可使用便携版，或为原生程序指定 `--data-dir`：
 
 ```powershell
-./build/bin/ba_cafe_lite_native.exe --data-dir ./artifacts/my-data --settings
-./build/bin/ba_cafe_lite_native.exe --diagnostics
+./build/bin/BA-Cafe-Pets.exe --data-dir ./artifacts/my-data --settings
+./build/bin/BA-Cafe-Pets.exe --diagnostics
 ```
 
 默认不写运行日志。启用 `--diagnostics` 后，日志、性能信息和挂起诊断保存在数据目录的 `logs/`，不自动上传。升级前退出旧进程，并在关闭程序后备份数据。
@@ -137,6 +137,6 @@ MSAA 用在模型实际渲染的离屏缓冲，而非隐藏的主窗口；显卡
 
 原始代码由 **maxiumlee（Max）** 开发，来源为 [maxiumlee/ba-cafe-lite](https://github.com/maxiumlee/ba-cafe-lite)；本分支由 **FrancisRi** 维护。
 
-核对时上游未提供项目整体的 `LICENSE`，本分支没有额外为整个项目指定 MIT／GPL 等许可证。第三方组件分别沿用其许可；角色、模型和贴图权利属于相应权利人。详见 [NOTICE.md](NOTICE.md)、[CREDITS.md](CREDITS.md) 和 [licenses/NOTICE.txt](licenses/NOTICE.txt)。
+截至 2026-10-24，上游仍未提供项目整体的 `LICENSE`。为整份衍生代码添加 MIT／GPL 等许可证，需要先取得相关权利人的相应授权；维护者拥有版权的新增代码可以明确范围后单独授权。目前未为整个项目或新增部分指定开源许可证，注明原作者不能代替授权。第三方组件分别沿用其许可；角色、模型和贴图权利属于相应权利人。详见 [NOTICE.md](NOTICE.md)、[CREDITS.md](CREDITS.md) 和 [licenses/NOTICE.txt](licenses/NOTICE.txt)。
 
 问题反馈请使用[本仓库 Issues](https://github.com/FrancisRi/BA-cafe-pets/issues)。参与开发请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。

@@ -19,7 +19,7 @@ foreach($binary in @($core,$launcher)){
 $work=Join-Path $root ('artifacts/native-release-'+$version+'/'+[guid]::NewGuid().ToString('N'))
 $stage=Join-Path $work 'stage'
 New-Item -ItemType Directory -Force -Path $stage,$dist | Out-Null
-Copy-Item -LiteralPath $core -Destination (Join-Path $stage 'ba_cafe_lite.exe')
+Copy-Item -LiteralPath $core -Destination (Join-Path $stage 'BA-Cafe-Pets.exe')
 $allowed=@('models/Shiroko.glb','defaults.ini','behavior/template.bt.xml','behavior/battle-mode.drawio','behavior/battle-mode.mmd',
     'README.txt','README.md','CHANGELOG.md','CREDITS.md','NOTICE.md','licenses/NOTICE.txt','licenses/raylib.txt','licenses/GLFW.txt','licenses/cgltf.txt',
     'licenses/BehaviorTree.CPP.txt','licenses/tinyxml2.txt','licenses/minitrace.txt','licenses/minicoro.txt','licenses/lexy.txt',
@@ -35,7 +35,7 @@ Copy-Item -LiteralPath $launcher -Destination $stub
 $strip=(Get-Command strip -ErrorAction SilentlyContinue).Source
 if(!$strip){$strip=(Get-ChildItem -Path "$env:LOCALAPPDATA/Microsoft/WinGet/Packages/BrechtSanders.WinLibs.*/mingw64/bin/strip.exe" -ErrorAction SilentlyContinue | Select-Object -First 1).FullName}
 if($strip){
-    foreach($binary in @((Join-Path $stage 'ba_cafe_lite.exe'),$stub)){
+    foreach($binary in @((Join-Path $stage 'BA-Cafe-Pets.exe'),$stub)){
         & $strip --strip-unneeded $binary
         if($LASTEXITCODE -ne 0){throw 'Cannot strip distribution executable'}
     }

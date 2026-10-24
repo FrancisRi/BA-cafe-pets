@@ -102,9 +102,9 @@ static LRESULT CALLBACK progressProc(HWND h,UINT m,WPARAM w,LPARAM l){
 }
 static void prepare(Context& ctx){
     std::ifstream marker(ctx.cache/L".ready");std::string ready;marker>>ready;
-    if(ready==hex(ctx.footer.sha,32)&&fs::is_regular_file(ctx.cache/L"ba_cafe_lite.exe")&&fs::is_regular_file(ctx.cache/L"behavior/template.bt.xml")&&fs::is_regular_file(ctx.cache/L"defaults.ini")&&fs::is_regular_file(ctx.cache/L"models/Shiroko.glb"))return;
+    if(ready==hex(ctx.footer.sha,32)&&fs::is_regular_file(ctx.cache/L"BA-Cafe-Pets.exe")&&fs::is_regular_file(ctx.cache/L"behavior/template.bt.xml")&&fs::is_regular_file(ctx.cache/L"defaults.ini")&&fs::is_regular_file(ctx.cache/L"models/Shiroko.glb"))return;
     progressContext=&ctx;WNDCLASSW wc{};wc.lpfnWndProc=progressProc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"BaCafeNativeReleaseProgress";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hbrBackground=reinterpret_cast<HBRUSH>(COLOR_WINDOW+1);RegisterClassW(&wc);
-    HWND window=CreateWindowExW(WS_EX_APPWINDOW,wc.lpszClassName,L"ba_cafe_lite",WS_CAPTION|WS_SYSMENU,GetSystemMetrics(SM_CXSCREEN)/2-240,GetSystemMetrics(SM_CYSCREEN)/2-80,480,160,nullptr,nullptr,wc.hInstance,nullptr);
+    HWND window=CreateWindowExW(WS_EX_APPWINDOW,wc.lpszClassName,L"BA Cafe Pets",WS_CAPTION|WS_SYSMENU,GetSystemMetrics(SM_CXSCREEN)/2-240,GetSystemMetrics(SM_CYSCREEN)/2-80,480,160,nullptr,nullptr,wc.hInstance,nullptr);
     label=CreateWindowExW(0,L"STATIC",L"正在准备离线资源…",WS_CHILD|WS_VISIBLE,22,22,420,28,window,nullptr,wc.hInstance,nullptr);
     INITCOMMONCONTROLSEX controls{sizeof(controls),ICC_PROGRESS_CLASS};InitCommonControlsEx(&controls);
     bar=CreateWindowExW(0,PROGRESS_CLASSW,L"",WS_CHILD|WS_VISIBLE,22,62,420,20,window,nullptr,wc.hInstance,nullptr);
@@ -126,7 +126,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         const auto data=home/L"data";fs::create_directories(data);SetEnvironmentVariableW(L"BA_NATIVE_DATA_DIR",data.c_str());
         SetEnvironmentVariableW(L"BA_NATIVE_PROGRAM_DIR",ctx.self.parent_path().c_str());
         int argc=0;auto** argv=CommandLineToArgvW(GetCommandLineW(),&argc);bool prepareOnly=false;
-        const auto exe=ctx.cache/L"ba_cafe_lite.exe";auto command=quote(exe.wstring());
+        const auto exe=ctx.cache/L"BA-Cafe-Pets.exe";auto command=quote(exe.wstring());
         for(int i=1;i<argc;++i){if(std::wcscmp(argv[i],L"--prepare-only")==0)prepareOnly=true;else command+=L" "+quote(argv[i]);}LocalFree(argv);
         if(prepareOnly){ReleaseMutex(mutex);CloseHandle(mutex);return 0;}
         SECURITY_ATTRIBUTES security{sizeof(security),nullptr,TRUE};
@@ -136,6 +136,6 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         STARTUPINFOW startup{sizeof(startup)};startup.dwFlags=STARTF_USESTDHANDLES|STARTF_USESHOWWINDOW;startup.wShowWindow=SW_HIDE;startup.hStdOutput=nul;startup.hStdError=nul;startup.hStdInput=nul;PROCESS_INFORMATION process{};
         const bool started=CreateProcessW(exe.c_str(),command.data(),nullptr,nullptr,TRUE,CREATE_NO_WINDOW,nullptr,ctx.cache.c_str(),&startup,&process);CloseHandle(nul);require(started,"Cannot start desktop pet");
         WaitForSingleObject(process.hProcess,INFINITE);DWORD code=1;GetExitCodeProcess(process.hProcess,&code);CloseHandle(process.hThread);CloseHandle(process.hProcess);result=int(code);
-    }catch(const std::exception& e){if(std::strcmp(e.what(),"Cancelled")!=0)MessageBoxW(nullptr,widen(e.what()).c_str(),L"ba_cafe_lite 启动失败",MB_ICONERROR);}
+    }catch(const std::exception& e){if(std::strcmp(e.what(),"Cancelled")!=0)MessageBoxW(nullptr,widen(e.what()).c_str(),L"BA Cafe Pets 启动失败",MB_ICONERROR);}
     if(mutex){ReleaseMutex(mutex);CloseHandle(mutex);}return result;
 }
