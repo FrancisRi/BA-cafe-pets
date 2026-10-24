@@ -94,8 +94,17 @@ struct CrowdSteering {
             for(const auto& other:bodies){if(other.id==self.id)continue;
                 const auto tangent=[&](Vector2 position,Vector2 velocity){const auto q=subtract(position,self.position);
                     const float r=self.radius+other.radius+0.07f,d=std::sqrt(norm(q));
-                    if(d<r||dot(q,intent)<-r)return;
-                    const float center=std::atan2(q.x,q.y),spread=std::asin(std::clamp(r/d,0.0f,1.0f));
+                    if(dot(q,intent)<-r)return;
+                    const float center=std::atan2(q.x,q.y);
+                    if(d<r){
+                        // A drag can place us inside the padded collision cone,
+                        // where external tangents do not exist. Try either side
+                        // with an outward component; clear() still checks every
+                        // peer and never allows the existing overlap to deepen.
+                        if(d>1e-6f)for(int sign:{1,-1})consider(std::remainder(center*RAD2DEG+sign*100.0f-preferred,360.0f),other.id);
+                        return;
+                    }
+                    const float spread=std::asin(std::clamp(r/d,0.0f,1.0f));
                     for(int sign:{1,-1}){const auto ray=direction((center+sign*spread)*RAD2DEG);const float along=dot(velocity,ray);
                         const float discriminant=along*along+speed*speed-norm(velocity);if(discriminant<0)continue;
                         const float length=-along+std::sqrt(discriminant);if(length<=0)continue;

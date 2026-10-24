@@ -1,6 +1,7 @@
 #pragma once
 #include "desktop_geometry.h"
 #include "stop_turn.h"
+#include <array>
 // Validate a whole trip before starting. Internal monitor seams are traversable;
 // the resting envelope must fit on one screen and large off-desktop gaps are rejected.
 struct DesktopPath {
@@ -38,14 +39,28 @@ struct DesktopPath {
         return monitor>=0&&restingMonitor(ground,geometry,zoom,lastLanding)==monitor&&covered(ground,lastLanding);
     }
     static bool crossing(PetGround& ground,const DesktopGeometry& geometry,float zoom,Vector3 endpoint){
-        const int from=restingMonitor(ground,geometry,zoom,ground.position),to=restingMonitor(ground,geometry,zoom,endpoint);
+        int from=restingMonitor(ground,geometry,zoom,ground.position);const int to=restingMonitor(ground,geometry,zoom,endpoint);
+        if(from<0){
+            // A rotated envelope outside its own screen needs recovery, not a
+            // fixed cross-monitor route that ignores subsequent cursor input.
+            const auto foot=ground.screen(ground.position);
+            if(ground.monitors.empty()){if(foot.x>=0&&foot.x<ground.width&&foot.y>=0&&foot.y<ground.height)from=0;}
+            else for(size_t i=0;i<ground.monitors.size();++i){const auto& area=ground.monitors[i];if(foot.x>=area.left&&foot.x<area.right&&foot.y>=area.top&&foot.y<area.bottom){from=int(i);break;}}
+        }
         return to>=0&&from!=to;
     }
     static bool stepAllowed(const PetGround& ground,float heading,double distance){
         const auto p=ground.screen(ground.step(heading,float(distance)));const auto b=ground.bodyOffsets;
         // Do not clamp a moving foot to each individual monitor. That would
         // stop it at an internal seam/gap after the trip had already been accepted.
-        return p.x+b.left>=-0.5f&&p.x+b.right<=ground.width+0.5f&&p.y+b.top>=-0.5f&&p.y+b.bottom<=ground.height+0.5f;
+        if(!std::isfinite(p.x)||!std::isfinite(p.y))return false;
+        const auto outside=[&](Vector2 foot){return std::array<double,4>{std::max(0.0,-double(foot.x)-b.left-.5),std::max(0.0,double(foot.x)+b.right-ground.width-.5),std::max(0.0,-double(foot.y)-b.top-.5),std::max(0.0,double(foot.y)+b.bottom-ground.height-.5)};};
+        const auto next=outside(p);if(std::all_of(next.begin(),next.end(),[](double value){return value==0;}))return true;
+        // Dragging/turning can leave the new resting envelope slightly outside.
+        // Permit only recovery: no edge gets worse and at least one improves.
+        const auto current=outside(ground.screen(ground.position));bool improves=false;
+        for(size_t i=0;i<next.size();++i){if(next[i]>current[i]+.001)return false;improves|=next[i]<current[i]-.0001;}
+        return improves;
     }
     static bool turnFits(PetGround& ground,const DesktopGeometry& geometry,float zoom,float yaw,float desired,double seconds,double speed,double stopMin,double stopMax){
         auto preview=ground;StopTurn turn;turn.begin(yaw,desired,seconds);

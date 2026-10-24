@@ -12,6 +12,36 @@ static double oldSegmentDistance(Vector3 a,Vector3 b,Vector3 p){const double x=b
     return std::hypot(p.x-a.x-x*t,p.z-a.z-z*t);}
 static constexpr double dt=0.008,speed=2;
 static auto freeSpace=[](float,double){return true;};
+static void recoverDesktopEnvelope(){
+    PetGround ground;ground.measuredBounds=true;ground.position=ground.floorAt({100,600});
+    const auto foot=ground.screen(ground.position);ground.bodyOffsets={-foot.x-1.5f,-100,100,20};
+    check(DesktopPath::stepAllowed(ground,90,.0005),"A partly outside envelope can take a small inward recovery step");
+    check(!DesktopPath::stepAllowed(ground,-90,.0005),"Recovery cannot move farther outside the desktop");
+    ground.bodyOffsets={-50,-100,50,20};check(!DesktopPath::stepAllowed(ground,-90,100),"An inside pet still cannot leave the screen");
+    DesktopGeometry geometry;ground.monitors={{0,0,float(ground.width),float(ground.height)}};ground.position=ground.floorAt({2,800});geometry.measure(ground,1);
+    check(DesktopPath::restingMonitor(ground,geometry,1,ground.position)<0,"Fixture starts with a clipped resting envelope");
+    check(!DesktopPath::crossing(ground,geometry,1,ground.floorAt({1000,800})),"Same-screen envelope recovery must retain cursor replanning");
+    ground.width=3840;ground.monitors={{0,0,1920,1080},{1920,0,3840,1080}};ground.position=ground.floorAt({1000,800});
+    check(DesktopPath::crossing(ground,geometry,1,ground.floorAt({3000,800})),"A real transfer between monitors remains a crossing");
+}
+static void draggedNearPeer(){
+    for(float initial:{-.92f,-.2f}){
+        std::array<CrowdBody,2> bodies{CrowdBody{1,{0,initial},{},.45f},CrowdBody{2,{0,0},{},.45f}};CrowdSteering steering;
+        const Vector2 goal{0,3};bool separated=false;
+        for(int frame=0;frame<2000;++frame){
+            const auto q=CrowdSteering::subtract(goal,bodies[0].position);const double left=std::sqrt(CrowdSteering::norm(q));if(left<.03)break;
+            const auto move=steering.step(bodies[0],bodies,std::atan2(q.x,q.y)*RAD2DEG,std::min(left,speed*dt),dt,freeSpace);
+            check(std::isfinite(move.heading),"A pet dragged into a peer's clearance must find an escape toward its follow goal");
+            const auto u=CrowdSteering::direction(move.heading);const auto before=distance(bodies[0].position,bodies[1].position);
+            bodies[0].position.x+=u.x*speed*dt*move.scale;bodies[0].position.y+=u.y*speed*dt*move.scale;
+            const auto after=distance(bodies[0].position,bodies[1].position);
+            if(before<.9)check(after>=before-1e-5,"Recovering from a drag must not deepen overlap");
+            if(separated)check(after>=.9-1e-3,"After clearing overlap the pet must not penetrate the peer again");separated|=after>=.9;
+        }
+        check(distance(bodies[0].position,goal)<.04,"Follow resumes beyond a stationary peer after a central drag");
+        check(distance(bodies[1].position,{0,0})==0,"Recovery must not push the idle peer");
+    }
+}
 static void fiveWayCrossing(){
     std::array<CrowdBody,5> bodies{};std::array<Vector2,5> goals{};std::array<CrowdSteering,5> steering{};
     std::array<bool,5> stopped{};double nearest=1e9;int arrived=0;
@@ -56,6 +86,8 @@ static void encounter(std::array<CrowdBody,2> bodies,std::array<Vector2,2> goals
     check(maxBrake<=0.055,"Ordinary passing must brake gradually");
 }
 int main(){try{
+    recoverDesktopEnvelope();
+    draggedNearPeer();
     encounter({CrowdBody{1,{0,-3},{0,2},0.45f},CrowdBody{2,{0,3},{0,-2},0.45f}},{Vector2{0,3},Vector2{0,-3}});
     encounter({CrowdBody{1,{-3,0},{2,0},0.45f},CrowdBody{2,{0,-3},{0,2},0.45f}},{Vector2{3,0},Vector2{0,3}});
     encounter({CrowdBody{1,{0,-3},{0,2},0.45f},CrowdBody{2,{0,0},{},0.45f}},{Vector2{0,3},Vector2{}},true);

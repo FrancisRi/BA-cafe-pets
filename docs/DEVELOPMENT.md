@@ -44,11 +44,12 @@ CMake 会下载并校验固定版本的 raylib 6.0 与 BehaviorTree.CPP 4.8.0。
 先完成应用构建，再构建测试目标：
 
 ```powershell
-cmake --build build --target ba_cafe_lite_ui_tests ba_cafe_lite_model_library_tests ba_cafe_lite_model_import_tests ba_cafe_lite_model_storage_tests ba_cafe_lite_topmost_tests ba_cafe_lite_follow_tests ba_cafe_lite_antialias_tests -j 4
+cmake --build build --target ba_cafe_lite_ui_tests ba_cafe_lite_model_library_tests ba_cafe_lite_model_import_tests ba_cafe_lite_model_storage_tests ba_cafe_lite_topmost_tests ba_cafe_lite_follow_tests ba_cafe_lite_drag_follow_tests ba_cafe_lite_antialias_tests -j 4
 ./build/ba_cafe_lite_ui_tests.exe
 ./build/ba_cafe_lite_model_import_tests.exe
 ./build/ba_cafe_lite_topmost_tests.exe
 ./build/ba_cafe_lite_follow_tests.exe (Join-Path $PWD ('artifacts/follow-' + [guid]::NewGuid().ToString('N') + '.ini'))
+./build/ba_cafe_lite_drag_follow_tests.exe (Join-Path $PWD ('artifacts/drag-follow-' + [guid]::NewGuid().ToString('N')))
 ```
 
 抗锯齿测试使用隐藏 OpenGL 窗口，不读取用户模型；比较真实 GPU 斜边覆盖与 32×32 子采样参考，验证透明预乘颜色、画质切换、缓冲绑定恢复和显存预算回退：
@@ -56,6 +57,8 @@ cmake --build build --target ba_cafe_lite_ui_tests ba_cafe_lite_model_library_te
 ```powershell
 ./build/ba_cafe_lite_antialias_tests.exe
 ```
+
+拖动回归使用真实角色、Win32 拖动消息及模拟鼠标位置，检查逻辑位移、实际渲染窗口位移和视线恢复。窗口保持隐藏，不移动用户鼠标。测试资料路径必须不存在；可依次附加只读模型路径、`cafe`／`battle`、缩放值，例如模型路径后使用 `cafe 1.24`。额外模型不会复制进发行包。
 
 模型库测试会创建文件并测试回收站删除，参数必须是尚不存在的独立测试目录：
 
@@ -68,10 +71,10 @@ $scratch = Join-Path $PWD ('artifacts/model-library-' + [guid]::NewGuid().ToStri
 打包后可用 Windows 桌面验证单文件启动器的旧记录恢复。脚本将 EXE、模型与数据复制到独立测试目录，不改动实际用户资料：
 
 ```powershell
-python tests/launcher_storage_compatibility.py ./dist/BA-Cafe-Pets-1.1.2-x64.exe
-python tests/tray_integration.py ./dist/BA-Cafe-Pets-1.1.2-portable-x64.zip
-python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.2-portable-x64.zip
-python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.2-x64.exe
+python tests/launcher_storage_compatibility.py ./dist/BA-Cafe-Pets-1.1.3-x64.exe
+python tests/tray_integration.py ./dist/BA-Cafe-Pets-1.1.3-portable-x64.zip
+python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.3-portable-x64.zip
+python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.3-x64.exe
 ```
 
 界面回归检查使用隔离 Windows 桌面，不把模拟模型写入实际用户数据。测试还比较滚动后的实际窗口像素与完整重绘结果，并核对滑块普通绘制和合成绘制一致；覆盖浅色／深色主题及 100%／150%／200% DPI，同时验证滑块拖动和键盘操作。
