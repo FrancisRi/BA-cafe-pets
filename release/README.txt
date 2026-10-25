@@ -1,4 +1,4 @@
-BA Cafe Pets 1.1.5 · Windows x64
+BA Cafe Pets 1.1.6 · Windows x64
 
 基于 maxiumlee（Max）的 ba-cafe-lite 继续开发。
 原作者：https://github.com/maxiumlee/ba-cafe-lite
@@ -8,7 +8,7 @@ BA Cafe Pets 1.1.5 · Windows x64
 便携版请退出旧程序后解压到原目录，运行 BA-Cafe-Pets.exe；旧 ba_cafe_lite.exe 不自动删除，请勿再启动。
 
 启动
-  单文件版双击 BA-Cafe-Pets-1.1.5-x64.exe；便携版解压后运行 BA-Cafe-Pets.exe。
+  单文件版双击 BA-Cafe-Pets-1.1.6-x64.exe；便携版解压后运行 BA-Cafe-Pets.exe。
   默认角色 Shiroko。
   不需要 Blender、浏览器、WebView2、Python 或开发环境。
   便携 ZIP 请完整解压，保留 model、defaults.ini、behavior 和 licenses。
@@ -20,6 +20,8 @@ BA Cafe Pets 1.1.5 · Windows x64
   “显示完整界面”：打开 Fluent 风格的全局、咖啡厅、战斗和模型管理。
   桌宠保持置顶；完整主界面可被其他窗口覆盖，打开时桌宠继续活动。
   左键拖动：移动。右键／中键拖动：旋转。鼠标滚轮：缩放。
+  咖啡厅开启散步、关闭跟随时，恢复鼠标或键盘输入后会返回最后一次拖拽放下的位置。
+  遇阻、点击或旋转不会改写返回点，再次拖拽放下才会更新。
   “导入模型”：选择 GLB，可按 Ctrl／Shift 一次多选多个。
   模型管理中右键点击一行：显示／隐藏、设为当前、定位或删除。
   “退出桌宠”：保存设置并关闭全部角色。

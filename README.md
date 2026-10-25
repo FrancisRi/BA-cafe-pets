@@ -29,8 +29,8 @@
 
 从[本仓库 Releases](https://github.com/FrancisRi/BA-cafe-pets/releases/latest)下载 Windows x64 发行包：
 
-- `BA-Cafe-Pets-1.1.5-x64.exe`：单文件版，双击运行，首次启动自动释放离线资源。
-- `BA-Cafe-Pets-1.1.5-portable-x64.zip`：便携版，完整解压后运行 `BA-Cafe-Pets.exe`。
+- `BA-Cafe-Pets-1.1.6-x64.exe`：单文件版，双击运行，首次启动自动释放离线资源。
+- `BA-Cafe-Pets-1.1.6-portable-x64.zip`：便携版，完整解压后运行 `BA-Cafe-Pets.exe`。
 - 对应的 `.sha256` 文件：用于核对下载文件的 SHA-256。
 
 也可以按下列步骤从源码构建。
