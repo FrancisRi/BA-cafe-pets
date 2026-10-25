@@ -433,7 +433,7 @@ struct App {
         if(!fixedPose && initialMode=="battle" && !settings->battleAvailable)throw std::runtime_error("Model has no battle animations: "+battle->clips.missing);
         selectMode(!fixedPose && requested && settings->battleAvailable);
         if(fixedPose){const auto selected=reviewClip.empty()?idle:reviewClip;state.start(state.find(selected),true);state.time=reviewTime;}
-        model=pendingModel;loaded=true;frameReady=false;readyAt=GetTickCount64();journey.route.clear();yaw=0;stopTurn.reset();
+        model=pendingModel;loaded=true;frameReady=false;readyAt=GetTickCount64();journey={};yaw=0;stopTurn.reset();
         directed.cancel();restFacing.reset();geometry=DesktopGeometry{};
         const auto& spatial=message.at("spatial");
         auto box=[&](const Json& values,Vector3& low,Vector3& high){if(!values.is_array()||values.size()!=6)throw std::runtime_error("Invalid spatial bounds");for(const auto& v:values)if(!v.is_number()||!std::isfinite(v.get<float>())||std::abs(v.get<float>())>100)throw std::runtime_error("Invalid model envelope");low={values[0],values[1],values[2]};high={values[3],values[4],values[5]};};
@@ -479,7 +479,7 @@ struct App {
         ground.modelZoom=zoom;state.movementScale=zoom*WalkSpeedMultiplier*(battleMode?3.0:1.0);updatePlacementShape();geometry.measure(ground,zoom);
         const double idle=idleInputSeconds();
         if(!fixedPose){
-            if(observeDebouncedInput(state,idle,elapsed,preferences.inputGrace) && !battleMode&&!preferences.follow&&!directed.active){state.trackingCursor=false;state.returnRequested=state.walkEnabled&&!journey.route.empty();if(!state.returnRequested)yaw=0;}
+            if(observeDebouncedInput(state,idle,elapsed,preferences.inputGrace) && !battleMode&&!preferences.follow&&!directed.active){state.trackingCursor=false;state.returnRequested=state.walkEnabled&&journey.requestReturn(ground.position);if(!state.returnRequested)yaw=0;}
             POINT cursor{};GetCursorPos(&cursor);const Vector2 pixel{float(cursor.x-work.left),float(cursor.y-work.top)};
             const auto goal=battleMode&&state.inputActive?ground.planeAt(pixel,1.15f*zoom):ground.floorAt(ground.clampFoot(pixel));const float dx=goal.x-ground.position.x,dz=goal.z-ground.position.z;
             state.cursorTarget=dx*dx+dz*dz>0.04f;state.cursorYaw=std::atan2(dx,dz)*RAD2DEG;
@@ -771,6 +771,7 @@ struct App {
         presentState(true);
     }
     void releaseMouse(){
+        if(left&&dragged)journey.place(ground.position);
         if(right)placementNeeded=true;
         left=right=menuPressed=rightDragged=false;ReleaseCapture();presentState(true);
     }

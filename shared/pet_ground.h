@@ -4,6 +4,7 @@
 #include <cmath>
 #include <vector>
 #include <functional>
+#include <optional>
 
 // A fixed, long-lens perspective camera overlooking a horizontal y=0 floor.
 // Window cropping is independent of the camera and never changes model scale.
@@ -146,10 +147,20 @@ struct PetGround {
     }
 };
 
-// Remember the excursion origin across all randomly chosen walking segments.
+// The placement survives interrupted excursions and completed return routes.
 struct PetJourney {
+    std::optional<Vector3> home;
     std::vector<Vector3> route;
-    void begin(Vector3 point) { if (route.empty()) route.push_back(point); }
+    void place(Vector3 point) { home=point;route.clear(); }
+    void begin(Vector3 point) {
+        if(!home)home=point;
+        if(route.empty())route.push_back(*home);
+    }
+    bool requestReturn(Vector3 point) {
+        route.clear();
+        if(!home||std::hypot(home->x-point.x,home->z-point.z)<0.002f)return false;
+        route.push_back(*home);return true;
+    }
     bool stepHome(PetGround& ground, float distance, float& yaw) {
         while (!route.empty()) {
             const auto target=route.back();

@@ -20,6 +20,21 @@ int main(){try{
     frame.reset(0);frame.advance(0.080);check(frame.next>0.080&&frame.next<0.081,"Overload renders promptly without queued catch-up or an artificial 30 FPS cap");
     check(framePosition({}, {2,0,1},0.004,10,10.030,false).x<=0.00801,"Prediction cannot overshoot the remaining walking time");
     check(framePosition({1,0,2},{2,0,1},1,10,10.030,true).x==1,"Paused gestures do not extrapolate");
+    PetJourney journey;PetGround returning;float returnYaw=0;
+    const Vector3 placed{1,0,2};journey.place(placed);
+    journey.begin(placed);journey.route.clear(); // Interrupted walk / blocked destination.
+    returning.position={3,0,4};journey.begin(returning.position);
+    check(Vector3Distance(journey.route.back(),placed)<1e-6,"A new walk after interruption must retain the last placement");
+    journey.route.clear();
+    check(journey.requestReturn(returning.position),"Input after a blocked walk must still request a return");
+    check(journey.stepHome(returning,10,returnYaw)&&Vector3Distance(returning.position,placed)<1e-6,"Return must reach the placement after its temporary route was cleared");
+    check(!journey.requestReturn(returning.position),"Input at home must not start a redundant return");
+    returning.position={4,0,5};journey.begin(returning.position);
+    check(Vector3Distance(journey.route.back(),placed)<1e-6,"Completing a return must not forget the placement");
+    const Vector3 newPlacement{2,0,3};journey.place(newPlacement);returning.position={5,0,6};
+    check(journey.requestReturn(returning.position)&&journey.stepHome(returning,10,returnYaw)&&Vector3Distance(returning.position,newPlacement)<1e-6,"Dragging again must replace the previous placement");
+    PetJourney initial;initial.begin(placed);initial.route.clear();initial.begin(newPlacement);
+    check(Vector3Distance(initial.route.back(),placed)<1e-6,"Without a drag, retain the first excursion origin");
     PetGround ground;Vector3 velocity{1.2f,0,0.4f};double lastTick=0;Vector3 position{};Vector2 previous{};
     for(int i=0;i<600;++i){const double renderAt=i/60.0;lastTick=std::floor(renderAt/0.008)*0.008;position=Vector3Scale(velocity,float(lastTick));const auto sampled=framePosition(position,velocity,1,lastTick,renderAt,false);const auto reference=Vector3Scale(velocity,float(renderAt));
         check(Vector3Distance(sampled,reference)<2e-6,"Frame movement must follow the render timestamp, not the last 125Hz step");
@@ -36,5 +51,5 @@ int main(){try{
         }
         std::fill(pixels.begin(),pixels.end(),0);nativePixels(pixels.data(),dib.data(),width,height,region);check(region.empty(),"A transparent frame cannot block mouse input");
     }
-    std::cout<<"60Hz deadlines, bounded movement prediction, committed drag anchors, exact BGRA and conservative alpha regions passed\n";
+    std::cout<<"60Hz deadlines, bounded movement prediction, persistent return placement, committed drag anchors, exact BGRA and conservative alpha regions passed\n";
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

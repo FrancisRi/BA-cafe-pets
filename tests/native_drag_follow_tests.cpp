@@ -12,6 +12,7 @@ static BOOL WINAPI testGetCursorPos(LPPOINT point){*point=testCursor;return TRUE
 #include "../main.cpp"
 #undef GetCursorPos
 #include <iostream>
+#include <limits>
 
 static void check(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
 int wmain(int argc,wchar_t** argv){try{
@@ -58,6 +59,43 @@ int wmain(int argc,wchar_t** argv){try{
     const Vector2 middle{a.ground.width*.5f,a.ground.height*.65f};
     auto start=a.ground.screen(a.ground.position);pointer(start);App::inputProc(a.inputWindow,WM_LBUTTONDOWN,MK_LBUTTON,0);pointer(middle);App::inputProc(a.inputWindow,WM_MOUSEMOVE,MK_LBUTTON,0);tick(1);present();App::inputProc(a.inputWindow,WM_LBUTTONUP,0,0);tick(1);
     for(Vector2 target:std::vector<Vector2>{{2,a.ground.height*.65f},{a.ground.width-2.f,a.ground.height*.65f},{a.ground.width*.8f,2},{a.ground.width*.2f,a.ground.height-2.f}})follow("single actor cursor retarget",target);
+    if(!a.battleMode){
+        double inputIdle=0;a.idleInputSeconds=[&]{return inputIdle;};
+        a.preferences.follow=false;a.preferences.wandering=true;a.preferences.cafeTracking=false;
+        a.preferences.moveInterval=.02;a.preferences.moveBodies=.5;a.preferences.walkTimeJitter=a.preferences.walkDistanceJitter=0;
+        a.state.idleSecondsOverride=1;a.state.random.seed(17);a.applyPreferences();
+        const auto distance=[](Vector3 p,Vector3 q){return std::hypot(p.x-q.x,p.z-q.z);};
+        const auto drop=[&](Vector2 target,bool tickDuringDrag){
+            const auto origin=a.ground.screen(a.ground.position);pointer(origin);App::inputProc(a.inputWindow,WM_LBUTTONDOWN,MK_LBUTTON,0);
+            pointer(target);App::inputProc(a.inputWindow,WM_MOUSEMOVE,MK_LBUTTON,0);if(tickDuringDrag)tick(1);
+            const auto placed=a.ground.position;App::inputProc(a.inputWindow,WM_LBUTTONUP,0,0);tick(1);
+            check(a.journey.home&&distance(*a.journey.home,placed)<1e-5,"Mouse release must remember the drop even if no tick observed the drag");
+            return placed;
+        };
+        const auto wander=[&](Vector3 placed){
+            inputIdle=100;
+            for(int i=0;i<1500&&(!a.state.walking||a.journey.route.empty()||distance(a.ground.position,placed)<.08);++i)tick(1);
+            check(a.state.walking&&!a.state.returningHome&&distance(a.ground.position,placed)>=.08,"Real inactive behavior must wander away from the drop");
+            check(!a.journey.route.empty()&&distance(a.journey.route.back(),placed)<1e-5,"Wandering must target the latest manual drop");
+        };
+        const auto returnOnInput=[&](Vector3 placed){
+            inputIdle=0;tick(1);check(a.state.returnRequested&&a.state.returningHome,"Resuming input must start returning to the drop");
+            for(int i=0;i<3000&&!a.state.returnArrived;++i)tick(1);
+            check(a.state.returnArrived&&distance(a.ground.position,placed)<.002,"Input must return to the drop, not a later walking position");tick(2);
+        };
+        const auto placed=drop(middle,false);wander(placed);
+        // Rotation interrupts the excursion but cannot redefine the manual drop.
+        App::inputProc(a.inputWindow,WM_MBUTTONDOWN,MK_MBUTTON,0);tick(1);App::inputProc(a.inputWindow,WM_MBUTTONUP,0,0);tick(1);
+        wander(placed);returnOnInput(placed);
+        const auto replacement=drop({middle.x+50,middle.y},true);wander(replacement);
+        // Exercise the actual blocked-movement stop, then resume input before
+        // another random walk can repopulate the temporary return route.
+        const auto steering=a.avoidHeading;a.avoidHeading=[](float,double){return MovementChoice{std::numeric_limits<float>::quiet_NaN()};};
+        tick(1);a.avoidHeading=steering;
+        check(a.journey.route.empty()&&!a.state.walking,"A blocked walk clears only its transient route");returnOnInput(replacement);
+        a.idleInputSeconds=[] {return 0.0;};a.preferences.follow=true;a.preferences.wandering=false;a.preferences.cafeTracking=true;a.applyPreferences();
+        std::cout<<"Manual drop, interrupted wandering, replacement drop and input-triggered return passed.\n";
+    }
     // Repeat a central drag into a stationary peer's collision envelope.
     const auto peerFile=profile/L"Peer.glb";std::filesystem::copy_file(a.model,peerFile);const auto peerId=SceneRoster::key(peerFile);
     scene.roster.remember({peerId,utf8(peerFile.wstring()),"Peer","cafe",false});scene.activate(peerId);tick(2);
