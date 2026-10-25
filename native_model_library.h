@@ -86,8 +86,8 @@ struct NativeModelLibrary {
                 return result;
             }
             for(const auto& entry:std::filesystem::directory_iterator(directory)){
-                if(!entry.is_regular_file())continue;const auto name=entry.path().filename().wstring();
-                if((name.ends_with(shortSuffix)||name.ends_with(fullSuffix))&&digest(entry.path())==result.digest){result.file=entry.path();result.reused=true;return result;}
+                if(!owns(entry.path())||!entry.is_regular_file()||entry.file_size()!=std::filesystem::file_size(result.source))continue;
+                if(digest(entry.path())==result.digest){result.file=entry.path();result.reused=true;return result;}
             }
         }
         const auto stem=safeStem(file);result.file=directory/(stem+shortSuffix);
@@ -121,5 +121,14 @@ struct NativeModelLibrary {
         }catch(...){if(ownsTemporary){std::error_code ignored;std::filesystem::remove(temporary,ignored);}throw;}
     }
     Path store(const Path& source) const {return commit(prepare(source));}
+    // Library migration preserves filenames (including intentional aliases),
+    // while the normal import path continues to deduplicate by content.
+    Path copyToLibrary(const Path& source) const {
+        if(owns(source)&&std::filesystem::is_regular_file(source))return std::filesystem::absolute(source).lexically_normal();
+        auto plan=prepare(source);const auto named=directory/source.filename();
+        if(!std::filesystem::exists(named)){plan.file=named;plan.reused=false;}
+        else if(owns(named)&&std::filesystem::is_regular_file(named)&&digest(named)==plan.digest){plan.file=named;plan.reused=true;}
+        return commit(plan);
+    }
     Path ensureDirectory() const {std::filesystem::create_directories(directory);return directory;}
 };

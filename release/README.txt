@@ -1,4 +1,4 @@
-BA Cafe Pets 1.1.3 · Windows x64
+BA Cafe Pets 1.1.4 · Windows x64
 
 基于 maxiumlee（Max）的 ba-cafe-lite 继续开发。
 原作者：https://github.com/maxiumlee/ba-cafe-lite
@@ -8,10 +8,10 @@ BA Cafe Pets 1.1.3 · Windows x64
 便携版请退出旧程序后解压到原目录，运行 BA-Cafe-Pets.exe；旧 ba_cafe_lite.exe 不自动删除，请勿再启动。
 
 启动
-  单文件版双击 BA-Cafe-Pets-1.1.3-x64.exe；便携版解压后运行 BA-Cafe-Pets.exe。
+  单文件版双击 BA-Cafe-Pets-1.1.4-x64.exe；便携版解压后运行 BA-Cafe-Pets.exe。
   默认角色 Shiroko。
   不需要 Blender、浏览器、WebView2、Python 或开发环境。
-  便携 ZIP 请完整解压，保留 models、defaults.ini、behavior 和 licenses。
+  便携 ZIP 请完整解压，保留 model、defaults.ini、behavior 和 licenses。
 
 操作
   右下角托盘图标：单击打开主界面，右键打开模型快捷菜单。
@@ -32,9 +32,9 @@ BA Cafe Pets 1.1.3 · Windows x64
   选项下方显示当前角色实际生效的超采样、MSAA 和自动降级状态，切换后随实际绘制更新。
 
 模型管理
-  导入默认复制、校验到 EXE 旁自动创建的 model 文件夹，单文件版不会写入解压缓存。
+  所有模型（含白子）统一复制、校验到 EXE 旁的 model 文件夹或自选目录，运行记录不指向解压缓存。
   模型管理 → “更改保存位置…”可选择目录，“恢复默认位置”返回 EXE 旁的 model 文件夹。
-  新导入使用新目录；旧模型保留原文件并继续管理，不会自动搬动或删除。
+  更改目录时现有模型一并复制并校验，保留角色设置；失败保留原配置，原始文件和旧副本保留作备份。
   模型库不受旧的 15 条历史限制，最多同时显示 5 个角色。
   “刷新模型库”同步实际文件，新发现的模型不会自动显示。
   删除本地模型会将副本移入回收站，并同步移除记录、关闭相应桌宠。

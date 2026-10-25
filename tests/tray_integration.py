@@ -161,7 +161,7 @@ try:
     confirm=wait_for(lambda: windows('#32770'),'remove final model record confirmation')[0]
     user.PostMessageW(confirm,0x111,6,0)
     wait_for(lambda: len(read_roster()['characters'])==0,'empty model library')
-    assert process.poll() is None and tray_window() and (PROGRAM/'models/Shiroko.glb').is_file()
+    assert process.poll() is None and tray_window() and (PROGRAM/'model/Shiroko.glb').is_file()
     send(full,0x111,2);assert process.wait(timeout=10)==0
     process=subprocess.Popen([str(PROGRAM/'BA-Cafe-Pets.exe'),'--data-dir',str(SCRATCH),'--settings'],cwd=PROGRAM,env=environment)
     full=wait_for(lambda: windows('BaCafeNativeSettings'),'restart after removing all models')[0]

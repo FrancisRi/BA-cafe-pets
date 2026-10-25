@@ -24,8 +24,8 @@ struct Scene {
         if(modifyingModels)return;
         try{
             bool changed=false;
-            for(const auto& folder:leader().modelStorageSettings->directories())for(const auto& file:NativeModelLibrary(folder).files()){
-                const auto id=SceneRoster::key(file);if(!roster.find(id)){roster.remember({id,utf8(file.wstring()),utf8(NativeModelLibrary::displayName(file)),"cafe",false});changed=true;}
+            for(const auto& file:leader().modelLibrary().files()){
+                const auto id=SceneRoster::key(file);if(!roster.find(id)&&!leader().modelStorageSettings->bundled(file,leader().bundledResource())){roster.remember({id,utf8(file.wstring()),utf8(NativeModelLibrary::displayName(file)),"cafe",false});changed=true;}
             }
             const auto before=roster.entries.size();
             roster.entries.erase(std::remove_if(roster.entries.begin(),roster.entries.end(),[&](const auto& row){return !row.active&&leader().managedLibrary(wide(row.path))&&!std::filesystem::exists(wide(row.path));}),roster.entries.end());
@@ -157,8 +157,16 @@ struct Scene {
         historyFile=first->storage()/L"characters.json";
         bool historyLoaded=false;
         if(!review){try{roster.load(historyFile);historyLoaded=std::filesystem::exists(historyFile);}catch(const std::exception& e){error=std::string("角色历史读取失败：")+e.what();}}
-        if(!review){try{first->modelStorageSettings->recover(roster,first->directory/L"models/Shiroko.glb");}catch(const std::exception& e){error=std::string("旧模型记录恢复失败：")+e.what();}}
-        if(!review){try{first->modelLibrary().ensureDirectory();}catch(const std::exception& e){error=std::string("无法创建模型保存目录，请在模型管理中更改位置：")+e.what();}}
+        if(!review){try{
+            const auto resource=first->bundledResource();auto& storage=*first->modelStorageSettings;
+            storage.recover(roster,resource);
+            const auto changes=storage.unify(roster,resource,storage.current);
+            bool remapped=false;for(const auto& change:changes)if(NativeModelStorage::same(first->model,change.source)){first->model=change.file;remapped=true;break;}
+            if(!remapped){
+                if(!first->modelSpecified&&storage.bundled(first->model,resource))first->model=storage.bundledModel;
+                else if(std::filesystem::is_regular_file(first->model))first->model=first->modelLibrary().copyToLibrary(first->model);
+            }
+        }catch(const std::exception& e){error=std::string("模型目录统一失败，原模型保留：")+e.what();}}
         for(auto& e:roster.entries)if(e.active&&!std::filesystem::is_regular_file(wide(e.path)))e.active=false;
         const bool background=!review&&!first->modelSpecified&&(historyLoaded||!roster.entries.empty())&&!roster.activeCount();
         bool explicitAccepted=false;
@@ -254,6 +262,21 @@ struct Scene {
         }
         sync();
     }
+    void changeModelsFolder(const std::filesystem::path& folder){
+        save();auto& storage=*leader().modelStorageSettings;
+        const auto changes=storage.unify(roster,leader().bundledResource(),folder);
+        std::vector<std::string> mapped;
+        for(auto& actor:actors){
+            for(const auto& change:changes)if(actor->actorId==change.oldId){
+                actor->actorId=change.id;actor->model=change.file;if(actor->pendingImport)actor->pendingModel=change.file;break;
+            }
+            if(std::find(mapped.begin(),mapped.end(),actor->actorId)!=mapped.end()){
+                actor->displayed=false;actor->pendingImport=false;actor->releaseMouse();actor->actorId.clear();
+                ShowWindow(actor->window,SW_HIDE);ShowWindow(actor->inputWindow,SW_HIDE);
+            }else mapped.push_back(actor->actorId);
+        }
+        error.clear();importNotice="全部模型已统一保存到所选目录（含白子），原文件保留。";refreshModels();save();sync();
+    }
     void message(const Json& j){
         const auto type=j.value("type",std::string{});
         if(type!="import"&&type!="refresh_models")importNotice.clear();
@@ -264,7 +287,7 @@ struct Scene {
             try{
                 auto& storage=*leader().modelStorageSettings;
                 const auto folder=type=="reset_models_folder"?std::optional<std::filesystem::path>(storage.defaultDirectory()):NativeModelStorage::choose(leader().nativeSettings->dialogOwner(),storage.current);
-                if(!folder)return;storage.change(*folder);error.clear();refreshModels();sync();
+                if(!folder)return;changeModelsFolder(*folder);
             }catch(const std::exception& failure){error=failure.what();sync();}return;
         }
         if(type=="model_locate"){

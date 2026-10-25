@@ -1,16 +1,20 @@
-param([int]$Jobs=4,[switch]$SkipBuild,[string]$RootExecutablePath)
+param([int]$Jobs=4,[switch]$SkipBuild,[string]$RootExecutablePath,[string]$BinaryDirectory,
+    [ValidatePattern('^[A-Za-z0-9_-]+$')][string]$CoreExecutableName='ba_cafe_lite_native_release')
 $ErrorActionPreference='Stop'
 $root=$PSScriptRoot
 $project=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'CMakeLists.txt') -Raw
 if($project -notmatch 'project\(ba_cafe_lite_native VERSION (\d+\.\d+\.\d+)'){throw 'Cannot read native release version'}
 $version=$Matches[1]
-$base=Join-Path $PSScriptRoot 'build/bin'
+$base=if($BinaryDirectory){[IO.Path]::GetFullPath($BinaryDirectory)}else{Join-Path $PSScriptRoot 'build/bin'}
 $dist=Join-Path $root 'dist'
 $output=Join-Path $dist ('BA-Cafe-Pets-'+$version+'-x64.exe')
 $zip=Join-Path $dist ('BA-Cafe-Pets-'+$version+'-portable-x64.zip')
 if((Test-Path -LiteralPath $output) -or (Test-Path -LiteralPath $zip)){throw 'Release already exists; increment the native CMake project version first'}
-if(!$SkipBuild){& (Join-Path $PSScriptRoot 'build.ps1') -Jobs $Jobs -ExecutableName ba_cafe_lite_native_release -Release}
-$core=Join-Path $base 'ba_cafe_lite_native_release.exe'
+if(!$SkipBuild){
+    if($BinaryDirectory){throw 'Use -SkipBuild with -BinaryDirectory after building the selected configuration'}
+    & (Join-Path $PSScriptRoot 'build.ps1') -Jobs $Jobs -ExecutableName $CoreExecutableName -Release
+}
+$core=Join-Path $base ($CoreExecutableName+'.exe')
 $launcher=Join-Path $base 'ba_cafe_lite_release_launcher.exe'
 foreach($binary in @($core,$launcher)){
     $info=(Get-Item -LiteralPath $binary).VersionInfo
@@ -20,7 +24,7 @@ $work=Join-Path $root ('artifacts/native-release-'+$version+'/'+[guid]::NewGuid(
 $stage=Join-Path $work 'stage'
 New-Item -ItemType Directory -Force -Path $stage,$dist | Out-Null
 Copy-Item -LiteralPath $core -Destination (Join-Path $stage 'BA-Cafe-Pets.exe')
-$allowed=@('models/Shiroko.glb','defaults.ini','behavior/template.bt.xml','behavior/battle-mode.drawio','behavior/battle-mode.mmd',
+$allowed=@('model/Shiroko.glb','defaults.ini','behavior/template.bt.xml','behavior/battle-mode.drawio','behavior/battle-mode.mmd',
     'README.txt','README.md','CHANGELOG.md','CREDITS.md','NOTICE.md','LICENSE.md','docs/LICENSE-SCOPE.md','docs/DEVELOPMENT.md','licenses/GPL-3.0-only.txt','licenses/NOTICE.txt','licenses/raylib.txt','licenses/GLFW.txt','licenses/cgltf.txt',
     'licenses/BehaviorTree.CPP.txt','licenses/tinyxml2.txt','licenses/minitrace.txt','licenses/minicoro.txt','licenses/lexy.txt',
     'licenses/GCC-GPL3.txt','licenses/GCC-runtime-exception.txt')

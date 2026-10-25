@@ -127,7 +127,9 @@ void NativeRenderer::render(HWND display,HWND input,bool screenshot,const std::f
  rlSetBlendFactorsSeparate(0x0302,0x0303,1,0x0303,0x8006,0x8006);BeginBlendMode(BLEND_CUSTOM_SEPARATE);
  const float outline=0.002f*std::tan(camera.fovy*DEG2RAD*0.5f)/std::tan(35*DEG2RAD*0.5f)*480/desktop[1].get<float>()*line/100;
  if(mode==2){SetShaderValue(hull,hullWidthLocation,&outline,SHADER_UNIFORM_FLOAT);rlEnableBackfaceCulling();rlSetCullFace(RL_CULL_FACE_FRONT);
-  for(const auto& part:model->parts){bool show=true;for(int i=part->node;i>=0;i=model->nodes[i].parent)show&=model->nodes[i].visible;if(!show||part->transparent)continue;auto material=part->material;material.shader=hull;DrawMesh(part->mesh,material,pose);}rlSetCullFace(RL_CULL_FACE_BACK);
+  // A hidden Morph still has its original normals: inflating its collapsed
+  // vertices would resurrect it as a black line, especially with mixed bones.
+  for(const auto& part:model->parts){bool show=true;for(int i=part->node;i>=0;i=model->nodes[i].parent)show&=model->nodes[i].visible;if(!show||part->transparent||part->outlineCollapsed)continue;auto material=part->material;material.shader=hull;DrawMesh(part->mesh,material,pose);}rlSetCullFace(RL_CULL_FACE_BACK);
  }
  auto draw=[&](const auto& part){bool show=true;for(int i=part->node;i>=0;i=model->nodes[i].parent)show&=model->nodes[i].visible;if(!show)return;auto material=part->material;material.shader=unlit;const int alpha=part->transparent?2:part->alphaCutoff>=0?1:0;
   SetShaderValue(unlit,factorLocation,part->factor.data(),SHADER_UNIFORM_VEC4);SetShaderValue(unlit,alphaLocation,&alpha,SHADER_UNIFORM_INT);SetShaderValue(unlit,cutoffLocation,&part->alphaCutoff,SHADER_UNIFORM_FLOAT);

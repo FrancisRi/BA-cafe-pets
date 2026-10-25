@@ -20,7 +20,7 @@ int wmain(int argc,wchar_t** argv){try{
     const auto root=std::filesystem::path(__FILE__).parent_path().parent_path(),profile=std::filesystem::absolute(argv[1]);
     check(!std::filesystem::exists(profile),"Never use an existing user profile for drag tests");std::filesystem::create_directories(profile);
     GraphicsContext graphics;auto first=std::make_unique<App>();
-    first->directory=root/L"build/bin";first->programDirectory=profile;first->dataDirectory=profile;first->dataDirectorySpecified=true;
+    first->directory=std::filesystem::is_regular_file(root/L"build/bin/behavior/template.bt.xml")?root/L"build/bin":root/L"build/bin/Release";first->programDirectory=profile;first->dataDirectory=profile;first->dataDirectorySpecified=true;
     first->model=argc>2?std::filesystem::absolute(argv[2]):root/L"assets/Shiroko.glb";first->modelSpecified=true;first->initialMode=argc>3?utf8(argv[3]):"cafe";first->review=true;first->diagnostics=false;
     first->idleInputSeconds=[] {return 0.0;};
     Scene scene(std::move(first));auto& a=scene.leader();

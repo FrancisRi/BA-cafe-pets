@@ -130,7 +130,7 @@ struct NativeSettings {
             auto refresh=control(panel,L"BUTTON",L"刷新模型库",BS_OWNERDRAW,2106,212,y,132,36);placeContent(refresh,212,y,132,36);y+=48;
             auto change=control(panel,L"BUTTON",L"更改保存位置…",BS_OWNERDRAW,2107,16,y,184,36);placeContent(change,16,y,184,36);
             auto reset=control(panel,L"BUTTON",L"恢复默认位置",BS_OWNERDRAW,2108,212,y,162,36);placeContent(reset,212,y,162,36);y+=48;
-            note(L"默认保存在程序旁的 model 文件夹；更改仅影响后续导入，原有模型仍可使用和管理。",40);
+            note(L"所有模型（含白子）统一保存在 model 文件夹；更改目录会复制并校验全部模型，原文件保留。",40);
             auto folderPath=control(panel,L"STATIC",L"",SS_PATHELLIPSIS,2110,16,y,panelWidth(),24);SendMessageW(folderPath,WM_SETFONT,reinterpret_cast<WPARAM>(ui.small),FALSE);SetPropW(folderPath,L"FluentMuted",reinterpret_cast<HANDLE>(1));placeContent(folderPath,16,y,0,24,true);y+=40;
             section(L"已导入的模型");note(L"勾选显示角色；右键模型可切换、定位或删除。模型库与本地文件同步，同时显示最多 5 个。",40);
             const int rosterHeight=last.value("characters",Json::array()).empty()?128:std::min(4,int(last["characters"].size()))*64;

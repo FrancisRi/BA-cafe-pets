@@ -34,6 +34,7 @@ Git 的新增行和提交作者记录用于追溯，不单独证明某行的版�
 引用或调用的上游／第三方实现，以及任何沿用材料，均不由本声明重新授权。
 
 - `native_antialias.h`
+- `morph_outline.h`
 - `native_fluent.h`
 - `native_model_import.h`
 - `native_model_library.h`
@@ -44,6 +45,8 @@ Git 的新增行和提交作者记录用于追溯，不单独证明某行的版�
 - `tests/model_import_tests.cpp`
 - `tests/model_library_tests.cpp`
 - `tests/model_storage_tests.cpp`
+- `tests/morph_outline_tests.cpp`
+- `tests/native_model_unification_tests.cpp`
 - `tests/native_drag_follow_tests.cpp`
 - `tests/native_ui_tests.cpp`
 - `tests/tray_background_regressions.py`

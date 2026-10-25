@@ -1,5 +1,6 @@
 #include "gltf_model.h"
 #include "animation_keys.h"
+#include "morph_outline.h"
 #include "rlgl.h"
 #include <algorithm>
 #include <bit>
@@ -172,6 +173,7 @@ GltfModel::GltfModel(const std::filesystem::path& file,const std::function<void(
      }
     }
     for(size_t k=0;k<p.targets_count;k++){const auto& target=p.targets[k];const cgltf_accessor* pos=nullptr;const cgltf_accessor* normal=nullptr;for(size_t a=0;a<target.attributes_count;a++){if(target.attributes[a].type==cgltf_attribute_type_position)pos=target.attributes[a].data;else if(target.attributes[a].type==cgltf_attribute_type_normal)normal=target.attributes[a].data;}part->morphPositions.push_back(vectors(pos,count));part->morphNormals.push_back(vectors(normal,count));}
+    part->collapsedOutlineMorphs=collapsedOutlineTargets(part->positions,part->morphPositions,part->source);
     auto& mesh=part->mesh;mesh.vertexCount=int(part->source.size());mesh.triangleCount=int(indices.size()/3);mesh.vertices=static_cast<float*>(MemAlloc(mesh.vertexCount*3*sizeof(float)));mesh.normals=static_cast<float*>(MemAlloc(mesh.vertexCount*3*sizeof(float)));mesh.texcoords=static_cast<float*>(MemAlloc(mesh.vertexCount*2*sizeof(float)));mesh.colors=static_cast<unsigned char*>(MemAlloc(mesh.vertexCount*4));if(!mesh.vertices||!mesh.normals||!mesh.texcoords||!mesh.colors)throw std::bad_alloc();
     const cgltf_texture_view* view=nullptr;if(p.material){const auto& m=*p.material;part->transparent=m.alpha_mode==cgltf_alpha_mode_blend;part->doubleSided=m.double_sided;part->alphaCutoff=m.alpha_mode==cgltf_alpha_mode_mask?m.alpha_cutoff:-1;if(m.has_pbr_metallic_roughness){std::copy_n(m.pbr_metallic_roughness.base_color_factor,4,part->factor.data());view=&m.pbr_metallic_roughness.base_color_texture;}else if(m.has_pbr_specular_glossiness){std::copy_n(m.pbr_specular_glossiness.diffuse_factor,4,part->factor.data());view=&m.pbr_specular_glossiness.diffuse_texture;}}
     if(view&&view->texture)part->material.maps[MATERIAL_MAP_DIFFUSE].texture=textures[view->texture-raw->textures];
@@ -285,6 +287,7 @@ void GltfModel::updateGeometry(bool upload){
   if(!p.morphPositions.empty())dirty|=p.lastMorphWeights!=n.current.weights;
   if(p.skin>=0)for(size_t j=0;j<p.usedJoints.size();j++)dirty|=p.jointVersions[j]!=skins[p.skin].versions[p.usedJoints[j]];
   if(dirty){++updatedParts;p.posedBounds={{INFINITY,INFINITY,INFINITY},{-INFINITY,-INFINITY,-INFINITY}};
+   p.outlineCollapsed=morphOutlineCollapsed(p.collapsedOutlineMorphs,p.morphPositions.size(),n.current.weights);
    if(p.sharedInfluences)for(auto& group:p.influenceGroups){group.transform={};if(!group.count)group.transform=n.world;else for(unsigned j=0;j<group.count;j++){const auto& bone=skins[p.skin].palette[group.joints[j]];for(int k=0;k<16;k++)group.transform[k]+=bone[k]*group.weights[j];}}
    for(size_t i=0;i<p.source.size();i++){auto v=Vector3Scale(Vector3Add(point(p,p.source[i],false,false,true),origin),fit);p.posedBounds.min=Vector3Min(p.posedBounds.min,v);p.posedBounds.max=Vector3Max(p.posedBounds.max,v);const auto normal=point(p,p.source[i],true,true,true);std::memcpy(p.mesh.vertices+i*3,&v,3*sizeof(float));std::memcpy(p.mesh.normals+i*3,&normal,3*sizeof(float));}
    p.nodeVersion=n.worldVersion;p.geometryFit=fit;p.geometryOrigin=origin;p.lastMorphWeights=n.current.weights;p.geometryReady=true;p.needsUpload=true;

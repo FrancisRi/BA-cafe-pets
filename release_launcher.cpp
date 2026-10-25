@@ -102,7 +102,7 @@ static LRESULT CALLBACK progressProc(HWND h,UINT m,WPARAM w,LPARAM l){
 }
 static void prepare(Context& ctx){
     std::ifstream marker(ctx.cache/L".ready");std::string ready;marker>>ready;
-    if(ready==hex(ctx.footer.sha,32)&&fs::is_regular_file(ctx.cache/L"BA-Cafe-Pets.exe")&&fs::is_regular_file(ctx.cache/L"behavior/template.bt.xml")&&fs::is_regular_file(ctx.cache/L"defaults.ini")&&fs::is_regular_file(ctx.cache/L"models/Shiroko.glb"))return;
+    if(ready==hex(ctx.footer.sha,32)&&fs::is_regular_file(ctx.cache/L"BA-Cafe-Pets.exe")&&fs::is_regular_file(ctx.cache/L"behavior/template.bt.xml")&&fs::is_regular_file(ctx.cache/L"defaults.ini")&&(fs::is_regular_file(ctx.cache/L"model/Shiroko.glb")||fs::is_regular_file(ctx.cache/L"models/Shiroko.glb")))return;
     progressContext=&ctx;WNDCLASSW wc{};wc.lpfnWndProc=progressProc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"BaCafeNativeReleaseProgress";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hbrBackground=reinterpret_cast<HBRUSH>(COLOR_WINDOW+1);RegisterClassW(&wc);
     HWND window=CreateWindowExW(WS_EX_APPWINDOW,wc.lpszClassName,L"BA Cafe Pets",WS_CAPTION|WS_SYSMENU,GetSystemMetrics(SM_CXSCREEN)/2-240,GetSystemMetrics(SM_CYSCREEN)/2-80,480,160,nullptr,nullptr,wc.hInstance,nullptr);
     label=CreateWindowExW(0,L"STATIC",L"正在准备离线资源…",WS_CHILD|WS_VISIBLE,22,22,420,28,window,nullptr,wc.hInstance,nullptr);

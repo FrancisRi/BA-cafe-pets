@@ -106,7 +106,8 @@ assert {'CompatibilityModel0','CompatibilityModel1','FormerDefault'}<=set(found)
 assert found['CompatibilityModel0']['active'] and found['CompatibilityModel0']['mode']=='battle'
 assert abs(found['CompatibilityModel0']['zoom']-0.87)<0.001
 assert (program/'model').is_dir(), 'Create the model folder beside the real EXE, outside its extraction cache'
-assert Path(found['FormerDefault']['path'])==former and former.is_file(), 'Continue managing GLBs from the former EXE-directory default'
+assert Path(found['FormerDefault']['path']).parent==program/'model' and former.is_file(), 'Unify former EXE-directory GLBs while preserving the original'
+assert all(Path(row['path']).parent==program/'model' for row in current['characters']), 'All runtime model paths, including Shiroko, use the real EXE model folder'
 assert (legacy/'characters.json').read_bytes()==legacy_bytes
 assert all(Path(row['path']).is_file() for row in rows)
 print('Legacy developer models recovered by standalone launcher, with mode/visibility/zoom and original files preserved.')

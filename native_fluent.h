@@ -9,6 +9,11 @@
 #include <string>
 #include <vector>
 
+// The Windows SDK's RPC headers define `small` as a macro under MSVC.
+#ifdef small
+#undef small
+#endif
+
 // Shared Fluent styling for real Win32 controls. DWM owns the window frame,
 // shadow and rounded corners; unsupported material attributes simply fall back.
 struct NativeFluent {

@@ -27,6 +27,8 @@ int main(int argc,char** argv){
         {std::ofstream out(library.directory/L"notes.txt");out<<"not a model";}
         const auto inventory=library.files();check(std::find(inventory.begin(),inventory.end(),manual)!=inventory.end(),"Model inventory discovers files that have no import history");
         check(std::find(inventory.begin(),inventory.end(),nested)==inventory.end(),"Inventory only manages files directly inside the library");
+        const auto manualDownload=scratch/L"downloads/ManualAlias.glb";model(manualDownload,"manual file");
+        check(library.store(manualDownload)==manual,"Imports reuse matching plain filenames, including the bundled Shiroko copy");
         check(NativeModelLibrary::displayName(third)==L"renamed","Inventory hides managed content suffixes");
         check(library.owns(manual)&&!library.owns(source)&&!library.owns(nested),"Ownership is limited to GLB files inside the model library");
         fails([&]{library.recycle(source);},"External original files cannot be deleted");

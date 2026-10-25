@@ -22,6 +22,7 @@ struct DrawPart {
     int node=-1,skin=-1;std::string name;Mesh mesh{};Material material{};
     std::vector<Vector3> positions,normals,smoothNormals;
     std::vector<std::vector<Vector3>> morphPositions,morphNormals;
+    std::vector<unsigned> collapsedOutlineMorphs;bool outlineCollapsed=false;
     std::vector<std::array<unsigned,8>> joints;
     std::vector<std::array<float,8>> weights;
     std::vector<unsigned char> influenceCounts;

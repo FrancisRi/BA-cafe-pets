@@ -87,8 +87,12 @@ struct App {
     NativeSession session;std::function<void()> sessionChanged;
     std::filesystem::path storage() const {return dataDirectory.empty()?directory:dataDirectory;}
     NativeModelLibrary modelLibrary() const {return NativeModelLibrary(modelStorageSettings->current);}
+    std::filesystem::path bundledResource() const {
+        const auto file=directory/L"model/Shiroko.glb";
+        return std::filesystem::is_regular_file(file)?file:directory/L"models/Shiroko.glb";
+    }
     std::optional<NativeModelLibrary> managedLibrary(const std::filesystem::path& file) const {
-        if(modelStorageSettings->bundled(file,directory/L"models/Shiroko.glb"))return {};
+        if(modelStorageSettings->bundled(file,bundledResource()))return {};
         for(const auto& folder:modelStorageSettings->directories()){NativeModelLibrary library(folder);if(library.owns(file))return library;}return {};
     }
     void openModelsFolder(){
@@ -905,7 +909,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         wchar_t dataRoot[32768]{};if(GetEnvironmentVariableW(L"BA_NATIVE_DATA_DIR",dataRoot,32768)>0)app.dataDirectory=std::filesystem::absolute(dataRoot);
         if(app.dataDirectory.empty())app.dataDirectory=app.directory/L"data";
         wchar_t programRoot[32768]{};if(GetEnvironmentVariableW(L"BA_NATIVE_PROGRAM_DIR",programRoot,32768)>0)app.programDirectory=std::filesystem::absolute(programRoot);else app.programDirectory=app.directory;
-        app.model=app.directory/L"models/Shiroko.glb";
+        app.model=app.bundledResource();
         wchar_t saved[32768]{};GetPrivateProfileStringW(L"Model",L"Path",L"",saved,32768,(app.storage()/L"active-model.ini").c_str());
         if(*saved&&std::filesystem::is_regular_file(saved))app.model=saved;
         int argc=0;auto** argv=CommandLineToArgvW(GetCommandLineW(),&argc);

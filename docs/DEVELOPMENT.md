@@ -58,6 +58,17 @@ cmake --build build --target ba_cafe_lite_ui_tests ba_cafe_lite_model_library_te
 ./build/ba_cafe_lite_antialias_tests.exe
 ```
 
+Morph 描边回归验证收缩隐藏、共享顶点访问器、普通表情、混合目标和动作过渡的区分：
+
+```powershell
+cmake --build build --target ba_cafe_lite_morph_outline_tests
+./build/ba_cafe_lite_morph_outline_tests.exe
+```
+
+可追加一个或多个只读 GLB 路径，使用真实加载与 CPU 几何缓存路径检查隐藏、过渡和恢复；带模型时仅创建隐藏 OpenGL 窗口，不读取或保存用户设置。
+
+使用 Visual Studio 等多配置生成器时，构建命令加 `--config Release`，测试程序位于 `build/Release/`，应用位于 `build/bin/Release/`。实际模型画面应额外检查 Ibuki、Reisa 的 `Formation_Pickup` 表情切换前后；可用 `--clip Formation_Pickup --sample 4 --snapshot <输出.png>` 固定动画帧，并使用独立的 `--data-dir`。
+
 拖动回归使用真实角色、Win32 拖动消息及模拟鼠标位置，检查逻辑位移、实际渲染窗口位移和视线恢复。窗口保持隐藏，不移动用户鼠标。测试资料路径必须不存在；可依次附加只读模型路径、`cafe`／`battle`、缩放值，例如模型路径后使用 `cafe 1.24`。额外模型不会复制进发行包。
 
 模型库测试会创建文件并测试回收站删除，参数必须是尚不存在的独立测试目录：
@@ -66,15 +77,19 @@ cmake --build build --target ba_cafe_lite_ui_tests ba_cafe_lite_model_library_te
 $scratch = Join-Path $PWD ('artifacts/model-library-' + [guid]::NewGuid().ToString('N'))
 ./build/ba_cafe_lite_model_library_tests.exe $scratch
 ./build/ba_cafe_lite_model_storage_tests.exe (Join-Path $PWD ('artifacts/model-storage-' + [guid]::NewGuid().ToString('N')))
+cmake --build build --target ba_cafe_lite_model_unification_tests
+./build/ba_cafe_lite_model_unification_tests.exe (Join-Path $PWD ('artifacts/model-unification-' + [guid]::NewGuid().ToString('N')))
 ```
+
+统一模型目录测试覆盖自带白子、旧目录发现、重名冲突、隐藏角色、选中状态／模式／大小、重启、防止旧副本重新出现和保存失败回退。原生场景测试使用真实 GLB、独立资料及隐藏窗口，检查迁移发生在模型加载前后时演员路径与记录同步；原始模型和旧副本保持不变。
 
 打包后可用 Windows 桌面验证单文件启动器的旧记录恢复。脚本将 EXE、模型与数据复制到独立测试目录，不改动实际用户资料：
 
 ```powershell
-python tests/launcher_storage_compatibility.py ./dist/BA-Cafe-Pets-1.1.3-x64.exe
-python tests/tray_integration.py ./dist/BA-Cafe-Pets-1.1.3-portable-x64.zip
-python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.3-portable-x64.zip
-python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.3-x64.exe
+python tests/launcher_storage_compatibility.py ./dist/BA-Cafe-Pets-1.1.4-x64.exe
+python tests/tray_integration.py ./dist/BA-Cafe-Pets-1.1.4-portable-x64.zip
+python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.4-portable-x64.zip
+python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.4-x64.exe
 ```
 
 界面回归检查使用隔离 Windows 桌面，不把模拟模型写入实际用户数据。测试还比较滚动后的实际窗口像素与完整重绘结果，并核对滑块普通绘制和合成绘制一致；覆盖浅色／深色主题及 100%／150%／200% DPI，同时验证滑块拖动和键盘操作。
@@ -108,6 +123,13 @@ pwsh -File ./package.ps1
 ```
 
 脚本生成 `BA-Cafe-Pets-版本号-x64.exe`、便携 ZIP、SHA-256 校验文件及发行清单，输出到 `dist/`，同时生成根目录的 `BA-Cafe-Pets.exe`。只打包默认模型、程序资源和许可文件，不打包本地 `data/` 或额外模型。
+
+使用 Visual Studio / MSVC 已构建的 Release 配置时，可直接指定二进制目录与内核名称，无需安装 MinGW：
+
+```powershell
+cmake --build build --config Release --target ba_cafe_lite_native ba_cafe_lite_release_launcher
+pwsh -File ./package.ps1 -SkipBuild -BinaryDirectory ./build/bin/Release -CoreExecutableName BA-Cafe-Pets
+```
 
 两个发行包均附 `LICENSE.md`、`docs/LICENSE-SCOPE.md` 和 `licenses/GPL-3.0-only.txt`。GPL-3.0-only 仅为 FrancisRi 自有原创新增及修改的授权；不得因此将上游整份代码标记为 GPL。分发者仍须满足 GPL 对相应作品的适用要求，并取得其他必要授权。发布时应提供实际发行对应的完整提交或源码归档，包含构建脚本、接口和必要来源；不要只指向持续变化的默认分支。
 

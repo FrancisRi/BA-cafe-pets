@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include "native_model_library.h"
 
 // The launcher supplies the directory of the user's EXE, not its extraction
 // cache. Configuration remains with user data; old libraries remain managed.
@@ -16,7 +17,8 @@ struct NativeModelStorage {
     using Path=std::filesystem::path;
     using Json=nlohmann::json;
     Path programDirectory,configuration,dataDirectory,current;
-    bool discoverLegacy=true;
+    Path bundledModel;
+    bool discoverLegacy=true,unifiedLayout=false;
     std::vector<Path> previous,recoveredProfiles;
     static std::string utf8(const std::wstring& text){const int n=WideCharToMultiByte(CP_UTF8,0,text.data(),int(text.size()),nullptr,0,nullptr,nullptr);std::string result(n,' ');if(n)WideCharToMultiByte(CP_UTF8,0,text.data(),int(text.size()),result.data(),n,nullptr,nullptr);return result;}
     static std::wstring wide(const std::string& text){const int n=MultiByteToWideChar(CP_UTF8,0,text.data(),int(text.size()),nullptr,0);std::wstring result(n,L' ');if(n)MultiByteToWideChar(CP_UTF8,0,text.data(),int(text.size()),result.data(),n);return result;}
@@ -28,6 +30,8 @@ struct NativeModelStorage {
         if(!std::filesystem::exists(configuration))return;
         std::ifstream input(configuration);const auto value=Json::parse(input);
         const auto saved=value.value("directory",std::string{});if(!saved.empty())current=resolve(saved);
+        unifiedLayout=value.value("unifiedLayout",false);
+        const auto bundled=value.value("bundledModel",std::string{});if(!bundled.empty())bundledModel=resolve(bundled);
         for(const auto& item:value.value("previousDirectories",Json::array()))append(previous,resolve(item.get<std::string>()));
         for(const auto& item:value.value("recoveredProfiles",Json::array()))append(recoveredProfiles,resolve(item.get<std::string>()));
     }
@@ -42,7 +46,7 @@ struct NativeModelStorage {
         std::vector<Path> result;append(result,programDirectory/L"data");append(result,programDirectory/L"build/bin/data");return result;
     }
     std::vector<Path> directories() const {
-        std::vector<Path> result;append(result,current);append(result,programDirectory);append(result,dataDirectory/L"models");
+        std::vector<Path> result;append(result,current);append(result,defaultDirectory());append(result,programDirectory);append(result,programDirectory/L"models");append(result,dataDirectory/L"models");
         for(const auto& path:legacyDataDirectories())append(result,path/L"models");
         for(const auto& path:previous)append(result,path);return result;
     }
@@ -52,9 +56,9 @@ struct NativeModelStorage {
         const auto handle=CreateFileW(probe.c_str(),GENERIC_WRITE,FILE_SHARE_READ|FILE_SHARE_DELETE,nullptr,CREATE_NEW,FILE_ATTRIBUTE_TEMPORARY|FILE_FLAG_DELETE_ON_CLOSE,nullptr);
         if(handle==INVALID_HANDLE_VALUE)throw std::runtime_error("所选文件夹无法写入，请选择可保存模型的位置");CloseHandle(handle);
     }
-    void persist(const Path& destination,const std::vector<Path>& history,const std::vector<Path>& recovered) const {
+    void persist(const Path& destination,const std::vector<Path>& history,const std::vector<Path>& recovered,const Path& bundled={},bool unified=false) const {
         Json paths=Json::array(),profiles=Json::array();for(const auto& path:history)paths.push_back(encode(path));for(const auto& path:recovered)profiles.push_back(encode(path));
-        const Json value={{"directory",same(destination,defaultDirectory())?std::string{}:encode(destination)},{"previousDirectories",paths},{"recoveredProfiles",profiles}};
+        const Json value={{"directory",same(destination,defaultDirectory())?std::string{}:encode(destination)},{"previousDirectories",paths},{"recoveredProfiles",profiles},{"bundledModel",bundled.empty()?std::string{}:encode(bundled)},{"unifiedLayout",unified}};
         std::filesystem::create_directories(dataDirectory);const auto temporary=configuration.wstring()+L".tmp";
         try{
             {std::ofstream output(Path(temporary),std::ios::binary);output<<value.dump(2);if(!output)throw std::runtime_error("无法保存模型目录设置");}
@@ -63,7 +67,7 @@ struct NativeModelStorage {
     }
     void change(const Path& folder){
         const auto destination=absolute(folder);writable(destination);if(same(destination,current))return;
-        auto history=previous;append(history,current);persist(destination,history,recoveredProfiles);
+        auto history=previous;append(history,current);persist(destination,history,recoveredProfiles,bundledModel,unifiedLayout);
         current=destination;previous=std::move(history);
     }
     static std::optional<Path> choose(HWND owner,const Path& initial){
@@ -82,8 +86,12 @@ struct NativeModelStorage {
         const Path result(name);CoTaskMemFree(name);return result;
     }
     bool bundled(const Path& file,const Path& resource) const {
+        if(!bundledModel.empty()&&same(file,bundledModel))return true;
         if(same(file,resource))return true;
-        if(file.filename()!=L"Shiroko.glb"||file.parent_path().filename()!=L"models")return false;
+        if(file.filename()!=L"Shiroko.glb"||(file.parent_path().filename()!=L"models"&&file.parent_path().filename()!=L"model"))return false;
+        // An upgraded portable/build directory can retain the former seed next
+        // to the new model/ layout. It is a seed backup, not another user entry.
+        if(same(file,programDirectory/L"models/Shiroko.glb")||same(file,resource.parent_path().parent_path()/L"models/Shiroko.glb"))return true;
         if(same(file.parent_path().parent_path().parent_path(),dataDirectory.parent_path()/L"app"))return true;
         for(const auto& data:legacyDataDirectories())if(same(file,data.parent_path()/L"models/Shiroko.glb"))return true;
         return false;
@@ -92,7 +100,7 @@ struct NativeModelStorage {
         bool changed=false;
         auto recovered=recoveredProfiles;
         // Normalize old bundled-model cache references across launcher upgrades.
-        for(auto& row:roster.entries)if(bundled(Path(wide(row.path)),resource)&&!same(Path(wide(row.path)),resource)){
+        for(auto& row:roster.entries)if(!unifiedLayout&&bundled(Path(wide(row.path)),resource)&&!same(Path(wide(row.path)),resource)){
             const auto old=row.id;row.id=Roster::key(resource);row.path=utf8(resource.wstring());if(roster.selected==old)roster.selected=row.id;changed=true;
         }
         bool hasUser=std::any_of(roster.entries.begin(),roster.entries.end(),[&](const auto& row){return !bundled(Path(wide(row.path)),resource)&&std::filesystem::is_regular_file(Path(wide(row.path)));});
@@ -115,7 +123,55 @@ struct NativeModelStorage {
             const auto backup=dataDirectory/(L"characters.before-storage-"+std::to_wstring(GetTickCount64())+L".json");
             std::filesystem::copy_file(dataDirectory/L"characters.json",backup,std::filesystem::copy_options::none);
         }
-        if(recovered.size()!=recoveredProfiles.size()){persist(current,previous,recovered);recoveredProfiles=std::move(recovered);}
+        if(recovered.size()!=recoveredProfiles.size()){persist(current,previous,recovered,bundledModel,unifiedLayout);recoveredProfiles=std::move(recovered);}
         return changed;
+    }
+    struct Relocation {std::string oldId,id;Path source,file;};
+    template<class Roster> std::vector<Relocation> unify(Roster& roster,const Path& resource,const Path& folder){
+        const auto destination=absolute(folder);writable(destination);
+        NativeModelLibrary library(destination);
+        // Keep a distributable seed in the package; runtime records always use
+        // the configured library, including single-file launcher installations.
+        const auto seed=library.copyToLibrary(resource);
+        auto source=roster;
+        const auto discover=[&](const Path& directory){for(const auto& file:NativeModelLibrary(directory).files()){
+            if(same(file,resource)||same(file,seed)||bundled(file,resource))continue;
+            const auto id=Roster::key(file);if(!source.find(id))source.remember({id,utf8(file.wstring()),utf8(NativeModelLibrary::displayName(file)),"cafe",false});
+        }};
+        // Old copies are migration inputs once, never additional live libraries
+        // that can resurrect deleted models on the next refresh or restart.
+        if(!unifiedLayout)for(const auto& directory:directories())discover(directory);
+        else discover(current);
+        if(!same(destination,current))discover(destination);
+        auto updated=source;updated.entries.clear();updated.selected.clear();
+        std::vector<Relocation> changes;
+        for(auto row:source.entries){
+            const auto oldId=row.id;const Path original(wide(row.path));
+            if(bundled(original,resource))row.path=utf8(seed.wstring());
+            else if(std::filesystem::is_regular_file(original))row.path=utf8(library.copyToLibrary(original).wstring());
+            else throw std::runtime_error("无法统一模型目录，找不到模型文件："+utf8(original.wstring()));
+            const Path file(wide(row.path));row.id=Roster::key(file);
+            changes.push_back({oldId,row.id,original,file});
+            if(auto* existing=updated.find(row.id)){
+                const bool active=existing->active||row.active;
+                if(source.selected==oldId)*existing=row;
+                existing->active=active;
+            }else updated.remember(row);
+            if(source.selected==oldId)updated.selected=row.id;
+        }
+        const bool changed=updated.json()!=roster.json();
+        auto history=previous;if(!same(destination,current))append(history,current);
+        if(changed&&std::filesystem::is_regular_file(dataDirectory/L"characters.json")){
+            static std::atomic<unsigned long> serial{0};
+            const auto backup=dataDirectory/(L"characters.before-unified-"+std::to_wstring(GetTickCount64())+L"-"+std::to_wstring(++serial)+L".json");
+            std::filesystem::copy_file(dataDirectory/L"characters.json",backup,std::filesystem::copy_options::none);
+        }
+        if(changed||!unifiedLayout||!same(destination,current)||bundledModel.empty()||!same(seed,bundledModel)){
+            persist(destination,history,recoveredProfiles,seed,true);
+            try{if(changed)updated.save(dataDirectory/L"characters.json");}
+            catch(...){persist(current,previous,recoveredProfiles,bundledModel,unifiedLayout);throw;}
+        }
+        current=destination;previous=std::move(history);bundledModel=seed;unifiedLayout=true;roster=std::move(updated);
+        return changes;
     }
 };
