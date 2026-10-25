@@ -125,6 +125,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         ctx.cache=home/L"app"/widen(hex(ctx.footer.sha,16));prepare(ctx);
         const auto data=home/L"data";fs::create_directories(data);SetEnvironmentVariableW(L"BA_NATIVE_DATA_DIR",data.c_str());
         SetEnvironmentVariableW(L"BA_NATIVE_PROGRAM_DIR",ctx.self.parent_path().c_str());
+        SetEnvironmentVariableW(L"BA_NATIVE_LAUNCHER_PATH",ctx.self.c_str());
         int argc=0;auto** argv=CommandLineToArgvW(GetCommandLineW(),&argc);bool prepareOnly=false;
         const auto exe=ctx.cache/L"BA-Cafe-Pets.exe";auto command=quote(exe.wstring());
         for(int i=1;i<argc;++i){if(std::wcscmp(argv[i],L"--prepare-only")==0)prepareOnly=true;else command+=L" "+quote(argv[i]);}LocalFree(argv);

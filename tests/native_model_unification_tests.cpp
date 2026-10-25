@@ -21,8 +21,11 @@ int wmain(int argc,wchar_t** argv){try{
     original.remember({SceneRoster::key(firstFile),utf8(firstFile.wstring()),"First","cafe",true,1.1f});
     original.remember({SceneRoster::key(secondFile),utf8(secondFile.wstring()),"Second","battle",false,0.9f});
     original.selected=SceneRoster::key(firstFile);original.save(profile/L"characters.json");
+    const auto startupKey=L"Software\\BA-Cafe-Pets-Tests\\Host-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64());
+    struct RegistryCleanup {std::wstring key;~RegistryCleanup(){RegDeleteTreeW(HKEY_CURRENT_USER,key.c_str());RegDeleteKeyW(HKEY_CURRENT_USER,L"Software\\BA-Cafe-Pets-Tests");}} registryCleanup{startupKey};
+    auto startup=std::make_shared<NativeAutostart>(NativeAutostart::launchExecutable(),profile,startupKey);
     const auto app=[&]{auto a=std::make_unique<App>();a->directory=package;a->programDirectory=program;a->dataDirectory=profile;a->dataDirectorySpecified=true;
-        a->model=package/L"model/Shiroko.glb";a->modelStorageSettings=std::make_shared<NativeModelStorage>(program,profile,false);return a;};
+        a->model=package/L"model/Shiroko.glb";a->modelStorageSettings=std::make_shared<NativeModelStorage>(program,profile,false);a->autostartSettings=startup;return a;};
     const auto paths=[&](Scene& scene,const fs::path& folder){
         check(scene.error.empty(),scene.error.c_str());check(scene.roster.entries.size()==3,"Preserve all three model identities");
         for(const auto& row:scene.roster.entries)check(NativeModelStorage::same(fs::path(wide(row.path)).parent_path(),folder),"All runtime paths, including Shiroko, use one library");
@@ -35,6 +38,9 @@ int wmain(int argc,wchar_t** argv){try{
     {
         Scene scene(app());auto& a=scene.leader();ShowWindow(a.window,SW_HIDE);ShowWindow(a.inputWindow,SW_HIDE);
         paths(scene,program/L"model");check(a.pendingImport,"Exercise migration before the first model load");
+        scene.message({{"type","set_autostart"},{"enabled",true}});check(startup->enabled()&&scene.snapshot()["startup"]["enabled"]==true,"Host startup command and snapshot work before a model finishes loading");
+        scene.message({{"type","set_autostart"},{"enabled",false}});check(!startup->enabled(),"Host can disable startup independently of character preferences");
+        scene.message({{"type","set_autostart"},{"enabled","invalid"}});check(!scene.error.empty()&&!startup->enabled(),"Host rejects invalid startup commands without changing Windows state");scene.error.clear();
         const auto custom=root/L"全部 模型";scene.changeModelsFolder(custom);paths(scene,custom);
         check(a.pendingModel.parent_path()==custom&&a.actorId==scene.roster.selected,"Pending load and actor identity follow the migrated record");
         scene.tick();check(a.loaded,"Load the actual GLB after relocating its pending path");

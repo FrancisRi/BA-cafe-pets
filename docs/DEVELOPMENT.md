@@ -41,6 +41,16 @@ CMake 会下载并校验固定版本的 raylib 6.0 与 BehaviorTree.CPP 4.8.0。
 
 ## 回归检查
 
+开机自启与描边数值框的回归：
+
+```powershell
+cmake --build build --target ba_cafe_lite_autostart_tests ba_cafe_lite_ui_tests
+./build/ba_cafe_lite_autostart_tests.exe (Join-Path $PWD ('artifacts/autostart-' + [guid]::NewGuid().ToString('N')))
+./build/ba_cafe_lite_ui_tests.exe
+```
+
+自启测试将注册表操作限制在随机生成的 `HKCU/Software/BA-Cafe-Pets-Tests/` 测试键，结束后清除该键，不修改真实 `Run` 启动项。界面回归检查浅深主题与多 DPI、数值框的键盘／失焦行为、范围校验、滑块同步、绘制一致性及自启开关消息。主场景测试也使用注入的独立注册表服务。
+
 先完成应用构建，再构建测试目标：
 
 ```powershell
@@ -86,10 +96,10 @@ cmake --build build --target ba_cafe_lite_model_unification_tests
 打包后可用 Windows 桌面验证单文件启动器的旧记录恢复。脚本将 EXE、模型与数据复制到独立测试目录，不改动实际用户资料：
 
 ```powershell
-python tests/launcher_storage_compatibility.py ./dist/BA-Cafe-Pets-1.1.4-x64.exe
-python tests/tray_integration.py ./dist/BA-Cafe-Pets-1.1.4-portable-x64.zip
-python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.4-portable-x64.zip
-python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.4-x64.exe
+python tests/launcher_storage_compatibility.py ./dist/BA-Cafe-Pets-1.1.5-x64.exe
+python tests/tray_integration.py ./dist/BA-Cafe-Pets-1.1.5-portable-x64.zip
+python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.5-portable-x64.zip
+python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.5-x64.exe
 ```
 
 界面回归检查使用隔离 Windows 桌面，不把模拟模型写入实际用户数据。测试还比较滚动后的实际窗口像素与完整重绘结果，并核对滑块普通绘制和合成绘制一致；覆盖浅色／深色主题及 100%／150%／200% DPI，同时验证滑块拖动和键盘操作。

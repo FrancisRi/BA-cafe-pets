@@ -11,6 +11,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <set>
 using Json=nlohmann::json;
 std::wstring wide(const std::string& text){const int count=MultiByteToWideChar(CP_UTF8,0,text.data(),int(text.size()),nullptr,0);std::wstring out(count,L' ');MultiByteToWideChar(CP_UTF8,0,text.data(),int(text.size()),out.data(),count);return out;}
 #include "native_preferences.h"
@@ -51,6 +52,10 @@ static void checkRepainting(NativeSettings& menu){
         const auto slider=GetDlgItem(menu.panel,103);ControlPixels track(slider);
         const auto live=track.read(),printed=track.read(true);
         check(live==printed,"Slider must use the same Fluent drawing for normal and composited repainting");
+        RECT thumb{};SendMessageW(slider,TBM_GETTHUMBRECT,0,reinterpret_cast<LPARAM>(&thumb));
+        std::set<unsigned> shades;const int cx=(thumb.left+thumb.right)/2,cy=track.height/2,radius=menu.u(11);
+        for(int py=std::max(0,cy-radius);py<std::min(track.height,cy+radius);++py)for(int px=std::max(0,cx-radius);px<std::min(track.width,cx+radius);++px){const auto index=(size_t(py)*track.width+px)*4;shades.insert(unsigned(live[index])|(unsigned(live[index+1])<<8)|(unsigned(live[index+2])<<16));}
+        check(shades.size()>12,"Slider thumb has smooth vector edge coverage at every theme and DPI");
         ControlPixels panel(menu.panel);
         for(int offset:{40,192,288,96,400,240,0}){
             menu.scrollTo(menu.u(offset));pump(menu);const auto incremental=panel.read();
@@ -63,6 +68,35 @@ static void checkRepainting(NativeSettings& menu){
     RECT channel{},bounds{};SendMessageW(slider,TBM_GETCHANNELRECT,0,reinterpret_cast<LPARAM>(&channel));GetClientRect(slider,&bounds);const int x=channel.left+(channel.right-channel.left)/4,y=bounds.bottom/2;
     SendMessageW(slider,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(x,y));SendMessageW(slider,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(x,y));SendMessageW(slider,WM_LBUTTONUP,0,MAKELPARAM(x,y));
     check(SendMessageW(slider,TBM_GETPOS,0,0)<300,"Styled slider retains pointer interaction");SetFocus(menu.window);
+}
+static void checkOutlineInput(NativeSettings& menu,Json& state,std::vector<Json>& sent){
+    const auto edit=menu.outlineValue,slider=GetDlgItem(menu.panel,103);check(edit,"Outline width exposes a native numeric edit");
+    const auto text=[&]{wchar_t value[64]{};GetWindowTextW(edit,value,64);return std::wstring(value);};
+    SetFocus(menu.window);SendMessageW(edit,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(menu.u(20),menu.u(8)));SendMessageW(edit,WM_LBUTTONUP,0,MAKELPARAM(menu.u(20),menu.u(8)));
+    DWORD selectionStart{},selectionEnd{};SendMessageW(edit,EM_GETSEL,reinterpret_cast<WPARAM>(&selectionStart),reinterpret_cast<LPARAM>(&selectionEnd));
+    check(GetFocus()==edit&&selectionStart==0&&selectionEnd==3,"Clicking the displayed number focuses the native edit and selects its value");
+    ControlPixels frame(menu.outlineHost);const auto focusedFrame=frame.read(true);SetFocus(menu.window);check(focusedFrame!=frame.read(true),"Native number box exposes a visible Fluent focus underline");
+    SetFocus(edit);SetWindowTextW(edit,L"1");menu.sync();check(text()==L"1","Background snapshots preserve a partially typed value");
+    const auto invalidCount=sent.size();SendMessageW(edit,WM_KEYDOWN,VK_RETURN,0);
+    check(sent.size()==invalidCount&&GetFocus()==edit&&GetPropW(edit,L"FluentInputError"),"Invalid Enter retains focus and shows inline validation without saving");
+    MSG escape{};escape.hwnd=edit;escape.message=WM_KEYDOWN;escape.wParam=VK_ESCAPE;check(menu.route(escape)&&IsWindowVisible(menu.window),"Esc cancels numeric editing rather than closing settings");
+    check(text()==L"175%"&&state["value"]["outlineWidth"]==175,"Esc restores the saved value");
+    SetFocus(edit);SetWindowTextW(edit,L"137%");SendMessageW(edit,WM_KEYDOWN,VK_RETURN,0);
+    check(state["value"]["outlineWidth"]==137&&SendMessageW(slider,TBM_GETPOS,0,0)==137&&text()==L"137%","Enter synchronizes the saved value, text and slider");
+    SetFocus(edit);SetWindowTextW(edit,L"164");SetFocus(GetDlgItem(menu.panel,101));
+    check(state["value"]["outlineWidth"]==164,"Leaving a valid numeric input commits the value");
+    SetFocus(edit);SetWindowTextW(edit,L"999");SetFocus(menu.window);
+    check(state["value"]["outlineWidth"]==164&&text()==L"164%","Leaving an invalid input restores the last valid width");
+    SetFocus(edit);SetWindowTextW(edit,L"180");MSG tab{};tab.hwnd=edit;tab.message=WM_KEYDOWN;tab.wParam=VK_TAB;menu.route(tab);
+    check(GetFocus()!=edit&&state["value"]["outlineWidth"]==180,"Tab commits the number and follows native focus navigation");
+    SendMessageW(slider,TBM_SETPOS,TRUE,201);SendMessageW(menu.panel,WM_HSCROLL,TB_THUMBPOSITION,reinterpret_cast<LPARAM>(slider));
+    check(text()==L"201%"&&state["value"]["outlineWidth"]==201,"Dragging updates the editable number");
+    state["value"]["outlineMode"]=0;menu.sync();check(!IsWindowEnabled(edit)&&!IsWindowEnabled(slider),"Number and slider are disabled together when outlines are off");
+    state["value"]["outlineMode"]=2;state["value"]["outlineWidth"]=175;menu.sync();
+    const auto previous=state["value"];menu.command(2210,BN_CLICKED);
+    check(sent.back()["type"]=="set_autostart"&&state["startup"]["enabled"]==true&&state["value"]==previous,"Startup uses a separate explicit application-level setting");
+    wchar_t name[64]{};GetWindowTextW(GetDlgItem(menu.panel,2210),name,64);check(std::wstring(name).find(L"已开启")!=std::wstring::npos,"Startup toggle exposes its actual state to native accessibility");
+    state["busy"]=true;menu.sync();check(IsWindowEnabled(GetDlgItem(menu.panel,2210)),"Model loading does not disable application startup settings");state["busy"]=false;menu.sync();menu.command(2210,BN_CLICKED);check(!state["startup"]["enabled"].get<bool>(),"Startup can be explicitly disabled again");
 }
 static void checkFlyoutFrame(HWND window,const NativeFluent& theme){
     ControlPixels image(window);NativeFluent::fill(image.dc,{0,0,image.width,image.height},RGB(255,0,255));
@@ -95,12 +129,13 @@ int main(int argc,char** argv){
         TestDesktop desktop; // Test fixtures never appear on the user's desktop.
         NativePreferences preferences;Json state={{"name","Shiroko"},{"selectedId","a"},{"activeCount",1},{"battleAvailable",true},{"canFollow",true},{"busy",false},{"error",""},{"percent",0},{"value",preferences.json()}};
         state["modelsDirectory"]="data/models";
+        state["startup"]={{"enabled",false},{"available",true}};
         state["value"].update({{"mode","cafe"},{"look",true},{"idleSeconds",30},{"activeSeconds",5}});
         state["characters"]=Json::array();for(int i=0;i<15;++i)state["characters"].push_back({{"id",i==0?"a":std::to_string(i)},{"name",i==0?"Shiroko":i==1?"Yuuka (Sportswear)":"Imported test model "+std::to_string(i+1)},{"path","fixtures/model-"+std::to_string(i)+".glb"},{"active",i==0},{"available",i!=14},{"ready",i==0},{"mode","cafe"}});
         std::vector<Json> sent;std::vector<bool> visibility,pauses;
         NativeSettings menu;menu.snapshot=[&]{return state;};menu.visibility=[&](bool value){visibility.push_back(value);};
         menu.pauseChanged=[&](bool value){pauses.push_back(value);};
-        menu.receive=[&](const Json& message){sent.push_back(message);const auto type=message.at("type");if(type=="save")state["value"]=message.at("value");if(type=="roster_toggle")for(auto& row:state["characters"])if(row["id"]==message["id"]){row["active"]=message["active"];state["activeCount"]=state["activeCount"].get<int>()+(message["active"].get<bool>()?1:-1);}if(type=="roster_select")state["selectedId"]=message.at("id");};
+        menu.receive=[&](const Json& message){sent.push_back(message);const auto type=message.at("type");if(type=="set_autostart")state["startup"]["enabled"]=message["enabled"];if(type=="save")state["value"]=message.at("value");if(type=="roster_toggle")for(auto& row:state["characters"])if(row["id"]==message["id"]){row["active"]=message["active"];state["activeCount"]=state["activeCount"].get<int>()+(message["active"].get<bool>()?1:-1);}if(type=="roster_select")state["selectedId"]=message.at("id");};
         menu.sync();check(!menu.visible(),"Initial sync creates no windows");
         menu.showQuick(nullptr,std::filesystem::current_path());pump(menu);
         checkFlyoutFrame(menu.quickWindow,menu.quickUi);
@@ -152,6 +187,7 @@ int main(int argc,char** argv){
         SetWindowTextW(GetDlgItem(menu.panel,108),L"45");menu.save();check(state["value"]["idleSeconds"]==45,"Full settings still save edited numeric values");
         SendMessageW(GetDlgItem(menu.panel,101),CB_SETCURSEL,0,0);menu.command(101,CBN_SELCHANGE);check(state["value"]["renderQuality"]==0,"Styled combo preserves native selection commands");
         SendMessageW(GetDlgItem(menu.panel,103),TBM_SETPOS,TRUE,175);SendMessageW(menu.panel,WM_HSCROLL,TB_THUMBPOSITION,reinterpret_cast<LPARAM>(GetDlgItem(menu.panel,103)));check(state["value"]["outlineWidth"]==175,"Styled slider retains native value/drag behavior");
+        checkOutlineInput(menu,state,sent);
         menu.page=3;menu.build();check(SendMessageW(menu.list,LB_GETCOUNT,0,0)==15,"Full roster preserves the entire import history");
         const auto lastRowVisible=[&]{RECT row{},client{},viewport{};const auto count=SendMessageW(menu.list,LB_GETCOUNT,0,0);SendMessageW(menu.list,LB_GETITEMRECT,count-1,reinterpret_cast<LPARAM>(&row));GetClientRect(menu.list,&client);if(row.top<0||row.bottom>client.bottom)return false;MapWindowPoints(menu.list,menu.panel,reinterpret_cast<POINT*>(&row),2);GetClientRect(menu.panel,&viewport);return row.top>=0&&row.bottom<=viewport.bottom;};
         for(UINT dpi:{96u,120u,144u,168u,192u}){
@@ -196,10 +232,13 @@ int main(int argc,char** argv){
             menu.sync();
             for(auto& row:state["characters"])row["managed"]=std::filesystem::path(wide(row.value("path",std::string{}))).parent_path().lexically_normal()==std::filesystem::path(wide(state.value("modelsDirectory",std::string{}))).lexically_normal();
             menu.reloadTheme(menu.window,GetDpiForSystem());menu.page=0;menu.show(nullptr,std::filesystem::current_path());pump(menu);capture(menu.window,output/L"settings-global.bmp");
+            menu.scrollTo(menu.u(menu.contentHeight));pump(menu);capture(menu.window,output/L"settings-app.bmp");menu.scrollTo(0);
+            SetFocus(menu.outlineValue);pump(menu);capture(menu.window,output/L"settings-number-edit.bmp");menu.cancelOutline();SetFocus(menu.window);
             for(int p=1;p<4;++p){menu.page=p;menu.build();pump(menu);capture(menu.window,output/(std::wstring(L"settings-")+std::to_wstring(p)+L".bmp"));}
             if(SendMessageW(menu.list,LB_GETCOUNT,0,0)>0){size_t chosen=0;for(size_t i=0;i<state["characters"].size();++i)if(state["characters"][i].value("managed",false)){chosen=i;break;}SendMessageW(menu.list,LB_SETCURSEL,chosen,0);menu.showModelMenu(menu.list,MAKELPARAM(-1,-1));pump(menu);capture(menu.modelMenu,output/L"model-context.bmp");menu.hideModelMenu();}
             menu.hide();menu.showQuick(nullptr,std::filesystem::current_path());pump(menu);capture(menu.quickWindow,output/L"quick-menu.bmp");menu.hide();
-            menu.page=0;menu.show(nullptr,std::filesystem::current_path());menu.reloadTheme(menu.window,GetDpiForSystem(),0);pump(menu);capture(menu.window,output/L"settings-light.bmp");menu.hide();
+            menu.page=0;menu.show(nullptr,std::filesystem::current_path());menu.reloadTheme(menu.window,GetDpiForSystem(),0);pump(menu);capture(menu.window,output/L"settings-light.bmp");
+            menu.scrollTo(menu.u(menu.contentHeight));pump(menu);capture(menu.window,output/L"settings-app-light.bmp");menu.hide();
             menu.showQuick(nullptr,std::filesystem::current_path());menu.reloadTheme(menu.quickWindow,GetDpiForSystem(),0);pump(menu);capture(menu.quickWindow,output/L"quick-light.bmp");menu.hide();
         }
         std::cout<<"Native UI regression checks passed: incremental repaint pixels, Fluent sliders, quick roster, caps, mode/follow, loading, full settings, validation, visibility and DPI.\n";return 0;

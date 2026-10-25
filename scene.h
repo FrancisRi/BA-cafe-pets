@@ -282,6 +282,14 @@ struct Scene {
         if(type!="import"&&type!="refresh_models")importNotice.clear();
         if(type=="exit"){save();stopping=true;PostQuitMessage(0);return;}
         if(type=="refresh_models"){refreshModels();sync();return;}
+        if(type=="set_autostart"){
+            try{
+                if(!j.contains("enabled")||!j["enabled"].is_boolean())throw std::runtime_error("开机自启设置无效。");
+                if(!leader().autostartSettings)throw std::runtime_error(leader().autostartError.empty()?"当前无法设置开机自启。":leader().autostartError);
+                leader().autostartSettings->set(j["enabled"].get<bool>());error.clear();
+                importNotice=j["enabled"].get<bool>()?"已开启开机自启，下次登录 Windows 时自动启动。":"已关闭开机自启。";
+            }catch(const std::exception& failure){error=failure.what();}sync();return;
+        }
         if(type=="change_models_folder"||type=="reset_models_folder"){
             if(modifyingModels)return;NativeHealth::Pause choosing;
             try{
@@ -337,7 +345,7 @@ struct Scene {
         if(stopping||leader().session.paused())return;
         const bool loading=std::any_of(actors.begin(),actors.end(),[](const auto& a){return a->displayed&&!a->loaded&&!a->done&&(!a->renderer||a->settings->importBusy);});
         if(!loading)for(const auto& entry:roster.entries)if(entry.active&&!find(entry.id)){
-            auto child=std::make_unique<App>();child->directory=leader().directory;child->programDirectory=leader().programDirectory;child->dataDirectory=leader().dataDirectory;child->modelStorageSettings=leader().modelStorageSettings;child->model=wide(entry.path);child->actorId=entry.id;
+            auto child=std::make_unique<App>();child->directory=leader().directory;child->programDirectory=leader().programDirectory;child->dataDirectory=leader().dataDirectory;child->modelStorageSettings=leader().modelStorageSettings;child->autostartSettings=leader().autostartSettings;child->model=wide(entry.path);child->actorId=entry.id;
             child->initialMode=entry.mode;child->smooth=leader().smooth;child->zoom=commonZoom();
             auto& a=*child;actors.push_back(std::move(child));try{attach(a,false);}catch(const std::exception& e){a.done=true;a.displayed=false;roster.find(entry.id)->active=false;error=e.what();save();sync();}break;
         }

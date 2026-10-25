@@ -4,6 +4,8 @@
 #include <commctrl.h>
 #include <dwmapi.h>
 #include <uxtheme.h>
+#include <objidl.h>
+#include <gdiplus.h>
 #include <algorithm>
 #include <cwchar>
 #include <string>
@@ -50,7 +52,8 @@ struct NativeFluent {
         }
         canvasBrush=CreateSolidBrush(canvas);surfaceBrush=CreateSolidBrush(surface);
         const auto make=[&](int size,int weight,const wchar_t* face){return CreateFontW(-px(size),0,0,0,weight,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,face);};
-        font=make(14,FW_NORMAL,L"Segoe UI");small=make(12,FW_NORMAL,L"Segoe UI");heading=make(14,FW_SEMIBOLD,L"Segoe UI");title=make(28,FW_SEMIBOLD,L"Segoe UI Variable Display");icons=make(18,FW_NORMAL,L"Segoe Fluent Icons");
+        NONCLIENTMETRICSW metrics{sizeof(metrics)};const wchar_t* face=SystemParametersInfoW(SPI_GETNONCLIENTMETRICS,sizeof(metrics),&metrics,0)?metrics.lfMessageFont.lfFaceName:L"Segoe UI";
+        font=make(14,FW_NORMAL,face);small=make(12,FW_NORMAL,face);heading=make(14,FW_SEMIBOLD,face);title=make(28,FW_SEMIBOLD,face);icons=make(18,FW_NORMAL,L"Segoe Fluent Icons");
     }
     void frame(HWND hwnd,bool flyout=false) const {
         const BOOL immersive=dark;const DWORD corners=2,material=flyout?3:2;
@@ -91,16 +94,50 @@ struct NativeFluent {
         auto pen=CreatePen(PS_SOLID,std::max(1,px(2)),accent);auto oldPen=SelectObject(dc,pen),oldBrush=SelectObject(dc,GetStockObject(NULL_BRUSH));
         RoundRect(dc,r.left,r.top,r.right,r.bottom,px(6),px(6));SelectObject(dc,oldBrush);SelectObject(dc,oldPen);DeleteObject(pen);
     }
+    static bool vectorDrawing(){
+        struct Runtime {ULONG_PTR token{};Runtime(){Gdiplus::GdiplusStartupInput input;Gdiplus::GdiplusStartup(&token,&input,nullptr);}~Runtime(){if(token)Gdiplus::GdiplusShutdown(token);}};
+        static Runtime runtime;return runtime.token!=0;
+    }
+    static Gdiplus::Color vectorColor(COLORREF color,BYTE alpha=255){return {alpha,GetRValue(color),GetGValue(color),GetBValue(color)};}
+    static void capsule(Gdiplus::Graphics& g,float x,float y,float width,float height,COLORREF color){
+        if(width<=0||height<=0)return;Gdiplus::SolidBrush brush(vectorColor(color));
+        const float diameter=std::min(width,height);Gdiplus::GraphicsPath path;
+        path.AddArc(x,y,diameter,diameter,90,180);path.AddArc(x+width-diameter,y,diameter,diameter,270,180);path.CloseFigure();g.FillPath(&brush,&path);
+    }
+    void slider(HDC dc,RECT r,RECT track,int center,bool enabled,bool hot,bool pressed) const {
+        const float scale=dpi/96.0f,cy=(r.top+r.bottom)*0.5f,radius=10*scale;
+        const float cx=std::clamp(float(center),radius+1,float(r.right)-radius-1);
+        const float left=std::max(float(track.left),radius+1),right=std::min(float(track.right),float(r.right)-radius-1);
+        if(vectorDrawing()){
+            Gdiplus::Graphics g(dc);g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+            capsule(g,left,cy-1.5f*scale,right-left,3*scale,enabled?muted:line);
+            capsule(g,left,cy-1.5f*scale,cx-left,3*scale,enabled?accent:disabled);
+            if(!highContrast){Gdiplus::SolidBrush shadow(vectorColor(RGB(0,0,0),dark?48:25));g.FillEllipse(&shadow,cx-radius,cy-radius+scale,2*radius,2*radius);}
+            Gdiplus::SolidBrush shell(vectorColor(highContrast?surface:dark?RGB(69,69,69):RGB(255,255,255)));
+            Gdiplus::Pen edge(vectorColor(highContrast?text:dark?RGB(152,152,152):RGB(132,132,132)),scale);
+            g.FillEllipse(&shell,cx-radius,cy-radius,2*radius,2*radius);g.DrawEllipse(&edge,cx-radius,cy-radius,2*radius,2*radius);
+            const float inner=(pressed?4:hot?6:5)*scale;Gdiplus::SolidBrush knob(vectorColor(enabled?accent:disabled));g.FillEllipse(&knob,cx-inner,cy-inner,2*inner,2*inner);
+            g.Flush(Gdiplus::FlushIntentionSync);
+        }else{
+            RECT rail{int(left),int(cy-px(2)),int(right),int(cy+px(2))};round(dc,rail,muted,muted,px(4));rail.right=int(cx);round(dc,rail,accent,accent,px(4));
+            RECT shell{int(cx-radius),int(cy-radius),int(cx+radius),int(cy+radius)};round(dc,shell,surface,muted,px(20));RECT knob{int(cx-px(5)),int(cy-px(5)),int(cx+px(5)),int(cy+px(5))};round(dc,knob,enabled?accent:disabled,enabled?accent:disabled,px(10));
+        }
+    }
+    void inputFrame(HDC dc,RECT r,bool focused,bool invalid,bool enabled) const {
+        const auto edge=invalid?danger:focused?accent:enabled?muted:line;
+        round(dc,r,surface,enabled?line:disabled,px(8));
+        RECT bottom{r.left+px(3),r.bottom-px(focused||invalid?2:1),r.right-px(3),r.bottom};fill(dc,bottom,edge);
+    }
     // Subclass only hover/focus invalidation. Native controls retain keyboard,
     // accessibility, capture and command behavior.
     static LRESULT CALLBACK controlProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l,UINT_PTR,DWORD_PTR data){
         auto* theme=reinterpret_cast<NativeFluent*>(data);wchar_t cls[32]{};GetClassNameW(hwnd,cls,32);
         if(msg==WM_LBUTTONDOWN)SendMessageW(GetAncestor(hwnd,GA_ROOT),WM_CHANGEUISTATE,MAKEWPARAM(UIS_SET,UISF_HIDEFOCUS),0);
         if(msg==WM_KEYDOWN&&(w==VK_TAB||w==VK_LEFT||w==VK_RIGHT||w==VK_UP||w==VK_DOWN))SendMessageW(GetAncestor(hwnd,GA_ROOT),WM_CHANGEUISTATE,MAKEWPARAM(UIS_CLEAR,UISF_HIDEFOCUS),0);
-        const bool combo=std::wcscmp(cls,L"ComboBox")==0,slider=std::wcscmp(cls,TRACKBAR_CLASSW)==0;
+        const bool combo=std::wcscmp(cls,L"ComboBox")==0,isSlider=std::wcscmp(cls,TRACKBAR_CLASSW)==0;
         if(theme&&combo&&msg==WM_NCPAINT)return 0;
-        if(theme&&(combo||slider)&&msg==WM_ERASEBKGND){RECT r{};GetClientRect(hwnd,&r);fill(reinterpret_cast<HDC>(w),r,theme->surface);return 1;}
-        if(theme&&(combo||slider)&&(msg==WM_PAINT||msg==WM_PRINTCLIENT||msg==WM_PRINT)){
+        if(theme&&(combo||isSlider)&&msg==WM_ERASEBKGND){RECT r{};GetClientRect(hwnd,&r);fill(reinterpret_cast<HDC>(w),r,theme->surface);return 1;}
+        if(theme&&(combo||isSlider)&&(msg==WM_PAINT||msg==WM_PRINTCLIENT||msg==WM_PRINT)){
             if(msg==WM_PRINT&&((l&PRF_CHECKVISIBLE)&&!IsWindowVisible(hwnd)))return 0;
             if(msg==WM_PRINT&&!(l&PRF_CLIENT))return 0;
             PAINTSTRUCT ps{};const bool printing=msg!=WM_PAINT;const auto dc=printing?reinterpret_cast<HDC>(w):BeginPaint(hwnd,&ps);RECT r{};GetClientRect(hwnd,&r);fill(dc,r,theme->surface);
@@ -114,20 +151,20 @@ struct NativeFluent {
                 if(GetFocus()==hwnd){RECT line{theme->px(3),r.bottom-theme->px(2),r.right-theme->px(3),r.bottom};fill(dc,line,theme->accent);}
             }else{
                 RECT thumb{},track{};SendMessageW(hwnd,TBM_GETTHUMBRECT,0,reinterpret_cast<LPARAM>(&thumb));SendMessageW(hwnd,TBM_GETCHANNELRECT,0,reinterpret_cast<LPARAM>(&track));
-                const int cy=(r.top+r.bottom)/2,cx=(thumb.left+thumb.right)/2;track.top=cy-theme->px(2);track.bottom=cy+theme->px(2);
-                round(dc,track,enabled?theme->muted:theme->line,enabled?theme->muted:theme->line,theme->px(4));track.right=cx;round(dc,track,enabled?theme->accent:theme->disabled,enabled?theme->accent:theme->disabled,theme->px(4));
-                RECT outer{cx-theme->px(10),cy-theme->px(10),cx+theme->px(10),cy+theme->px(10)};round(dc,outer,theme->surface,theme->line,theme->px(20));
-                const int knob=theme->px(hot?6:5);RECT inner{cx-knob,cy-knob,cx+knob,cy+knob};round(dc,inner,enabled?theme->accent:theme->disabled,enabled?theme->accent:theme->disabled,knob*2);
+                theme->slider(dc,r,track,(thumb.left+thumb.right)/2,enabled,hot,GetPropW(hwnd,L"FluentPressed")!=nullptr);
                 theme->focus(dc,r,hwnd,GetFocus()==hwnd);
             }
             if(!printing)EndPaint(hwnd,&ps);return 0;
+        }
+        if(isSlider&&(msg==WM_LBUTTONDOWN||msg==WM_LBUTTONUP||msg==WM_CAPTURECHANGED||msg==WM_CANCELMODE)){
+            if(msg==WM_LBUTTONDOWN)SetPropW(hwnd,L"FluentPressed",reinterpret_cast<HANDLE>(1));else RemovePropW(hwnd,L"FluentPressed");InvalidateRect(hwnd,nullptr,FALSE);
         }
         if(msg==WM_MOUSEMOVE&&!GetPropW(hwnd,L"FluentHover")){
             SetPropW(hwnd,L"FluentHover",reinterpret_cast<HANDLE>(1));TRACKMOUSEEVENT track{sizeof(track),TME_LEAVE,hwnd,0};TrackMouseEvent(&track);InvalidateRect(hwnd,nullptr,FALSE);
         }
         if(msg==WM_MOUSELEAVE){RemovePropW(hwnd,L"FluentHover");InvalidateRect(hwnd,nullptr,FALSE);}
         if(msg==WM_SETFOCUS||msg==WM_KILLFOCUS||msg==WM_ENABLE)InvalidateRect(hwnd,nullptr,FALSE);
-        if(msg==WM_NCDESTROY){RemovePropW(hwnd,L"FluentHover");RemoveWindowSubclass(hwnd,controlProc,1);}
+        if(msg==WM_NCDESTROY){RemovePropW(hwnd,L"FluentHover");RemovePropW(hwnd,L"FluentPressed");RemoveWindowSubclass(hwnd,controlProc,1);}
         return DefSubclassProc(hwnd,msg,w,l);
     }
 };

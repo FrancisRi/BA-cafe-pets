@@ -61,6 +61,7 @@ void replaceAll(std::string& text,const std::string& from,const std::string& to)
 #include "native_preferences.h"
 #include "native_model_library.h"
 #include "native_model_storage.h"
+#include "native_autostart.h"
 #include "native_model_import.h"
 #include "native_health.h"
 #include "native_session.h"
@@ -84,6 +85,8 @@ struct App {
     static constexpr double WalkSpeedMultiplier=1.2;
     HWND window{},inputWindow{}; std::filesystem::path directory,programDirectory,dataDirectory,model,pendingModel,snapshot;
     std::shared_ptr<NativeModelStorage> modelStorageSettings;
+    std::shared_ptr<NativeAutostart> autostartSettings;
+    std::string autostartError;
     NativeSession session;std::function<void()> sessionChanged;
     std::filesystem::path storage() const {return dataDirectory.empty()?directory:dataDirectory;}
     NativeModelLibrary modelLibrary() const {return NativeModelLibrary(modelStorageSettings->current);}
@@ -179,7 +182,10 @@ struct App {
         auto value=preferences.json();value.update({{"look",state.trackingEnabled},{"outline",state.outlineEnabled},
             {"mode",battleMode?"battle":"cafe"},{"idleSeconds",state.inactivityThreshold()},{"activeSeconds",state.activeSecondsOverride.value_or(30)}});
         const auto sampling=renderer?renderer->sampling():nativepet::NativeRenderer::Sampling{-1,1,0};
-        return {{"type","settings"},{"name",utf8(settings->title)},{"value",value},{"battleAvailable",settings->battleAvailable},
+        Json startup={{"enabled",false},{"available",bool(autostartSettings)}};
+        if(!autostartError.empty())startup["error"]=autostartError;
+        try{if(autostartSettings)startup["enabled"]=autostartSettings->enabled();}catch(const std::exception& e){startup["error"]=e.what();}
+        return {{"type","settings"},{"name",utf8(settings->title)},{"value",value},{"startup",startup},{"battleAvailable",settings->battleAvailable},
             {"renderSampling",{{"visible",displayed},{"ready",loaded&&sampling.quality==preferences.renderQuality},{"scale",sampling.scale},{"msaa",sampling.msaa}}},
             {"canFollow",battleMode?battle&&battle->clips.move>=0:cafeWalk>=0},{"busy",settings->importBusy},{"percent",settings->importPercent},
             {"detail",utf8(settings->progressDetail)},{"error",settingsError},{"modelsDirectory",utf8(modelLibrary().directory.wstring())},{"modelsDirectoryDefault",NativeModelStorage::same(modelLibrary().directory,modelStorageSettings->defaultDirectory())}};
@@ -828,6 +834,7 @@ struct App {
     }
     void initialize(bool leader=true){
         if(!modelStorageSettings)modelStorageSettings=std::make_shared<NativeModelStorage>(programDirectory.empty()?directory:programDirectory,storage(),!dataDirectorySpecified);
+        if(!autostartSettings)try{autostartSettings=std::make_shared<NativeAutostart>(NativeAutostart::launchExecutable(),dataDirectorySpecified?storage():std::filesystem::path{});}catch(const std::exception& e){autostartError=e.what();}
         state.log=[this](const std::string& text){if(!diagnostics)return;std::printf("%s\n",text.c_str());std::fflush(stdout);};
         state.log(smooth?"VARIANT smooth transitions + braking":"VARIANT regular");
         state.canWalk=[this](double y,double d){return canStartWalk(y,d);};

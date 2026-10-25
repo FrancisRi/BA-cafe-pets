@@ -1,4 +1,4 @@
-BA Cafe Pets 1.1.4 · Windows x64
+BA Cafe Pets 1.1.5 · Windows x64
 
 基于 maxiumlee（Max）的 ba-cafe-lite 继续开发。
 原作者：https://github.com/maxiumlee/ba-cafe-lite
@@ -8,7 +8,7 @@ BA Cafe Pets 1.1.4 · Windows x64
 便携版请退出旧程序后解压到原目录，运行 BA-Cafe-Pets.exe；旧 ba_cafe_lite.exe 不自动删除，请勿再启动。
 
 启动
-  单文件版双击 BA-Cafe-Pets-1.1.4-x64.exe；便携版解压后运行 BA-Cafe-Pets.exe。
+  单文件版双击 BA-Cafe-Pets-1.1.5-x64.exe；便携版解压后运行 BA-Cafe-Pets.exe。
   默认角色 Shiroko。
   不需要 Blender、浏览器、WebView2、Python 或开发环境。
   便携 ZIP 请完整解压，保留 model、defaults.ini、behavior 和 licenses。
@@ -30,6 +30,11 @@ BA Cafe Pets 1.1.4 · Windows x64
   清晰档结合 2× 超采样与最高 4× MSAA，均衡档尝试 2× MSAA。
   两种描边模式均平滑边缘，显卡限制或采样缓冲预算不足时自动降低采样。
   选项下方显示当前角色实际生效的超采样、MSAA 和自动降级状态，切换后随实际绘制更新。
+  线条粗细右侧数字可点击输入 10–300%；Enter 或失焦保存，Esc 取消，滑块与数字同步。
+
+开机自启
+  全局设置 → 应用 → 开机自启，可手动开启或关闭，初次运行默认不添加启动项。
+  登录 Windows 后恢复上次角色状态；单文件版记录外层 EXE，显式 --data-dir 参数一并保留。
 
 模型管理
   所有模型（含白子）统一复制、校验到 EXE 旁的 model 文件夹或自选目录，运行记录不指向解压缓存。

@@ -34,6 +34,8 @@ Git 的新增行和提交作者记录用于追溯，不单独证明某行的版�
 引用或调用的上游／第三方实现，以及任何沿用材料，均不由本声明重新授权。
 
 - `native_antialias.h`
+- `native_autostart.h`
+- `native_outline_input.h`
 - `morph_outline.h`
 - `native_fluent.h`
 - `native_model_import.h`
@@ -41,6 +43,7 @@ Git 的新增行和提交作者记录用于追溯，不单独证明某行的版�
 - `native_model_storage.h`
 - `native_tray.h`
 - `tests/antialias_tests.cpp`
+- `tests/autostart_tests.cpp`
 - `tests/launcher_storage_compatibility.py`
 - `tests/model_import_tests.cpp`
 - `tests/model_library_tests.cpp`

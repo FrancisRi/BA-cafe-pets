@@ -2,11 +2,12 @@
 #include "native_fluent.h"
 #include <array>
 #include <cwchar>
+#include "native_outline_input.h"
 
 // Both interfaces use the existing host messages; the host remains responsible
 // for validation, loading, behavior and persistence.
 struct NativeSettings {
-    HWND window{},panel{},list{},listEmpty{},progress{},quickWindow{},quickList{},modelMenu{};
+    HWND window{},panel{},list{},listEmpty{},progress{},quickWindow{},quickList{},modelMenu{},outlineValue{},outlineHost{};
     NativeFluent ui,quickUi,modelUi;
     std::function<Json()> snapshot;
     std::function<void(const Json&)> receive;
@@ -23,6 +24,7 @@ struct NativeSettings {
     std::vector<Placement> placements;
     int page=0,scroll=0,contentHeight=0,quickRows=0;
     bool syncing=false,closing=false,notifiedVisible=false,notifiedPaused=false;
+    bool editingOutline=false,endingOutline=false;
     std::string highlighted,contextId;
     Json readSnapshot(){
         auto result=snapshot();auto imported=Json::array();
@@ -60,7 +62,7 @@ struct NativeSettings {
         {"clickProbability",L"点击指挥概率",L"点击时触发指挥动作的概率 · %",1,L"\xE8B0"},
         {"keyboardIdle",L"无键盘输入收枪",L"停止键盘输入后的等待时间 · 秒",1,L"\xE823"}
     };
-    ~NativeSettings(){closing=true;if(modelMenu)DestroyWindow(modelMenu);if(quickWindow)DestroyWindow(quickWindow);if(window)DestroyWindow(window);}
+    ~NativeSettings(){closing=true;editingOutline=false;if(modelMenu)DestroyWindow(modelMenu);if(quickWindow)DestroyWindow(quickWindow);if(window)DestroyWindow(window);}
     int u(int value) const {return ui.px(value);}
     int panelWidth() const {RECT r{};if(panel)GetClientRect(panel,&r);return std::max(320,ui.dip(r.right)-32);}
     bool visible() const {return (window&&IsWindowVisible(window)&&!IsIconic(window))||(quickWindow&&IsWindowVisible(quickWindow));}
@@ -79,6 +81,35 @@ struct NativeSettings {
         SendMessageW(hwnd,WM_SETFONT,reinterpret_cast<WPARAM>(theme.font),FALSE);theme.themed(hwnd);
         if(!label)SetWindowSubclass(hwnd,NativeFluent::controlProc,1,reinterpret_cast<DWORD_PTR>(&theme));return hwnd;
     }
+    void outlineError(bool invalid){
+        if(!outlineValue)return;if(invalid)SetPropW(outlineValue,L"FluentInputError",reinterpret_cast<HANDLE>(1));else RemovePropW(outlineValue,L"FluentInputError");
+        if(outlineHost)InvalidateRect(outlineHost,nullptr,FALSE);
+    }
+    void cancelOutline(bool resetStatus=true){
+        editingOutline=false;outlineError(false);if(outlineValue)SetWindowTextW(outlineValue,(std::to_wstring(last["value"].value("outlineWidth",100))+L"%").c_str());
+        if(resetStatus&&window)SetWindowTextW(GetDlgItem(window,2300),statusText().c_str());
+    }
+    bool commitOutline(bool keepInvalid){
+        if(!outlineValue||!editingOutline||endingOutline||syncing)return true;
+        wchar_t text[64]{};GetWindowTextW(outlineValue,text,64);const auto parsed=parseOutlineWidth(text);
+        if(!parsed){
+            SetWindowTextW(GetDlgItem(window,2300),keepInvalid?L"请输入 10–300 之间的整数，可带 %；该更改尚未保存。":L"描边宽度无效，已保留原值（10–300%）。");
+            if(keepInvalid)outlineError(true);else cancelOutline(false);return false;
+        }
+        endingOutline=true;editingOutline=false;outlineError(false);
+        if(double(*parsed)!=last["value"].value("outlineWidth",100.0)){auto value=last["value"];value["outlineWidth"]=*parsed;sendValue(std::move(value));}
+        SetWindowTextW(outlineValue,(std::to_wstring(last["value"].value("outlineWidth",*parsed))+L"%").c_str());endingOutline=false;return true;
+    }
+    static LRESULT CALLBACK outlineProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l,UINT_PTR,DWORD_PTR data){
+        auto* self=reinterpret_cast<NativeSettings*>(data);
+        if(msg==WM_LBUTTONDOWN&&GetFocus()!=hwnd){const auto result=DefSubclassProc(hwnd,msg,w,l);SendMessageW(hwnd,EM_SETSEL,0,-1);return result;}
+        if(msg==WM_KEYDOWN&&(w==VK_RETURN||w==VK_ESCAPE)){
+            if(w==VK_ESCAPE){self->cancelOutline();SetFocus(self->window);}else if(self->commitOutline(true))SetFocus(self->window);return 0;
+        }
+        if(msg==WM_SETFOCUS||msg==WM_KILLFOCUS||msg==WM_ENABLE){const auto result=DefSubclassProc(hwnd,msg,w,l);if(self->outlineHost)InvalidateRect(self->outlineHost,nullptr,FALSE);return result;}
+        if(msg==WM_NCDESTROY){RemovePropW(hwnd,L"FluentInputError");RemoveWindowSubclass(hwnd,outlineProc,4);}
+        return DefSubclassProc(hwnd,msg,w,l);
+    }
     void hideQuick(){if(quickWindow)ShowWindow(quickWindow,SW_HIDE);notify();}
     void hideModelMenu(){if(modelMenu)ShowWindow(modelMenu,SW_HIDE);}
     void hide(){hideModelMenu();if(window)ShowWindow(window,SW_HIDE);hideQuick();notify();}
@@ -91,12 +122,13 @@ struct NativeSettings {
         struct Move {HWND hwnd;int x,y,w,h;};std::vector<Move> moves;moves.reserve(placements.size()+controls.size()*3);
         const auto place=[&](HWND hwnd,int x,int y,int w,int h){moves.push_back({hwnd,u(x),u(y)-scroll,u(w),u(h)});};
         for(const auto& p:placements)place(p.hwnd,p.x,p.y,p.stretch?width:p.w,p.h);
-        for(const auto& c:controls){const int widthInput=c.field->kind==3||std::string(c.field->key)=="renderQuality"?184:156;
+        for(const auto& c:controls){const int widthInput=c.field->kind==3?264:std::string(c.field->key)=="renderQuality"?184:156;
             if(c.field->kind==0)place(c.input,16,c.y,width,68);
             else{
                 place(c.label,64,c.y+12,std::max(80,width-widthInput-82),22);
                 place(c.hint,64,c.y+36,std::max(80,width-widthInput-82),20);
-                place(c.input,width-widthInput,c.y+17,widthInput,c.field->kind==2?260:34);
+                place(c.input,width-widthInput,c.y+17,c.field->kind==3?184:widthInput,c.field->kind==2?260:34);
+                if(c.field->kind==3&&outlineHost)place(outlineHost,width-68,c.y+17,68,34);
             }
         }
         // Moving siblings individually lets Win32 copy pixels from other cards.
@@ -121,7 +153,7 @@ struct NativeSettings {
         place(2300,258,h-48,w-300,34);place(2301,258,h-9,w-300,3);scrollTo(scroll);InvalidateRect(window,nullptr,FALSE);
     }
     void build(){
-        if(!panel)return;syncing=true;for(auto hwnd:content)DestroyWindow(hwnd);content.clear();placements.clear();controls.clear();list=listEmpty=nullptr;scroll=0;int y=8;
+        if(!panel)return;syncing=true;editingOutline=false;outlineValue=outlineHost=nullptr;for(auto hwnd:content)DestroyWindow(hwnd);content.clear();placements.clear();controls.clear();list=listEmpty=nullptr;scroll=0;int y=8;
         const auto note=[&](const wchar_t* text,int height=34){auto h=control(panel,L"STATIC",text,0,0,16,y,panelWidth(),height);SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(ui.small),FALSE);placeContent(h,16,y,0,height,true);y+=height+12;};
         const auto section=[&](const wchar_t* text){auto h=control(panel,L"STATIC",text,0,0,16,y,panelWidth(),24);SetPropW(h,L"FluentSection",reinterpret_cast<HANDLE>(1));SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(ui.heading),FALSE);placeContent(h,16,y,0,24,true);y+=34;};
         if(page==3){
@@ -150,9 +182,14 @@ struct NativeSettings {
                 else{
                     label=control(panel,L"STATIC",f.title,SS_ENDELLIPSIS,0,64,y+12,270,22);hint=control(panel,L"STATIC",f.detail,SS_ENDELLIPSIS,0,64,y+36,270,20);
                     SendMessageW(hint,WM_SETFONT,reinterpret_cast<WPARAM>(ui.small),FALSE);SetPropW(hint,L"FluentMuted",reinterpret_cast<HANDLE>(1));content.push_back(label);content.push_back(hint);
-                    input=control(panel,f.kind==3?TRACKBAR_CLASSW:f.kind==1?L"EDIT":L"COMBOBOX",L"",f.kind==3?TBS_HORZ|TBS_NOTICKS:f.kind==1?WS_BORDER|ES_AUTOHSCROLL:CBS_DROPDOWNLIST|CBS_OWNERDRAWFIXED|CBS_HASSTRINGS|WS_VSCROLL,100+int(i),326,y+17,156,f.kind==2?260:34);
+                    input=control(panel,f.kind==3?TRACKBAR_CLASSW:f.kind==1?L"EDIT":L"COMBOBOX",L"",f.kind==3?TBS_HORZ|TBS_NOTICKS|TBS_FIXEDLENGTH:f.kind==1?WS_BORDER|ES_AUTOHSCROLL:CBS_DROPDOWNLIST|CBS_OWNERDRAWFIXED|CBS_HASSTRINGS|WS_VSCROLL,100+int(i),326,y+17,156,f.kind==2?260:34);
                     if(f.kind==1)SendMessageW(input,EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(u(8),u(8)));
-                    if(f.kind==3)SendMessageW(input,TBM_SETRANGE,TRUE,MAKELPARAM(10,300));
+                    if(f.kind==3){
+                        SendMessageW(input,TBM_SETRANGE,TRUE,MAKELPARAM(10,300));SendMessageW(input,TBM_SETTHUMBLENGTH,u(24),0);
+                        outlineHost=CreateWindowExW(WS_EX_CONTROLPARENT,L"BaCafeNativeSettings",L"描边宽度",WS_CHILD|WS_VISIBLE|WS_CLIPCHILDREN,0,u(y+17),u(68),u(34),panel,reinterpret_cast<HMENU>(INT_PTR(2113)),GetModuleHandleW(nullptr),this);
+                        outlineValue=control(outlineHost,L"EDIT",L"",ES_CENTER|ES_AUTOHSCROLL,2112,7,7,54,20);
+                        SendMessageW(outlineValue,EM_SETLIMITTEXT,16,0);SetWindowSubclass(outlineValue,outlineProc,4,reinterpret_cast<DWORD_PTR>(this));content.push_back(outlineHost);
+                    }
                     if(f.kind==2){SendMessageW(input,CB_SETITEMHEIGHT,WPARAM(-1),u(30));SendMessageW(input,CB_SETITEMHEIGHT,0,u(32));const auto add=[&](const wchar_t* text){SendMessageW(input,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(text));};
                         if(std::string(f.key)=="mode"){add(L"咖啡厅");if(last.value("battleAvailable",false))add(L"战斗");}
                         else if(std::string(f.key)=="renderQuality"){add(L"省电 · 无 MSAA");add(L"均衡 · 2× MSAA");add(L"清晰 · 4× MSAA");}
@@ -164,7 +201,10 @@ struct NativeSettings {
                     SendMessageW(status,WM_SETFONT,reinterpret_cast<WPARAM>(ui.small),FALSE);SetPropW(status,L"FluentMuted",reinterpret_cast<HANDLE>(1));placeContent(status,16,y,0,44,true);y+=52;
                 }
             }
-            if(page==0){y+=8;auto h=control(panel,L"BUTTON",L"恢复默认设置",BS_OWNERDRAW,2201,16,y,160,36);placeContent(h,16,y,160,36);y+=52;}
+            if(page==0){
+                y+=8;auto h=control(panel,L"BUTTON",L"恢复默认设置",BS_OWNERDRAW,2201,16,y,160,36);placeContent(h,16,y,160,36);y+=52;
+                section(L"应用");auto startup=control(panel,L"BUTTON",L"开机自启",BS_OWNERDRAW,2210,16,y,panelWidth(),68);placeContent(startup,16,y,0,68,true);y+=84;
+            }
             if(page==2&&!last.value("battleAvailable",false))note(L"当前模型没有完整的战斗动画。相关选项暂不可用。",38);
         }
         contentHeight=y+16;syncing=false;layout();update();
@@ -213,16 +253,18 @@ struct NativeSettings {
         if(window){
             SetWindowTextW(GetDlgItem(window,10),pages[page]);const auto sub=wide(last.value("name",std::string{"角色"}))+L"  ·  "+(value.value("mode",std::string{})=="battle"?L"战斗模式":L"咖啡厅模式")+L"  ·  "+std::to_wstring(last.value("activeCount",1))+L" 个角色已显示";SetWindowTextW(GetDlgItem(window,11),sub.c_str());
             for(auto& c:controls){const std::string key=c.field->key;if(!value.contains(key))continue;const auto& v=value[key];
-                if(c.field->kind==0)c.checked=v.get<bool>();else if(c.field->kind==3){SendMessageW(c.input,TBM_SETPOS,TRUE,v.get<int>());SetWindowTextW(c.hint,(L"描边宽度 · "+std::to_wstring(v.get<int>())+L"%").c_str());}
+                if(c.field->kind==0)c.checked=v.get<bool>();else if(c.field->kind==3){SendMessageW(c.input,TBM_SETPOS,TRUE,v.get<int>());SetWindowTextW(c.hint,L"描边宽度 · 点击右侧数字输入");if(outlineValue&&!editingOutline)SetWindowTextW(outlineValue,(std::to_wstring(v.get<int>())+L"%").c_str());}
                 else if(c.field->kind==2){const int index=key=="mode"?(v=="battle"):key=="cafeLookMode"?(v=="threshold"):v.get<int>();SendMessageW(c.input,CB_SETCURSEL,index,0);}
                 else if(GetFocus()!=c.input){auto text=v.dump();if(text.ends_with(".0"))text.resize(text.size()-2);SetWindowTextW(c.input,wide(text).c_str());}
                 bool enabled=!last.value("busy",false)&&(page!=2||last.value("battleAvailable",false));if(key=="follow")enabled&=last.value("canFollow",false);if(key=="followNear"||key=="followFar")enabled&=last.value("canFollow",false)&&value.value("follow",false);if(key=="cafeLookMode")enabled&=value.value("cafeTracking",true);if(key=="outlineWidth")enabled&=value.value("outlineMode",2)!=0;
                 EnableWindow(c.input,enabled);if(c.label)EnableWindow(c.label,enabled);if(c.hint)EnableWindow(c.hint,enabled);InvalidateRect(c.input,nullptr,FALSE);
+                if(c.field->kind==3&&outlineValue){if(!enabled&&editingOutline)cancelOutline();EnableWindow(outlineHost,enabled);EnableWindow(outlineValue,enabled);RedrawWindow(outlineHost,nullptr,nullptr,RDW_INVALIDATE|RDW_ALLCHILDREN);}
             }
             SetWindowTextW(GetDlgItem(window,2300),statusText().c_str());EnableWindow(GetDlgItem(window,2200),quickEnabled(3010));ShowWindow(progress,last.value("busy",false)?SW_SHOW:SW_HIDE);InvalidateRect(progress,nullptr,FALSE);
             if(auto path=GetDlgItem(panel,2110))SetWindowTextW(path,wide(last.value("modelsDirectory",std::string{})).c_str());
             if(auto status=GetDlgItem(panel,2111))SetWindowTextW(status,samplingText().c_str());
             EnableWindow(GetDlgItem(panel,2107),!last.value("busy",false));EnableWindow(GetDlgItem(panel,2108),!last.value("busy",false)&&!last.value("modelsDirectoryDefault",false));
+            if(auto startup=GetDlgItem(panel,2210)){const auto state=last.value("startup",Json::object());SetWindowTextW(startup,state.value("enabled",false)?L"开机自启：已开启":L"开机自启：已关闭");EnableWindow(startup,state.value("available",false));InvalidateRect(startup,nullptr,FALSE);}
             if(list){fillRoster(list,false);const int n=int(SendMessageW(list,LB_GETCURSEL,0,0));const auto rows=last.value("characters",Json::array());ShowWindow(listEmpty,rows.empty()?SW_SHOW:SW_HIDE);const auto row=n>=0&&n<int(rows.size())?rows[n]:Json::object();const bool active=row.value("active",false);
                 SetWindowTextW(GetDlgItem(panel,2100),active?L"隐藏角色":L"显示角色");EnableWindow(GetDlgItem(panel,2100),n>=0&&(active||(row.value("available",false)&&last.value("activeCount",0)<5)));EnableWindow(GetDlgItem(panel,2101),n>=0&&active&&row.value("ready",false)&&highlighted!=last.value("selectedId",std::string{}));SetWindowTextW(GetDlgItem(panel,2102),row.value("managed",false)?L"删除模型":L"移除记录");EnableWindow(GetDlgItem(panel,2102),n>=0&&!row.value("loading",false));EnableWindow(GetDlgItem(panel,2103),last.value("activeCount",0)>0);EnableWindow(GetDlgItem(panel,2104),last.value("activeCount",0)>0);}
             for(int i=0;i<4;++i)InvalidateRect(GetDlgItem(window,1000+i),nullptr,FALSE);
@@ -320,8 +362,16 @@ struct NativeSettings {
         auto value=last.at("value");if(id==3000||id==3001)value["mode"]=id==3000?"cafe":"battle";else{const char* key=id==3002?"follow":id==3003?"wandering":id==3004?(value.value("mode",std::string{})=="battle"?"look":"cafeTracking"):"battleWalking";value[key]=!value.value(key,false);}sendValue(std::move(value));
     }
     void command(int id,int code){
+        if(closing)return;
         if(id>=4000&&id<=4003){modelCommand(id);return;}
         if(syncing)return;if(id>=3000&&id<=3013){quickCommand(id);return;}if(id==1){hide();return;}if(id==2){receive({{"type","exit"}});return;}
+        if(id==2112){
+            if(code==EN_SETFOCUS){editingOutline=true;outlineError(false);SetWindowTextW(outlineValue,std::to_wstring(last["value"].value("outlineWidth",100)).c_str());SendMessageW(outlineValue,EM_SETSEL,0,-1);}
+            else if(code==EN_KILLFOCUS)commitOutline(false);
+            else if(code==EN_CHANGE&&editingOutline){wchar_t text[64]{};GetWindowTextW(outlineValue,text,64);outlineError(!parseOutlineWidth(text).has_value());}
+            return;
+        }
+        if(id==2210&&code==BN_CLICKED){const auto startup=last.value("startup",Json::object());if(startup.value("available",false)&&receive)receive({{"type","set_autostart"},{"enabled",!startup.value("enabled",false)}});sync();return;}
         if(id==3){nativeMessageBox(window,L"右键：快捷菜单。右键拖动或中键拖动：旋转。\n左键拖拽：移动。滚轮：缩放。\n\n勾选模型显示或隐藏角色；方向键选择，空格勾选，Esc 关闭。\n\n咖啡厅：点击反应；持续输入后追踪鼠标；无输入后散步。\n战斗：按键攻击；句号、回车、分号、问号请求换弹；持续输入可短走或 EX。\n三连击：咖啡厅进入战斗，战斗退场。拖拽优先打断。",L"使用说明",MB_OK);return;}
         if(id>=1000&&id<1004){hideModelMenu();page=id-1000;if(page==3&&receive)receive({{"type","refresh_models"}});build();return;}
         if(id>=100&&id<100+int(std::size(fields))&&(code==BN_CLICKED||code==CBN_SELCHANGE||code==EN_KILLFOCUS)){if(code==BN_CLICKED)for(auto& c:controls)if(c.input==GetDlgItem(panel,id)&&c.field->kind==0)c.checked=!c.checked;save();return;}
@@ -364,6 +414,12 @@ struct NativeSettings {
                 if(isToggle){RECT track{r.right-theme.px(46),r.top+theme.px(8),r.right-theme.px(8),r.top+theme.px(28)};theme.toggle(dc,track,checked,!disabled);}if(id==3011){RECT arrow{r.right-theme.px(28),r.top,r.right-theme.px(8),r.bottom};theme.glyph(dc,L"\xE76C",arrow,color);}}
         }else if(id>=1000&&id<1004){
             const bool selected=page==id-1000;const auto fill=selected?theme.pressed:pressed?theme.pressed:hover?theme.line:theme.canvas;NativeFluent::round(dc,r,fill,fill,theme.px(6));RECT icon{r.left+theme.px(10),r.top,r.left+theme.px(36),r.bottom};theme.glyph(dc,pageIcons[id-1000],icon,color);auto text=r;text.left+=theme.px(48);theme.label(dc,title,text,theme.font,color);if(selected){RECT indicator{r.left,r.top+theme.px(12),r.left+theme.px(3),r.bottom-theme.px(12)};NativeFluent::round(dc,indicator,theme.accent,theme.accent,theme.px(3));}
+        }else if(id==2210){
+            NativeFluent::round(dc,r,pressed?theme.pressed:hover?theme.hover:theme.surface,theme.line,theme.px(8));
+            RECT icon{r.left+theme.px(14),r.top,r.left+theme.px(40),r.bottom};theme.glyph(dc,L"\xE7E8",icon,color);
+            RECT text{r.left+theme.px(48),r.top+theme.px(12),r.right-theme.px(76),r.top+theme.px(34)};theme.label(dc,L"开机自启",text,theme.font,color);text.top+=theme.px(24);text.bottom+=theme.px(24);
+            const auto startup=last.value("startup",Json::object());theme.label(dc,wide(startup.value("error",std::string{"登录 Windows 时自动启动"})),text,theme.small,disabled?theme.disabled:theme.muted);
+            RECT track{r.right-theme.px(58),r.top+theme.px(24),r.right-theme.px(20),r.top+theme.px(44)};theme.toggle(dc,track,startup.value("enabled",false),!disabled);
         }else if(id>=100&&id<100+int(std::size(fields))){
             const auto it=std::find_if(controls.begin(),controls.end(),[&](const auto& c){return c.input==d.hwndItem;});if(it==controls.end())return;NativeFluent::round(dc,r,pressed?theme.pressed:hover?theme.hover:theme.surface,theme.line,theme.px(8));RECT icon{r.left+theme.px(14),r.top,r.left+theme.px(40),r.bottom};theme.glyph(dc,it->field->icon,icon,color);RECT text{r.left+theme.px(48),r.top+theme.px(12),r.right-theme.px(76),r.top+theme.px(34)};theme.label(dc,title,text,theme.font,color);text.top+=theme.px(24);text.bottom+=theme.px(24);theme.label(dc,it->field->detail,text,theme.small,disabled?theme.disabled:theme.muted);RECT track{r.right-theme.px(58),r.top+theme.px(24),r.right-theme.px(20),r.top+theme.px(44)};theme.toggle(dc,track,it->checked,!disabled);
         }else{
@@ -374,6 +430,7 @@ struct NativeSettings {
     }
     void paint(HWND hwnd,HDC dc){
         RECT r{};GetClientRect(hwnd,&r);const bool context=hwnd==modelMenu,compact=hwnd==quickWindow;auto& theme=context?modelUi:compact?quickUi:ui;NativeFluent::fill(dc,r,context||compact?theme.surface:theme.canvas);
+        if(hwnd==outlineHost){ui.inputFrame(dc,r,GetFocus()==outlineValue,GetPropW(outlineValue,L"FluentInputError")!=nullptr,IsWindowEnabled(outlineValue));return;}
         if(hwnd==panel){const int width=panelWidth();for(const auto& c:controls)if(c.field->kind!=0){RECT box{u(16),u(c.y)-scroll,u(16+width),u(c.y+68)-scroll};if(box.bottom<0||box.top>r.bottom)continue;NativeFluent::round(dc,box,ui.surface,ui.line,u(8));RECT icon{u(30),u(c.y)-scroll,u(56),u(c.y+68)-scroll};ui.glyph(dc,c.field->icon,icon,IsWindowEnabled(c.input)?ui.text:ui.disabled);}}
         else if(hwnd==window){RECT divider{u(232),0,u(233),r.bottom};NativeFluent::fill(dc,divider,theme.line);}else if(compact||context)NativeFluent::round(dc,r,theme.surface,theme.line,theme.px(8));
     }
@@ -403,6 +460,7 @@ struct NativeSettings {
         if((message.message==WM_LBUTTONDOWN||message.message==WM_RBUTTONDOWN)&&modelMenu&&IsWindowVisible(modelMenu)&&root!=modelMenu)hideModelMenu();
         if(message.message==WM_LBUTTONDOWN||message.message==WM_RBUTTONDOWN||message.message==WM_MBUTTONDOWN){if(quickWindow&&IsWindowVisible(quickWindow)&&root!=quickWindow)hideQuick();}if(!root)return false;
         if(message.message==WM_KEYDOWN){
+            if(message.hwnd==outlineValue&&(message.wParam==VK_ESCAPE||message.wParam==VK_RETURN)){SendMessageW(outlineValue,WM_KEYDOWN,message.wParam,message.lParam);return true;}
             if(message.wParam==VK_TAB||message.wParam==VK_LEFT||message.wParam==VK_RIGHT||message.wParam==VK_UP||message.wParam==VK_DOWN)SendMessageW(root,WM_CHANGEUISTATE,MAKEWPARAM(UIS_CLEAR,UISF_HIDEFOCUS),0);
             if(message.wParam==VK_ESCAPE){if(root==modelMenu)hideModelMenu();else if(root==quickWindow)hideQuick();else hide();return true;}if(message.wParam==VK_TAB)return IsDialogMessageW(root,&message)!=FALSE;
             if(message.wParam==VK_RETURN){wchar_t cls[32]{};GetClassNameW(message.hwnd,cls,32);if(std::wcscmp(cls,L"EDIT")==0){save();SetFocus(window);return true;}if(std::wcscmp(cls,L"Button")==0){SendMessageW(message.hwnd,BM_CLICK,0,0);return true;}}
@@ -420,6 +478,8 @@ struct NativeSettings {
     static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
         auto* self=reinterpret_cast<NativeSettings*>(GetWindowLongPtrW(hwnd,GWLP_USERDATA));if(msg==WM_NCCREATE){self=static_cast<NativeSettings*>(reinterpret_cast<CREATESTRUCTW*>(l)->lpCreateParams);SetWindowLongPtrW(hwnd,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(self));}if(!self)return DefWindowProcW(hwnd,msg,w,l);
         const bool context=hwnd==self->modelMenu,compact=hwnd==self->quickWindow;auto& theme=context?self->modelUi:compact?self->quickUi:self->ui;
+        if(msg==WM_SIZE&&hwnd==self->outlineHost&&self->outlineValue){RECT r{};GetClientRect(hwnd,&r);SetWindowPos(self->outlineValue,nullptr,self->u(7),self->u(7),std::max(1,int(r.right)-self->u(14)),std::max(1,int(r.bottom)-self->u(14)),SWP_NOZORDER|SWP_NOACTIVATE);return 0;}
+        if(msg==WM_LBUTTONDOWN&&hwnd==self->outlineHost&&IsWindowEnabled(self->outlineValue)){SetFocus(self->outlineValue);SendMessageW(self->outlineValue,EM_SETSEL,0,-1);return 0;}
         if(msg==WM_ENTERSIZEMOVE){self->moveWait=std::make_unique<NativeHealth::Pause>();return 0;}if(msg==WM_EXITSIZEMOVE){self->moveWait.reset();return 0;}
         if(msg==WM_CLOSE){if(context)self->hideModelMenu();else if(compact)self->hideQuick();else self->hide();return 0;}
         if(msg==WM_ACTIVATE&&(compact||context)&&LOWORD(w)==WA_INACTIVE){if(context)self->hideModelMenu();else self->hideQuick();return 0;}
@@ -430,13 +490,14 @@ struct NativeSettings {
         if(msg==WM_NCHITTEST&&(compact||context))return HTCLIENT;
         if(msg==WM_SIZE&&hwnd==self->window&&self->panel){if(w==SIZE_MINIMIZED)self->hideModelMenu();self->layout();self->notify();return 0;}if(msg==WM_GETMINMAXINFO&&hwnd==self->window){auto* info=reinterpret_cast<MINMAXINFO*>(l);info->ptMinTrackSize={self->u(800),self->u(540)};return 0;}
         if(msg==WM_DPICHANGED){const auto* r=reinterpret_cast<RECT*>(l);self->reloadTheme(hwnd,HIWORD(w));SetWindowPos(hwnd,nullptr,r->left,r->top,r->right-r->left,r->bottom-r->top,SWP_NOZORDER|SWP_NOACTIVATE);return 0;}
-        if((msg==WM_SETTINGCHANGE||msg==WM_THEMECHANGED)&&hwnd!=self->panel){if(self->panel||compact)self->reloadTheme(hwnd,GetDpiForWindow(hwnd));return 0;}
+        if((msg==WM_SETTINGCHANGE||msg==WM_THEMECHANGED)&&hwnd!=self->panel&&hwnd!=self->outlineHost){if(self->panel||compact)self->reloadTheme(hwnd,GetDpiForWindow(hwnd));return 0;}
         if(msg==WM_COMMAND){self->command(LOWORD(w),HIWORD(w));return 0;}if(msg==WM_HSCROLL){self->save();return 0;}
         if(hwnd==self->panel&&(msg==WM_VSCROLL||msg==WM_MOUSEWHEEL)){int next=self->scroll;if(msg==WM_MOUSEWHEEL)next-=GET_WHEEL_DELTA_WPARAM(w)/120*self->u(96);else if(LOWORD(w)==SB_LINEUP)next-=self->u(40);else if(LOWORD(w)==SB_LINEDOWN)next+=self->u(40);else if(LOWORD(w)==SB_PAGEUP)next-=self->u(320);else if(LOWORD(w)==SB_PAGEDOWN)next+=self->u(320);else if(LOWORD(w)==SB_THUMBTRACK){SCROLLINFO info{sizeof(info),SIF_TRACKPOS};GetScrollInfo(hwnd,SB_VERT,&info);next=info.nTrackPos;}self->scrollTo(next);return 0;}
         if(msg==WM_MOUSEWHEEL&&hwnd==self->window){SendMessageW(self->panel,msg,w,l);return 0;}
         if(msg==WM_CTLCOLORSTATIC||msg==WM_CTLCOLORBTN||msg==WM_CTLCOLOREDIT||msg==WM_CTLCOLORLISTBOX){
             const auto dc=reinterpret_cast<HDC>(w);const auto child=reinterpret_cast<HWND>(l);const bool inPanel=GetParent(child)==self->panel;bool card=inPanel&&GetDlgCtrlID(child)!=0&&GetDlgCtrlID(child)!=2110;
             if(child==self->listEmpty)card=true;
+            if(child==self->outlineValue)card=true;
             for(const auto& c:self->controls)if(c.label==child||c.hint==child){card=true;break;}
             SetBkMode(dc,TRANSPARENT);SetTextColor(dc,!IsWindowEnabled(child)?theme.disabled:GetPropW(child,L"FluentMuted")?theme.muted:theme.text);SetBkColor(dc,context||compact||card?theme.surface:theme.canvas);return reinterpret_cast<LRESULT>(context||compact||card?theme.surfaceBrush:theme.canvasBrush);
         }
