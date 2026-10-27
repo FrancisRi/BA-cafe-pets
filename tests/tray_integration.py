@@ -148,6 +148,12 @@ try:
     wait_for(lambda: windows('BaCafeNativePet'),'show pet from tray roster')
     wait_for(lambda: user.IsWindowEnabled(user.GetDlgItem(quick,3000)),'restored pet loaded')
     send(quick,0x111,3011)
+    send(full,0x111,1000)
+    mode=user.GetDlgItem(panel(),100)
+    assert send(mode,0x146)>=3,'Formation is available in the shipped full-interface mode combo'
+    send(mode,0x14E,2);send(panel(),0x111,(1<<16)|100)
+    wait_for(lambda: read_roster()['characters'][0]['mode']=='formation','save the shipped formation mode')
+    assert not user.IsWindowEnabled(user.GetDlgItem(panel(),105)),'Shipped formation disables follow controls'
     send(full,0x111,1003);send(panel(),0x111,2100)
     wait_for(lambda: not windows('BaCafeNativePet'),'hide model again')
     send(full,0x111,2);assert process.wait(timeout=10)==0
@@ -156,6 +162,13 @@ try:
     wait_for(lambda: user.IsWindowEnabled(user.GetDlgItem(full,2200)),'imports available in background')
     assert tray_window() and not windows('BaCafeNativePet') and not any(row['active'] for row in read_roster()['characters'])
     assert abs(read_roster()['characters'][0]['zoom']-round(zoom,2))<.0001,'Background restart preserves the hidden model size'
+    assert read_roster()['characters'][0]['mode']=='formation','Background restart preserves formation mode'
+    send(full,0x111,1003);send(panel(),0x111,2100)
+    wait_for(lambda: windows('BaCafeNativePet'),'restore a formation pet after restart')
+    send(full,0x111,1000)
+    wait_for(lambda: send(user.GetDlgItem(panel(),100),0x147)==2,'restored character actually enters formation')
+    send(full,0x111,1003);send(panel(),0x111,2100)
+    wait_for(lambda: not windows('BaCafeNativePet'),'hide restored formation pet')
     send(full,0x111,1003)
     user.PostMessageW(panel(),0x111,2102,0)
     confirm=wait_for(lambda: windows('#32770'),'remove final model record confirmation')[0]

@@ -184,6 +184,12 @@ public:
         idle(true);return true;
     }
     bool exiting() const { return phase==Phase::Death || phase==Phase::Retreat; }
+    void retire(){
+        clicks=0;skillSaved=false;state.dragging=false;
+        if(clips.death>=0)play(Phase::Death,clips.death);
+        else if(clips.retreat>=0)play(Phase::Retreat,clips.retreat);
+        else returnToCafe=true;
+    }
     void tick(double dt, const BattleInput& events={}) {
         const double activityDt=activityDelta.value_or(dt);activityDelta.reset();
         auto input=events;
@@ -198,12 +204,7 @@ public:
         if(!reloading)keyboardIdle=input.keyPressed ? 0 : keyboardIdle+activityDt;
         if(input.petClick) {
             if(clock-clickStart>1.2) {clicks=0;clickStart=clock;}
-            if(++clicks>=3) {
-                clicks=0;skillSaved=false;state.dragging=false;
-                if(clips.death>=0)play(Phase::Death,clips.death);
-                else if(clips.retreat>=0)play(Phase::Retreat,clips.retreat);
-                else returnToCafe=true;
-            }
+            if(++clicks>=3)retire();
         }
         // Drag wins over every animation, including a skill or a retirement.
         if(input.dragging) {

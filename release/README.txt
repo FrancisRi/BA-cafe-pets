@@ -1,4 +1,4 @@
-BA Cafe Pets 1.1.6 · Windows x64
+BA Cafe Pets 1.1.7 · Windows x64
 
 基于 maxiumlee（Max）的 ba-cafe-lite 继续开发。
 原作者：https://github.com/maxiumlee/ba-cafe-lite
@@ -8,7 +8,7 @@ BA Cafe Pets 1.1.6 · Windows x64
 便携版请退出旧程序后解压到原目录，运行 BA-Cafe-Pets.exe；旧 ba_cafe_lite.exe 不自动删除，请勿再启动。
 
 启动
-  单文件版双击 BA-Cafe-Pets-1.1.6-x64.exe；便携版解压后运行 BA-Cafe-Pets.exe。
+  单文件版双击 BA-Cafe-Pets-1.1.7-x64.exe；便携版解压后运行 BA-Cafe-Pets.exe。
   默认角色 Shiroko。
   不需要 Blender、浏览器、WebView2、Python 或开发环境。
   便携 ZIP 请完整解压，保留 model、defaults.ini、behavior 和 licenses。
@@ -26,6 +26,12 @@ BA Cafe Pets 1.1.6 · Windows x64
   模型管理中右键点击一行：显示／隐藏、设为当前、定位或删除。
   “退出桌宠”：保存设置并关闭全部角色。
   朝向鼠标：30° 模式转身时更新鼠标目标；头部中心附近忽略微小移动。
+  咖啡厅／战斗双击角色：播放 Exs，期间固定朝向屏幕并暂停移动和鼠标追踪，完成后回到原模式待机。
+  原处 1.2 秒内三连击：第二次先播放 Exs，第三次可中断技能；咖啡厅进入战斗，战斗倒下／退场后返回咖啡厅。
+  列队：快捷菜单或全局动作模式选择，播放 Formation_Idle；仅可提起和放下，固定朝前，暂停移动、散步和鼠标追踪。
+  列队期间禁用旋转和滚轮，仍可右键切换模式；原散步／跟随参数保留，模式按角色保存。
+  有多套 Formation_Idle 时进入列队随机选择，实际提起放下后随机换另一套，提起动作与该形态匹配；单套保持原动作。
+  没有 Exs 时双击不播放其他片段；没有 Formation_Idle 时列队不可选，没有提起动画时提起期间保持列队待机。
 
 画面质量
   全局设置 → 画质与抗锯齿：均衡／清晰档增强抗锯齿，省电档保留轻量渲染。

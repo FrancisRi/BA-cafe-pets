@@ -1,6 +1,7 @@
 #include "gltf_model.h"
 #include "animation_keys.h"
 #include "morph_outline.h"
+#include "animation_scale_transition.h"
 #include "rlgl.h"
 #include <algorithm>
 #include <bit>
@@ -75,6 +76,7 @@ Json discoverAnimations(const std::vector<Clip>& clips){
    }else if(role=="Cafe_Idle")match=has(n,{"idle","rest","空闲"})&&!attack&&!move&&posture.empty()&&!has(n,{"exs","skill","interaction","subidle","idlestart"});
    else if(role=="Cafe_Walk"||role=="Move_Ing")match=move&&!has(n,{"end","stop","start","jump","callsign","public","interaction","结束","跳"})&&!attack&&(!cafe||role=="Cafe_Walk");
    else if(role=="Cafe_Reaction")match=has(n,{"reaction","click","touch","反应"});
+   else if(role=="Formation_Idle")match=n=="formationidle";
    else if(role=="Formation_Pickup")match=has(n,{"pickup","pick","grab","拖拽"});
    else if(role=="Move_Jump")match=has(n,{"jump","hop","跳"})&&!has(n,{"random"});
    else if(role=="Exs")match=n.ends_with("exs")||n.ends_with("skill")||n.ends_with("技能");
@@ -105,8 +107,18 @@ Json discoverAnimations(const std::vector<Clip>& clips){
  Json cafe;for(auto [key,role]:{std::pair{"idle","Cafe_Idle"},{"walk","Cafe_Walk"},{"reaction","Cafe_Reaction"},{"pickup","Formation_Pickup"}})cafe[key]=find(role,"Humanoid",group,false);
  if(cafe["idle"]==-1){cafe["idle"]=!battle["poses"].empty()?battle["poses"][0]["idle"].get<int>():0;warnings.push_back("Cafe Idle fallback: "+clips[cafe["idle"].get<int>()].name);}
  if(cafe["walk"]==-1)cafe["walk"]=battle["move"];if(cafe["pickup"]==-1)cafe["pickup"]=cafe["idle"];
+ Json formation={{"idle",find("Formation_Idle","Humanoid",group,false)},{"pickup",find("Formation_Pickup","Humanoid",group,false)}};
+ if(formation["idle"]==-1)formation["idle"]=find("Formation_Idle",family,group,false);
+ if(formation["pickup"]==-1)formation["pickup"]=find("Formation_Pickup",family,group,false);
+ formation["poses"]=Json::array();
+ for(size_t i=0;i<clips.size();++i){const auto& id=ids[i];if(clips[i].duration<=0||id.excluded||(id.stem!="formationidle"&&id.stem!="formationidlerandom"))continue;
+  int pickup=find("Formation_Pickup",id.family,id.group,true);if(pickup<0&&id.family!="Humanoid")pickup=find("Formation_Pickup","Humanoid",id.group,true);
+  formation["poses"].push_back({{"idle",int(i)},{"pickup",pickup},{"family",id.family},{"group",id.group}});
+ }
+ if(formation["idle"]==-1&&!formation["poses"].empty()){formation["idle"]=formation["poses"][0]["idle"];formation["pickup"]=formation["poses"][0]["pickup"];}
+ int manualSkill=battle["skill"];if(manualSkill<0)manualSkill=find("Exs","Humanoid",group,false);
  notes.push_back("Native coherent group: "+family+":"+(group.empty()?"default":group));
- return {{"cafe",cafe},{"battle",battle},{"warnings",warnings},{"notes",notes},{"selection",{{"family",family},{"group",group},{"alternatives",alternatives}}}};
+ return {{"cafe",cafe},{"battle",battle},{"formation",formation},{"manual",{{"skill",manualSkill}}},{"warnings",warnings},{"notes",notes},{"selection",{{"family",family},{"group",group},{"alternatives",alternatives}}}};
 }
 
 GltfModel::GltfModel(const std::filesystem::path& file,const std::function<void(int,const std::string&)>& progress){
@@ -267,8 +279,10 @@ void GltfModel::visibility(int clip){
  for(const auto& guard:partGuards)if(clip<0||clip>=int(guard.driven.size())||!guard.driven[clip])nodes[guard.node].visible=false;
 }
 void GltfModel::sample(int clip,double seconds,double elapsed,bool blend){
- if(clip!=currentClip){frozen.clear();if(displayed&&blend)for(const auto& n:nodes)frozen.push_back(n.current);currentClip=clip;transition=0;blendSeconds=clip>=0?std::min(0.18,clips[clip].duration*0.35):0.18;visibility(clip);}
+ const bool changed=clip!=currentClip;
+ if(changed){frozen.clear();if(displayed&&blend)for(const auto& n:nodes)frozen.push_back(n.current);currentClip=clip;transition=0;blendSeconds=clip>=0?std::min(0.18,clips[clip].duration*0.35):0.18;visibility(clip);}
  transition+=std::max(0.0,elapsed);evaluate(clip,seconds);
+ if(changed&&!frozen.empty()&&compensatingScaleTransition(nodes,frozen))frozen.clear();
  if(!frozen.empty()&&blendSeconds>0){float t=float(std::clamp(transition/blendSeconds,0.0,1.0));t=t*t*(3-2*t);for(size_t i=0;i<nodes.size();i++){auto& p=nodes[i].current;const auto& from=frozen[i];p.t=Vector3Lerp(from.t,p.t,t);p.s=Vector3Lerp(from.s,p.s,t);p.q=QuaternionSlerp(from.q,p.q,t);for(size_t j=0;j<p.weights.size();j++)p.weights[j]=(j<from.weights.size()?from.weights[j]:0)*(1-t)+p.weights[j]*t;}if(t>=1)frozen.clear();}
  hierarchy();displayed=true;
 }
@@ -324,11 +338,13 @@ void GltfModel::analyze(const std::function<void(int,const std::string&)>& progr
  if(source=="height-fallback"){std::vector<Vector3> shoulders;for(const auto& n:nodes)if(compact(n.name).find("upperarm")!=std::string::npos)shoulders.push_back(transform(n.world,{}));if(shoulders.size()==2&&Vector3Distance(shoulders[0],shoulders[1])*fit>0.1){bodyWidth=Vector3Distance(shoulders[0],shoulders[1])*fit;source="shoulder-bones";}}
  const auto profiles=stopProfiles();progress(75,"采样必要动作的显示边界");Bounds resting;std::set<int> restingClips{idle};for(const auto& p:catalog["battle"]["poses"])restingClips.insert(p["idle"].get<int>());
  auto measure=[&](int index,double time){visibility(index);evaluate(index,time);hierarchy();return bounds();};
+ const auto originalRestingClips=restingClips;const int formationIdle=catalog["formation"]["idle"];if(formationIdle>=0)restingClips.insert(formationIdle);
+ for(const auto& pose:catalog["formation"]["poses"])restingClips.insert(pose["idle"].get<int>());
  Json placement=Json::array();
  for(int index:restingClips)if(index>=0){
   std::vector<Bounds> boxes(parts.size());
   for(double fraction:{0.0,0.25,0.5,0.75,1.0}){
-   resting.join(measure(index,clips[index].duration*fraction));
+   const auto sampled=measure(index,clips[index].duration*fraction);if(originalRestingClips.count(index))resting.join(sampled);
    // Placement uses only vertices this visible primitive actually draws.
    // Keep normalization and the rendering envelope unchanged.
    for(size_t k=0;k<parts.size();++k){const auto& p=*parts[k];if(!visible(nodes,p.node))continue;
@@ -338,7 +354,7 @@ void GltfModel::analyze(const std::function<void(int,const std::string&)>& progr
   Json shapes=Json::array();for(const auto& box:boxes)if(box.valid())shapes.push_back(box.json());
   placement.push_back({{"clip",index},{"boxes",shapes}});
  }
- Bounds envelope=resting;std::set<int> used;const auto collect=[&](auto&& self,const Json& j)->void{if(j.is_number_integer()){const int i=j;if(i>=0&&i<int(clips.size()))used.insert(i);}else if(j.is_object()||j.is_array())for(const auto& item:j)self(self,item);};collect(collect,catalog["cafe"]);collect(collect,catalog["battle"]);
+ Bounds envelope=resting;std::set<int> used;const auto collect=[&](auto&& self,const Json& j)->void{if(j.is_number_integer()){const int i=j;if(i>=0&&i<int(clips.size()))used.insert(i);}else if(j.is_object()||j.is_array())for(const auto& item:j)self(self,item);};collect(collect,catalog["cafe"]);collect(collect,catalog["battle"]);collect(collect,catalog["formation"]);collect(collect,catalog["manual"]);
  size_t done=0;for(int index:used){const int count=std::clamp(int(std::ceil(clips[index].duration*4)),2,16);for(int i=0;i<=count;i++)envelope.join(measure(index,clips[index].duration*i/count));progress(75+int(++done*20/std::max(size_t(1),used.size())),"计算动作范围 "+std::to_string(done)+" / "+std::to_string(used.size()));}
  const auto padding=Vector3Add(Vector3Scale(Vector3Subtract(envelope.high,envelope.low),0.12f),{0.12f,0.12f,0.12f});envelope.low=Vector3Subtract(envelope.low,padding);envelope.high=Vector3Add(envelope.high,padding);
  Json list=Json::array();for(size_t i=0;i<clips.size();i++)list.push_back({{"name",clips[i].name},{"duration",clips[i].duration},{"index",i}});

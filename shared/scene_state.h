@@ -24,7 +24,7 @@ struct SceneRoster {
         entries.clear();for(const auto& row:data.at("characters")){
             SceneEntry e{row.at("id"),row.at("path"),row.at("name"),row.value("mode","cafe"),row.value("active",false)};
             e.zoom=std::clamp(row.value("zoom",1.0f),0.45f,1.65f);
-            if(e.id.empty()||e.path.empty()||find(e.id))continue;if(e.mode!="battle")e.mode="cafe";
+            if(e.id.empty()||e.path.empty()||find(e.id))continue;if(e.mode!="battle"&&e.mode!="formation")e.mode="cafe";
             if(activeCount()>=Maximum)e.active=false;entries.push_back(e);
         }selected=data.value("selected",std::string{});
     }

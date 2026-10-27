@@ -37,13 +37,13 @@ struct Scene {
     Json snapshot(){
         auto result=selected().settingsSnapshot();Json rows=Json::array();
         for(const auto& e:roster.entries){const auto* a=find(e.id);rows.push_back({{"id",e.id},{"name",e.name},{"path",e.path},{"active",e.active},{"managed",bool(leader().managedLibrary(wide(e.path)))},
-            {"available",std::filesystem::is_regular_file(wide(e.path))},{"ready",a&&a->loaded&&a->displayed},{"failed",a&&a->done&&!a->loaded},{"loading",e.active&&(!a||(!a->loaded&&a->settings->importBusy))},{"battleAvailable",a&&a->loaded&&a->settings->battleAvailable},{"mode",e.mode}});}
+            {"available",std::filesystem::is_regular_file(wide(e.path))},{"ready",a&&a->loaded&&a->displayed},{"failed",a&&a->done&&!a->loaded},{"loading",e.active&&(!a||(!a->loaded&&a->settings->importBusy))},{"battleAvailable",a&&a->loaded&&a->settings->battleAvailable},{"formationAvailable",a&&a->loaded&&a->formationIdle>=0},{"mode",e.mode}});}
         result["characters"]=rows;result["selectedId"]=roster.selected;result["activeCount"]=roster.activeCount();result["maximum"]=SceneRoster::Maximum;
         if(const auto* entry=roster.find(roster.selected))result["name"]=entry->name;
         if(const auto* e=roster.find(roster.selected);e&&e->active){const auto* a=find(e->id);if(!a){result["name"]=e->name;result["busy"]=true;result["percent"]=0;result["detail"]="等待加载模型";result["battleAvailable"]=false;result["value"]["mode"]=e->mode;}}
         if(!error.empty())result["error"]=error;
         result["notice"]=importNotice;
-        bool capable=false;for(const auto& a:actors)capable|=a->displayed&&a->loaded&&(a->cafeWalk>=0||(a->battle&&a->battle->clips.move>=0));
+        bool capable=false;for(const auto& a:actors)capable|=a->displayed&&a->loaded&&!a->formationMode&&(a->cafeWalk>=0||(a->battle&&a->battle->clips.move>=0));
         result["canFollow"]=capable;return result;
     }
     void copySettings(App& target,const App& source){
@@ -55,7 +55,7 @@ struct Scene {
     }
     void changed(App& source){
         if(broadcasting)return;broadcasting=true;
-        for(auto& a:actors){if(a.get()!=&source)copySettings(*a,source);if(auto* e=roster.find(a->actorId))e->mode=a->battleMode?"battle":"cafe";}
+        for(auto& a:actors){if(a.get()!=&source)copySettings(*a,source);if(auto* e=roster.find(a->actorId))e->mode=a->modeName();}
         // The shared INI contains parameters. Per-character modes live only in the roster.
         save();broadcasting=false;sync();
     }
@@ -137,7 +137,7 @@ struct Scene {
         a.quickMenuRequest=[this,&a]{roster.selected=a.actorId;save();leader().nativeSettings->showQuick(a.window,leader().directory);};
         a.closeRequest=[this,&a]{close(a.displayed?a.actorId:roster.selected);};
         a.tickCallback=[this]{tick();};a.settingsChanged=[this,&a]{changed(a);};
-        a.followRequest=[this]{auto& a=selected();a.preferences.follow=!a.preferences.follow;if(a.preferences.follow){a.blockedCursor.reset();a.followPlanAt=0;a.interactionUntil=0;}a.preferences.save(a.settings->ini);changed(a);};
+        a.followRequest=[this]{auto& a=selected();if(a.formationMode)return;a.preferences.follow=!a.preferences.follow;if(a.preferences.follow){a.blockedCursor.reset();a.followPlanAt=0;a.interactionUntil=0;}a.preferences.save(a.settings->ini);changed(a);};
         a.avoidHeading=[this,&a](float yaw,double distance){return steer(a,yaw,distance);};
         a.depthRequest=[this]{orderDepth();};
         if(first)a.sessionChanged=[this]{frameClock.reset(preciseSeconds());frameStatsAt=previousFrameAt=0;frameIntervals.clear();frameCosts.clear();armFrame();input.clear();input.lastKeyboard=0;const double now=preciseSeconds();for(auto& actor:actors){actor->lastTick=now;actor->nextRender=0;actor->pendingRender=false;actor->motionVelocity={};actor->motionRemaining=0;if(actor->renderer)actor->renderer->resume();}};
@@ -148,7 +148,7 @@ struct Scene {
                 if(segmentDistance(a.ground.position,end,p)<radius(a)+radius(*b)+0.04)return false;
             }return true;
         };
-        a.loadedCallback=[this,&a]{copySettings(a,leader());placeNew(a);if(auto* e=roster.find(a.actorId))e->mode=a.battleMode?"battle":"cafe";save();sync();};
+        a.loadedCallback=[this,&a]{copySettings(a,leader());placeNew(a);if(auto* e=roster.find(a.actorId))e->mode=a.modeName();save();sync();};
         a.destroyedCallback=[this,&a]{if(&a==&leader()){stopping=true;PostQuitMessage(a.exitCode);}else{a.displayed=false;if(auto* e=roster.find(a.actorId))e->active=false;save();sync();}};
         a.initialize(first);
         if(!first)copySettings(a,leader());
@@ -209,7 +209,7 @@ struct Scene {
         if(auto* a=find(id)){
             const bool reopening=!a->displayed;a->displayed=true;a->done=false;a->lastTick=preciseSeconds();copySettings(*a,leader());
             if(!a->loaded&&!a->settings->importBusy)a->requestModel(wide(e->path));
-            if(reopening&&a->loaded){a->setZoom(commonZoom());a->selectMode(a->battleMode,false);}
+            if(reopening&&a->loaded){a->setZoom(commonZoom());a->selectActionMode(a->modeName(),false);}
             ShowWindow(a->window,SW_SHOWNOACTIVATE);ShowWindow(a->inputWindow,SW_SHOWNOACTIVATE);placeNew(*a);
         }
         input.enable(true);error.clear();save();sync();
@@ -354,11 +354,11 @@ struct Scene {
         if(leader().nativeSettings->visible())events.keyPressed=events.reload=events.mouseClick=events.windowClosed=false;
         const bool calling=std::any_of(actors.begin(),actors.end(),[](const auto& a){return a->displayed&&a->battleMode&&a->battle&&a->battle->phase==pet::Battle::Phase::Callsign;});
         std::vector<App*> candidates;
-        if(events.mouseClick&&!calling)for(auto& a:actors)if(a->displayed&&a->loaded&&a->battleMode&&a->battle->canCallsign()&&!a->directed.jumping&&!a->state.settingsOpen)candidates.push_back(a.get());
+        if(events.mouseClick&&!calling)for(auto& a:actors)if(a->displayed&&a->loaded&&!a->manualAction&&a->battleMode&&a->battle->canCallsign()&&!a->directed.jumping&&!a->state.settingsOpen)candidates.push_back(a.get());
         App* caller=candidates.empty()?nullptr:candidates[std::uniform_int_distribution<size_t>(0,candidates.size()-1)(leader().state.random)];
         bool modesChanged=false;
         for(auto& a:actors)if(a->displayed||a->pendingImport){a->deferRendering=true;a->sharedEvents=events;a->sharedEvents.mouseClick=a.get()==caller;a->tick();
-            if(a->loaded)if(auto* e=roster.find(a->actorId)){const auto mode=a->battleMode?"battle":"cafe";if(e->mode!=mode){e->mode=mode;modesChanged=true;}}
+            if(a->loaded)if(auto* e=roster.find(a->actorId)){const auto mode=a->modeName();if(e->mode!=mode){e->mode=mode;modesChanged=true;}}
             if(stopping)break;}
         if(!stopping)separateCrowd();
         if(modesChanged){save();sync();}

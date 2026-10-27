@@ -9,7 +9,7 @@ struct PetSettings {
     std::wstring title, ini;
     std::wstring outlineTitle=L"模型描边", outlineDescription=L"突出角色外轮廓";
     // Opt-in: the separate Three.js prototype keeps its existing menu.
-    bool modesEnabled=false, battleAvailable=false, battleMode=false;
+    bool modesEnabled=false, battleAvailable=false, battleMode=false,formationMode=false;
     std::optional<bool> modeRequest;
     int bodyOffset() const { return modesEnabled ? 64 : 0; }
     int height() const { return 568+bodyOffset(); }
@@ -87,7 +87,7 @@ struct PetSettings {
         };
         write(L"InputIdleSeconds", state.idleSecondsOverride);
         write(L"ContinuedInputSeconds", state.activeSecondsOverride);
-        if(modesEnabled)ok &= WritePrivateProfileStringW(L"Behavior",L"Mode",battleMode?L"Battle":L"Cafe",ini.c_str())!=0;
+        if(modesEnabled)ok &= WritePrivateProfileStringW(L"Behavior",L"Mode",formationMode?L"Formation":battleMode?L"Battle":L"Cafe",ini.c_str())!=0;
         if (!ok) TraceLog(LOG_WARNING, "SETTINGS could not save preferences (%lu)", GetLastError());
     }
     bool applyTimes() {

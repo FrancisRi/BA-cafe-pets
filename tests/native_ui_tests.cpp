@@ -153,11 +153,24 @@ int main(int argc,char** argv){
         state["activeCount"]=5;menu.sync();menu.toggleRoster(2);check(sent.size()==count,"Five-model cap is respected");menu.toggleRoster(1);check(state["characters"][1]["active"]==false,"Models can still be hidden at the cap");state["activeCount"]=1;
         state["battleAvailable"]=false;menu.sync();const auto before=sent.size();menu.command(3001,BN_CLICKED);check(sent.size()==before,"Unsupported battle mode is disabled");
         state["battleAvailable"]=true;menu.sync();menu.command(3001,BN_CLICKED);check(state["value"]["mode"]=="battle","Quick mode switch uses existing save protocol");
+        state["formationAvailable"]=true;menu.sync();menu.command(3006,BN_CLICKED);
+        check(state["value"]["mode"]=="formation"&&menu.quickChecked(3006)&&!menu.quickChecked(3000),"Quick formation mode is independently selected");
+        const auto formationSaved=state["value"];for(int id:{3002,3003,3004,3005}){check(!IsWindowEnabled(GetDlgItem(menu.quickWindow,id)),"Formation disables movement and tracking toggles");menu.command(id,BN_CLICKED);}
+        check(state["value"]==formationSaved,"Disabled formation toggles preserve existing behavior settings");
+        menu.command(3000,BN_CLICKED);check(state["value"]["mode"]=="cafe"&&state["value"]["follow"]==formationSaved["follow"],"Leaving formation restores the saved follow preference");
+        state["battleAvailable"]=false;menu.sync();check(menu.modeChoices()==std::vector<std::string>({"cafe","formation"})&&menu.modeIndex("formation")==1,"Formation combo mapping works without a battle option");
+        state["formationAvailable"]=false;menu.sync();const auto noFormation=sent.size();menu.command(3006,BN_CLICKED);check(sent.size()==noFormation,"Missing Formation_Idle disables formation mode");state["formationAvailable"]=state["battleAvailable"]=true;menu.sync();
         state["busy"]=true;menu.sync();check(!IsWindowEnabled(GetDlgItem(menu.quickWindow,3002)),"Loading disables behavior edits");check(IsWindowEnabled(GetDlgItem(menu.quickWindow,3011)),"Full settings remain accessible while loading");state["busy"]=false;menu.sync();
         menu.command(3011,BN_CLICKED);pump(menu);check(IsWindowVisible(menu.window)&&!IsWindowVisible(menu.quickWindow),"Full interface replaces the flyout");
         check(!(GetWindowLongPtrW(menu.window,GWL_EXSTYLE)&WS_EX_TOPMOST),"Full settings must be a normal non-topmost window");
         check(visibility.size()==1&&visibility[0],"Quick-to-full transition keeps interface visibility continuous");
         check(!menu.pausesPets()&&pauses==std::vector<bool>({true,false}),"Switching from quick menu to full settings resumes pets");
+        const auto chooseMode=[&](int index){auto combo=GetDlgItem(menu.panel,100);SendMessageW(combo,CB_SETCURSEL,index,0);menu.command(100,CBN_SELCHANGE);pump(menu);};
+        chooseMode(2);check(state["value"]["mode"]=="formation","Full interface selects formation through its actual combo/save path");
+        const auto savedFollow=state["value"]["follow"];for(const auto& c:menu.controls)if(c.field->kind==0)check(!IsWindowEnabled(c.input),"Full formation settings disable behavior toggles");
+        menu.save();check(state["value"]["follow"]==savedFollow,"Saving formation appearance does not overwrite disabled behavior values");
+        chooseMode(0);check(state["value"]["mode"]=="cafe"&&state["value"]["follow"]==savedFollow,"Full interface restores cafe preferences");
+        state["battleAvailable"]=false;menu.sync();chooseMode(1);check(state["value"]["mode"]=="formation","Full interface maps the second combo choice to formation when battle is unavailable");chooseMode(0);state["battleAvailable"]=true;menu.sync();
         menu.hide();menu.show(nullptr,std::filesystem::current_path());pump(menu);
         check(!(GetWindowLongPtrW(menu.window,GWL_EXSTYLE)&WS_EX_TOPMOST),"Reopening full settings must not promote it to topmost");
         const auto pauseCount=pauses.size();ShowWindow(menu.window,SW_MINIMIZE);pump(menu);ShowWindow(menu.window,SW_RESTORE);pump(menu);

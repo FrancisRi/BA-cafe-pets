@@ -42,6 +42,8 @@ Git 的新增行和提交作者记录用于追溯，不单独证明某行的版�
 - `native_model_library.h`
 - `native_model_storage.h`
 - `native_tray.h`
+- `native_pet_clicks.h`
+- `animation_scale_transition.h`
 - `tests/antialias_tests.cpp`
 - `tests/autostart_tests.cpp`
 - `tests/launcher_storage_compatibility.py`
@@ -51,6 +53,7 @@ Git 的新增行和提交作者记录用于追溯，不单独证明某行的版�
 - `tests/morph_outline_tests.cpp`
 - `tests/native_model_unification_tests.cpp`
 - `tests/native_drag_follow_tests.cpp`
+- `tests/native_interaction_tests.cpp`
 - `tests/native_ui_tests.cpp`
 - `tests/tray_background_regressions.py`
 - `tests/tray_integration.py`

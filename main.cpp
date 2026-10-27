@@ -67,6 +67,7 @@ void replaceAll(std::string& text,const std::string& from,const std::string& to)
 #include "native_session.h"
 #include "native_loop.h"
 #include "native_frame.h"
+#include "native_pet_clicks.h"
 #include "native_settings.h"
 #include "native_renderer.h"
 #include "native_tray.h"
@@ -112,11 +113,11 @@ struct App {
     CrowdSteering crowd;uint64_t crowdId=0;double movementDt=0.008;float walkIntentYaw=0;
     std::function<bool(float,double)> clearJump;
     pet::BattleInput sharedEvents{};
-    double cafeClickStart=-10;int cafeClicks=0;
+    NativePetClicks clickSequence;bool doubleClickRequest=false,tripleClickRequest=false,manualAction=false;
     std::unique_ptr<nativepet::NativeRenderer> renderer;bool pendingImport=false;double nextRender=0;uint64_t renderedFrames=0;
     pet::Playback state;std::unique_ptr<pet::Behavior> behavior;std::unique_ptr<PetSettings> settings;
     std::unique_ptr<pet::Battle> battle;NativeDesktopInput battleInput;
-    bool battleMode=false;
+    bool battleMode=false,formationMode=false;
     PetGround ground;PetJourney journey;RECT work{};float primaryHeight=1,eyeHeight=1.7f,yaw=0,zoom=1;
     POINT down{},previous{};bool left=false,right=false,menuPressed=false,rightDragged=false,dragged=false,wasDragging=false,click=false,dragStarted=false;
     bool lookHotkey=false,quitHotkey=false;uint64_t walkGeneration=0;
@@ -137,7 +138,10 @@ struct App {
     std::optional<float> restFacing;
     pet::BattleInput deferredInput{};bool deferredCafeClick=false;
     std::string settingsError;
-    int windowWidth=Size,windowHeight=Size,cafeIdle=-1,cafeWalk=-1,cafeJump=-1;
+    int windowWidth=Size,windowHeight=Size,cafeIdle=-1,cafeWalk=-1,cafeJump=-1,formationIdle=-1,formationPickup=-1,manualSkill=-1;
+    struct FormationPose {int idle=-1,pickup=-1;};std::vector<FormationPose> formationPoses;size_t formationPoseIndex=0;
+    const char* modeName() const {return formationMode?"formation":battleMode?"battle":"cafe";}
+    bool frontLocked() const {return formationMode||manualAction||(battleMode&&battle&&battle->phase==pet::Battle::Phase::Skill);}
     POINT windowPosition{LONG_MIN,LONG_MIN};
     POINT committedOrigin{};Vector2 committedFoot{};bool committedFrame=false;
 
@@ -180,14 +184,15 @@ struct App {
     }
     Json settingsSnapshot() const {
         auto value=preferences.json();value.update({{"look",state.trackingEnabled},{"outline",state.outlineEnabled},
-            {"mode",battleMode?"battle":"cafe"},{"idleSeconds",state.inactivityThreshold()},{"activeSeconds",state.activeSecondsOverride.value_or(30)}});
+            {"mode",modeName()},{"idleSeconds",state.inactivityThreshold()},{"activeSeconds",state.activeSecondsOverride.value_or(30)}});
         const auto sampling=renderer?renderer->sampling():nativepet::NativeRenderer::Sampling{-1,1,0};
         Json startup={{"enabled",false},{"available",bool(autostartSettings)}};
         if(!autostartError.empty())startup["error"]=autostartError;
         try{if(autostartSettings)startup["enabled"]=autostartSettings->enabled();}catch(const std::exception& e){startup["error"]=e.what();}
         return {{"type","settings"},{"name",utf8(settings->title)},{"value",value},{"startup",startup},{"battleAvailable",settings->battleAvailable},
             {"renderSampling",{{"visible",displayed},{"ready",loaded&&sampling.quality==preferences.renderQuality},{"scale",sampling.scale},{"msaa",sampling.msaa}}},
-            {"canFollow",battleMode?battle&&battle->clips.move>=0:cafeWalk>=0},{"busy",settings->importBusy},{"percent",settings->importPercent},
+            {"formationAvailable",formationIdle>=0},{"manualSkillAvailable",manualSkill>=0},
+            {"canFollow",!formationMode&&(battleMode?battle&&battle->clips.move>=0:cafeWalk>=0)},{"busy",settings->importBusy},{"percent",settings->importPercent},
             {"detail",utf8(settings->progressDetail)},{"error",settingsError},{"modelsDirectory",utf8(modelLibrary().directory.wstring())},{"modelsDirectoryDefault",NativeModelStorage::same(modelLibrary().directory,modelStorageSettings->defaultDirectory())}};
     }
     void syncSettings(){if(syncRequest)syncRequest();else if(nativeSettings)nativeSettings->sync();}
@@ -302,13 +307,13 @@ struct App {
         bool valid=candidate.apply(value);
         for(const char* key:{"look"})valid&=value.contains(key)&&value[key].is_boolean();
         for(const char* key:{"idleSeconds","activeSeconds"})valid&=value.contains(key)&&value[key].is_number()&&std::isfinite(value[key].get<double>())&&value[key].get<double>()>=1&&value[key].get<double>()<=3600;
-        const auto mode=value.value("mode",std::string{});valid&=mode=="cafe"||(mode=="battle"&&settings->battleAvailable);
+        const auto mode=value.value("mode",std::string{});valid&=mode=="cafe"||(mode=="battle"&&settings->battleAvailable)||(mode=="formation"&&formationIdle>=0);
         if(!valid){settingsError="设置值超出允许范围，未保存";syncSettings();return;}
         const bool startFollow=!preferences.follow&&candidate.follow;
         if(candidate.cafeLookMode!=preferences.cafeLookMode)cafeAttention.pause();
         preferences=candidate;if(startFollow){blockedCursor.reset();followPlanAt=0;interactionUntil=0;}state.trackingEnabled=value["look"];state.outlineEnabled=preferences.outlineMode!=0;
         state.idleSecondsOverride=value["idleSeconds"];state.activeSecondsOverride=value["activeSeconds"];
-        if((mode=="battle")!=battleMode)selectMode(mode=="battle",false);
+        if(mode!=modeName())selectActionMode(mode,false);
         if(!directed.jumping)directed.cancel();restFacing.reset();placementNeeded=true;state.resetCooldown();applyPreferences();settings->save();preferences.save(settings->ini);
         settingsError.clear();syncSettings();state.log("SETTINGS saved: follow="+std::to_string(preferences.follow)+" interval="+std::to_string(preferences.moveInterval));
         if(settingsChanged)settingsChanged();
@@ -342,24 +347,49 @@ struct App {
         NativeHealth::Pause saving;
         try{requestModel(modelLibrary().store(file));}catch(const std::exception& error){settingsError=error.what();syncSettings();}
     }
-    bool selectMode(bool enabled,bool persist=false){
+    bool selectMode(bool enabled,bool persist=false){return selectActionMode(enabled?"battle":"cafe",persist);}
+    void chooseFormationPose(bool different){
+        if(formationPoses.empty())return;
+        const size_t size=formationPoses.size();
+        formationPoseIndex=different&&size>1?(formationPoseIndex+std::uniform_int_distribution<size_t>(1,size-1)(state.random))%size:std::uniform_int_distribution<size_t>(0,size-1)(state.random);
+        formationIdle=formationPoses[formationPoseIndex].idle;formationPickup=formationPoses[formationPoseIndex].pickup;
+        state.start(formationIdle,true);
+    }
+    bool selectActionMode(const std::string& mode,bool persist=false){
         if(!behavior || !battle)return false;
+        const bool enabled=mode=="battle",formation=mode=="formation";
+        if(mode!="cafe"&&!enabled&&!formation)return false;
+        if(formation&&formationIdle<0)return false;
         if(enabled && !battle->clips.supported()){
             state.log("MODE battle unavailable: "+battle->clips.missing);return false;
         }
         const auto anchor=ground.position;const float facing=yaw;
-        behavior->halt();stopLocomotion();blockedCursor.reset();placementNeeded=false;
+        behavior->halt();stopLocomotion();blockedCursor.reset();placementNeeded=false;manualAction=false;
+        clickSequence.reset();doubleClickRequest=tripleClickRequest=wasDragging=dragStarted=false;
         deferredInput={};deferredCafeClick=false;
         state.pendingClick=false;state.dragging=false;state.trackingCursor=false;
         state.returnRequested=state.returningHome=state.returnArrived=false;
         state.resetCooldown();
-        battleMode=enabled;settings->battleMode=enabled;battleInput.pollKeyboard=false;if(!grouped)battleInput.enable(enabled);
-        if(enabled)battle->start();else if(!fixedPose){const bool walk=state.walkEnabled,look=state.trackingEnabled;state.walkEnabled=state.trackingEnabled=false;behavior->tick(0);state.walkEnabled=walk;state.trackingEnabled=look;}
-        ground.position=anchor;yaw=facing;updatePlacementShape();placementGeneration=state.generation;interactionUntil=preciseSeconds()+0.5;
+        battleMode=enabled;formationMode=formation;settings->battleMode=enabled;settings->formationMode=formation;
+        battleInput.pollKeyboard=false;if(!grouped)battleInput.enable(enabled);
+        if(formation)chooseFormationPose(false);
+        else if(enabled)battle->start();else if(!fixedPose){const bool walk=state.walkEnabled,look=state.trackingEnabled;state.walkEnabled=state.trackingEnabled=false;behavior->tick(0);state.walkEnabled=walk;state.trackingEnabled=look;}
+        ground.position=anchor;yaw=formation?0:facing;updatePlacementShape();placementGeneration=state.generation;interactionUntil=preciseSeconds()+0.5;
         if(persist)settings->save();
         syncSettings();
-        state.log(std::string("MODE ")+(enabled?"battle":"cafe")+"; battle supported="+(battle->clips.supported()?"1":"0"));
+        state.log(std::string("MODE ")+modeName()+"; battle supported="+(battle->clips.supported()?"1":"0"));
         return true;
+    }
+    bool startManualSkill(){
+        if(formationMode||manualSkill<0||!loaded||state.settingsOpen)return false;
+        behavior->halt();stopLocomotion();if(battleMode)battle->start();
+        manualAction=true;state.pendingClick=false;state.facingRequest.reset();state.trackingCursor=false;
+        state.start(manualSkill,false);state.reaction=0;yaw=0;placementNeeded=false;return true;
+    }
+    void finishManualSkill(){
+        manualAction=false;stopLocomotion();state.pendingClick=false;state.resetCooldown();
+        if(battleMode)battle->start();else{behavior->halt();state.start(cafeIdle,true);}
+        yaw=0;interactionUntil=preciseSeconds()+0.5;placementNeeded=false;
     }
     void initializeBehavior(const Json& message){
         if(!grouped)battleInput.enable(false);battle.reset();behavior.reset();state.clips.clear();state.active=false;state.current=-1;
@@ -377,6 +407,10 @@ struct App {
         auto name=[&](const char* role) {const int i=index(catalog.at("cafe"),role);return i<0?std::string{}:state.clips[i].name;};
         const auto idle=name("idle"),walk=name("walk"),reaction=name("reaction"),pickup=name("pickup");
         cafeIdle=index(catalog.at("cafe"),"idle");cafeWalk=index(catalog.at("cafe"),"walk");
+        formationIdle=index(catalog.value("formation",Json::object()),"idle");formationPickup=index(catalog.value("formation",Json::object()),"pickup");
+        formationPoses.clear();for(const auto& pose:catalog.value("formation",Json::object()).value("poses",Json::array())){const int idle=index(pose,"idle");if(idle>=0)formationPoses.push_back({idle,index(pose,"pickup")});}
+        if(formationPoses.empty()&&formationIdle>=0)formationPoses.push_back({formationIdle,formationPickup});
+        manualSkill=index(catalog.value("manual",catalog.at("battle")),"skill");
         if(idle.empty())throw std::runtime_error("No usable default clip");
         for(const auto& warning:catalog.at("warnings"))state.log("ANIMATION mapping: "+warning.get<std::string>());
         for(const auto& note:catalog.value("notes",Json::array()))state.log("ANIMATION selection: "+note.get<std::string>());
@@ -429,9 +463,10 @@ struct App {
         battle->endBeforeReload=true;battle->smoothStops=smooth;
         applyPreferences();
         wchar_t savedMode[24]{};GetPrivateProfileStringW(L"Behavior",L"Mode",L"Cafe",savedMode,24,settings->ini.c_str());
-        const bool requested=initialMode=="battle" || (initialMode.empty() && std::wcscmp(savedMode,L"Battle")==0);
+        std::string requested=initialMode.empty()?(std::wcscmp(savedMode,L"Battle")==0?"battle":std::wcscmp(savedMode,L"Formation")==0?"formation":"cafe"):initialMode;
         if(!fixedPose && initialMode=="battle" && !settings->battleAvailable)throw std::runtime_error("Model has no battle animations: "+battle->clips.missing);
-        selectMode(!fixedPose && requested && settings->battleAvailable);
+        if(!fixedPose&&initialMode=="formation"&&formationIdle<0)throw std::runtime_error("Model has no Formation_Idle animation");
+        if(fixedPose||!selectActionMode(requested))selectMode(false);
         if(fixedPose){const auto selected=reviewClip.empty()?idle:reviewClip;state.start(state.find(selected),true);state.time=reviewTime;}
         model=pendingModel;loaded=true;frameReady=false;readyAt=GetTickCount64();journey={};yaw=0;stopTurn.reset();
         directed.cancel();restFacing.reset();geometry=DesktopGeometry{};
@@ -479,20 +514,40 @@ struct App {
         ground.modelZoom=zoom;state.movementScale=zoom*WalkSpeedMultiplier*(battleMode?3.0:1.0);updatePlacementShape();geometry.measure(ground,zoom);
         const double idle=idleInputSeconds();
         if(!fixedPose){
+            const bool dragging=left&&dragged;
+            if(formationMode){
+                if(!dragging&&(wasDragging||dragStarted))chooseFormationPose(true);
+                const int target=dragging&&formationPickup>=0?formationPickup:formationIdle;
+                if(!state.active||state.current!=target)state.start(target,true);
+                state.dragging=dragging;state.walking=false;state.pendingClick=false;state.trackingCursor=false;state.facingRequest.reset();
+                state.returnRequested=state.returningHome=state.returnArrived=false;
+                if(!state.settingsOpen)state.advance(dt);yaw=0;wasDragging=dragging;
+                click=dragStarted=doubleClickRequest=tripleClickRequest=false;renderFrame();return;
+            }
+            if(tripleClickRequest){
+                doubleClickRequest=false;
+                if(battleMode||settings->battleAvailable){manualAction=false;behavior->halt();stopLocomotion();
+                    if(battleMode)battle->retire();else{selectMode(true,!review);if(settingsChanged)settingsChanged();}}
+                click=false;
+            }else if(doubleClickRequest&&!dragging){startManualSkill();click=false;}
+            doubleClickRequest=tripleClickRequest=false;
+            if(manualAction&&dragging)finishManualSkill();
+            if(manualAction){
+                yaw=0;state.pendingClick=false;state.trackingCursor=false;state.facingRequest.reset();
+                if(!state.settingsOpen)state.advance(dt);
+                if(state.time>=state.clips[state.current].duration)finishManualSkill();
+                click=dragStarted=false;wasDragging=dragging;renderFrame();return;
+            }
             if(observeDebouncedInput(state,idle,elapsed,preferences.inputGrace) && !battleMode&&!preferences.follow&&!directed.active){state.trackingCursor=false;state.returnRequested=state.walkEnabled&&journey.requestReturn(ground.position);if(!state.returnRequested)yaw=0;}
             POINT cursor{};GetCursorPos(&cursor);const Vector2 pixel{float(cursor.x-work.left),float(cursor.y-work.top)};
             const auto goal=battleMode&&state.inputActive?ground.planeAt(pixel,1.15f*zoom):ground.floorAt(ground.clampFoot(pixel));const float dx=goal.x-ground.position.x,dz=goal.z-ground.position.z;
             state.cursorTarget=dx*dx+dz*dz>0.04f;state.cursorYaw=std::atan2(dx,dz)*RAD2DEG;
             float lookYaw=0;state.lookTarget=ground.faceCursor(pixel,eyeHeight*zoom,lookYaw);state.lookYaw=lookYaw;
-            const bool dragging=left&&dragged,front=click||dragStarted||wasDragging!=dragging;
-            if(!battleMode&&click){
-                if(preciseNow-cafeClickStart>1.2){cafeClicks=0;cafeClickStart=preciseNow;}
-                if(++cafeClicks>=3){cafeClicks=0;if(settings->battleAvailable){selectMode(true,!review);state.log("CAFE triple click -> battle");syncSettings();if(settingsChanged)settingsChanged();click=false;}}
-            }
+            const bool front=click||dragStarted||wasDragging!=dragging;
             if((front&&!directed.jumping)||dragging||right){blockedCursor.reset();cafeAttention.pause();directed.cancel();deferredInput={};deferredCafeClick=false;restFacing.reset();interactionUntil=preciseNow+2;placementNeeded=true;}
             if(front&&!directed.jumping)yaw=0;if(front||dragging||right||!state.walkEnabled){journey.route.clear();state.returnRequested=false;}
             if(battleMode){
-                auto events=grouped?sharedEvents:battleInput.take(click,dragging,false);events.petClick=click;events.dragging=dragging;
+                auto events=grouped?sharedEvents:battleInput.take(false,dragging,false);events.petClick=false;events.dragging=dragging;
                 if(directed.jumping){
                     deferredInput.keyPressed|=events.keyPressed;deferredInput.reload|=events.reload;
                     deferredInput.mouseClick|=events.mouseClick;deferredInput.windowClosed|=events.windowClosed;
@@ -719,6 +774,7 @@ struct App {
     }
     void updatePlacementShape(){
         geometry.yaw=yaw;int idle=cafeIdle;
+        if(formationMode)idle=formationIdle;
         if(battleMode&&battle)idle=battle->idleClip();
         const int clip=idle>=0&&idle<int(state.clips.size())?state.clips[idle].modelIndex:-1;
         if(loaded&&geometry.restingClip!=clip)placementNeeded=true;
@@ -744,26 +800,26 @@ struct App {
         // Normal movement/rotation/zoom commits the image AND origin together
         // in UpdateLayeredWindow. Only an explicit drag translates a cached frame.
         windowWidth=geometry.width;windowHeight=geometry.height;lastPost=now;
-        const bool turningWalk=!battleMode&&cafeAttention.turning&&cafeWalk>=0;
+        const bool turningWalk=!formationMode&&!manualAction&&!battleMode&&cafeAttention.turning&&cafeWalk>=0;
         const int index=turningWalk?cafeWalk:directed.active?(directed.jumping?(battleMode?battle->clips.jump:cafeJump):(battleMode?battle->clips.move:cafeWalk)):state.current;
         const int clip=index>=0?state.clips[index].modelIndex:0;
         const double playbackRate=!battleMode&&index==cafeIdle&&state.loop&&!state.walking&&!turningWalk&&!directed.active?0.75
             :1.0;
         const bool retreat=battle&&state.current==battle->clips.retreat;
         const bool victory=battleMode&&battle&&(battle->phase==pet::Battle::Phase::VictoryStart||battle->phase==pet::Battle::Phase::VictoryEnd);
-        const float displayYaw=std::remainder(yaw+(retreat?180.0f:0),360.0f);
+        const float displayYaw=frontLocked()?0:std::remainder(yaw+(retreat?180.0f:0),360.0f);
         if(retreat && retreatLogged!=state.generation) {
             retreatLogged=state.generation;std::printf("RETREAT facing: base=%.1f render=%.1f offset=180\n",yaw,displayYaw);std::fflush(stdout);
         }
         if(victory&&victoryLogged!=state.generation){victoryLogged=state.generation;state.log("VICTORY facing: render=0");}
         post({{"type","state"},{"maskRevision",maskRevision},{"generation",displayGeneration()},{"clip",clip},{"time",fixedPose?reviewTime:turningWalk?cafeAttention.time:directed.active?(directed.jumping?directed.jumpTime:directed.time):state.time},{"loop",turningWalk|| (directed.active?!directed.jumping:state.loop)},{"review",fixedPose},
-            {"mode",battleMode?"battle":"cafe"},{"paused",paused},
+            {"mode",modeName()},{"paused",paused},
             {"camera",{ground.camera.position.x,ground.camera.position.y,ground.camera.position.z}},{"fov",ground.camera.fovy},{"far",500*std::max(1.0f,ground.height/primaryHeight)},
             {"desktop",{ground.width,ground.height}},{"viewport",{windowWidth,windowHeight}},{"crop",{crop.x,crop.y}},{"surfaceOrigin",{surfaceOrigin.x,surfaceOrigin.y}},{"position",{displayPosition.x,0,displayPosition.z}},
             {"velocity",{motionVelocity.x,0,motionVelocity.z}},{"motionRemaining",motionRemaining},{"sampleTime",lastTick*1000},{"playbackRate",playbackRate},
             {"smooth",smooth},{"menuHint",menuHintVisible&&!state.settingsOpen},
             {"zoom",zoom},{"yaw",victory?0:displayYaw},{"outline",state.outlineEnabled},{"outlineMode",preferences.outlineMode},{"renderQuality",preferences.renderQuality},{"outlineWidth",preferences.outlineWidth},{"interacting",left||right},
-            {"resting",!left&&!right&&!state.walking&&!directed.active&&!turningWalk&&(battleMode?battle->phase==pet::Battle::Phase::Idle:state.current==cafeIdle)}});
+            {"resting",!manualAction&&!left&&!right&&!state.walking&&!directed.active&&!turningWalk&&(formationMode?state.current==formationIdle:battleMode?battle->phase==pet::Battle::Phase::Idle:state.current==cafeIdle)}});
     }
     void captureMouse(){
         SetCapture(inputWindow);
@@ -797,22 +853,22 @@ struct App {
             case WM_TIMER:if(!app->session.paused()){if(app->tickCallback)app->tickCallback();else app->tick();}return 0;
             case WM_LBUTTONDOWN:if(app->right||app->menuPressed)return 0;app->left=true;app->dragged=false;app->down=app->previous=cursor;app->captureMouse();return 0;
             case WM_RBUTTONDOWN:if(app->left||app->right)return 0;app->right=app->menuPressed=true;app->rightDragged=false;app->down=app->previous=cursor;app->captureMouse();return 0;
-            case WM_MBUTTONDOWN:if(app->left||app->menuPressed)return 0;app->right=true;app->previous=cursor;app->captureMouse();return 0;
+            case WM_MBUTTONDOWN:if(app->left||app->menuPressed||app->frontLocked())return 0;app->right=true;app->previous=cursor;app->captureMouse();return 0;
             case WM_MOUSEMOVE:
                 if(app->left){const bool before=app->dragged;app->dragged|=std::abs(cursor.x-app->down.x)>4||std::abs(cursor.y-app->down.y)>4;
-                    if(app->dragged){app->dragStarted|=!before;auto foot=app->ground.screen(app->ground.position);foot.x+=cursor.x-(before?app->previous.x:app->down.x);foot.y+=cursor.y-(before?app->previous.y:app->down.y);app->updatePlacementShape();app->geometry.place(app->ground,foot,app->zoom);}app->previous=cursor;}
+                    if(app->dragged){app->clickSequence.reset();app->doubleClickRequest=app->tripleClickRequest=false;app->dragStarted|=!before;auto foot=app->ground.screen(app->ground.position);foot.x+=cursor.x-(before?app->previous.x:app->down.x);foot.y+=cursor.y-(before?app->previous.y:app->down.y);app->updatePlacementShape();app->geometry.place(app->ground,foot,app->zoom);}app->previous=cursor;}
                 if(app->right){
                     if(app->menuPressed&&!app->rightDragged){app->rightDragged=std::abs(cursor.x-app->down.x)>4||std::abs(cursor.y-app->down.y)>4;if(!app->rightDragged)return 0;}
-                    app->yaw=std::remainder(app->yaw+(cursor.x-app->previous.x)*0.7f,360.0f);app->previous=cursor;
+                    if(!app->frontLocked())app->yaw=std::remainder(app->yaw+(cursor.x-app->previous.x)*0.7f,360.0f);app->previous=cursor;
                 }
                 if(app->left)app->moveCachedDrag();return 0;
-            case WM_LBUTTONUP:if(app->left){app->click=!app->dragged;app->releaseMouse();}return 0;
+            case WM_LBUTTONUP:if(app->left){app->click=!app->dragged;if(app->click&&!app->formationMode){const auto gesture=app->clickSequence.release(GetTickCount64(),cursor.x,cursor.y,GetDoubleClickTime(),GetSystemMetrics(SM_CXDOUBLECLK),GetSystemMetrics(SM_CYDOUBLECLK));app->doubleClickRequest|=gesture.doubleClick;app->tripleClickRequest|=gesture.tripleClick;}app->releaseMouse();}return 0;
             case WM_RBUTTONUP:if(app->menuPressed){const bool openMenu=!app->rightDragged;app->releaseMouse();if(BattleDesktopInput::instance)BattleDesktopInput::instance->mouseClick=false;if(openMenu)app->showQuickMenu();}return 0;
             case WM_MBUTTONUP:if(app->right&&!app->menuPressed)app->releaseMouse();return 0;
             case WM_CAPTURECHANGED:app->left=app->right=app->menuPressed=app->rightDragged=false;app->presentState(true);return 0;
             case WM_CANCELMODE:app->releaseMouse();return 0;
-            case WM_MOUSEWHEEL:app->setZoom(app->zoom*std::pow(1.1f,GET_WHEEL_DELTA_WPARAM(w)/120.0f));return 0;
-            case WM_HOTKEY:if(w==1){if(app->closeRequest)app->closeRequest();else DestroyWindow(hwnd);}else if(w==2){if(app->followRequest)app->followRequest();else{app->preferences.follow=!app->preferences.follow;app->preferences.save(app->settings->ini);app->syncSettings();}}return 0;
+            case WM_MOUSEWHEEL:if(!app->formationMode)app->setZoom(app->zoom*std::pow(1.1f,GET_WHEEL_DELTA_WPARAM(w)/120.0f));return 0;
+            case WM_HOTKEY:if(w==1){if(app->closeRequest)app->closeRequest();else DestroyWindow(hwnd);}else if(w==2&&!app->formationMode){if(app->followRequest)app->followRequest();else{app->preferences.follow=!app->preferences.follow;app->preferences.save(app->settings->ini);app->syncSettings();}}return 0;
             case WM_CLOSE:if(app->closeRequest)app->closeRequest();else DestroyWindow(hwnd);return 0;
             case WM_DESTROY:KillTimer(hwnd,1);if(app->quitHotkey)UnregisterHotKey(hwnd,1);if(app->lookHotkey)UnregisterHotKey(hwnd,2);app->done=true;app->window=nullptr;if(app->destroyedCallback)app->destroyedCallback();else if(!app->grouped)PostQuitMessage(0);return 0;
             default:return DefWindowProcW(hwnd,message,w,l);
@@ -937,7 +993,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
             else if(flag==L"--duration"&&i+1<argc){app.runSeconds=std::clamp(std::wcstod(argv[++i],nullptr),1.0,20.0);app.review=true;}
             else if(flag==L"--exit-after"&&i+1<argc){app.runSeconds=std::clamp(std::wcstod(argv[++i],nullptr),1.0,20.0);}
         }LocalFree(argv);
-        if(!app.initialMode.empty()&&app.initialMode!="cafe"&&app.initialMode!="battle")throw std::runtime_error("Mode must be cafe or battle");
+        if(!app.initialMode.empty()&&app.initialMode!="cafe"&&app.initialMode!="battle"&&app.initialMode!="formation")throw std::runtime_error("Mode must be cafe, battle or formation");
         app.fixedPose=app.review&&(app.initialMode.empty()||!app.reviewClip.empty()||app.sampleSpecified);
         app.modelStorageSettings=std::make_shared<NativeModelStorage>(app.programDirectory,app.storage(),!app.dataDirectorySpecified);
         std::unique_ptr<NativeHealth> health;
