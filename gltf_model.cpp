@@ -345,10 +345,20 @@ void GltfModel::analyze(const std::function<void(int,const std::string&)>& progr
   std::vector<Bounds> boxes(parts.size());
   for(double fraction:{0.0,0.25,0.5,0.75,1.0}){
    const auto sampled=measure(index,clips[index].duration*fraction);if(originalRestingClips.count(index))resting.join(sampled);
-   // Placement uses only vertices this visible primitive actually draws.
-   // Keep normalization and the rendering envelope unchanged.
+   // A bone/Morph can hide only some triangles of a primitive by collapsing
+   // them to a distant point. They occupy no surface but their vertices can
+   // extend far below the feet. Only non-degenerate posed triangles constrain
+   // placement; normalization, render geometry and its envelope stay intact.
    for(size_t k=0;k<parts.size();++k){const auto& p=*parts[k];if(!visible(nodes,p.node))continue;
-    for(unsigned vertex:p.source)boxes[k].add(Vector3Scale(Vector3Add(point(p,vertex),origin),fit));
+    std::vector<Vector3> vertices;vertices.reserve(p.source.size());
+    for(unsigned vertex:p.source)vertices.push_back(Vector3Scale(Vector3Add(point(p,vertex),origin),fit));
+    for(int triangle=0;triangle<p.mesh.triangleCount;++triangle){const int i=triangle*3;
+     const auto a=vertices[p.mesh.indices?p.mesh.indices[i]:i],b=vertices[p.mesh.indices?p.mesh.indices[i+1]:i+1],c=vertices[p.mesh.indices?p.mesh.indices[i+2]:i+2];
+     // In normalized units this rejects surfaces below 1e-8 square units,
+     // far below a pixel, while retaining thin/flat authored geometry.
+     if(Vector3LengthSqr(Vector3CrossProduct(Vector3Subtract(b,a),Vector3Subtract(c,a)))<=1e-16f)continue;
+     boxes[k].add(a);boxes[k].add(b);boxes[k].add(c);
+    }
    }
   }
   Json shapes=Json::array();for(const auto& box:boxes)if(box.valid())shapes.push_back(box.json());

@@ -106,6 +106,32 @@ int wmain(int argc,wchar_t** argv){try{
     if(a.formationIdle<0){check(!a.selectActionMode("formation")&&!a.formationMode,"A missing Formation_Idle cannot enter a fake formation mode");std::cout<<"Double-click/triple-click interactions and unavailable formation capability passed.\n";return 0;}
     check(a.selectActionMode("formation",true),"Enter formation mode");
     check(a.formationMode&&!a.battleMode&&a.state.current==a.formationIdle,"Formation starts its actual Formation_Idle clip");
+    if(argc>3){
+        const auto out=std::filesystem::absolute(argv[3]);std::filesystem::create_directories(out);const auto saved=a.ground.position;const float savedZoom=a.zoom;
+        if(argc>5)a.setZoom(std::wcstof(argv[5],nullptr));
+        for(const auto& mode:modes){
+            a.selectActionMode(mode);foot=a.ground.screen(a.ground.position);pointer(foot.x,foot.y);
+            App::inputProc(a.inputWindow,WM_LBUTTONDOWN,MK_LBUTTON,0);pointer(a.ground.width*.5f,a.ground.height-3.f);App::inputProc(a.inputWindow,WM_MOUSEMOVE,MK_LBUTTON,0);tick();
+            App::inputProc(a.inputWindow,WM_LBUTTONUP,0,0);tick();
+            const auto foot=a.ground.screen(a.ground.position);const auto offset=a.ground.bodyOffsets;
+            std::cout<<"EDGE "<<mode<<" foot="<<foot.x<<","<<foot.y<<" desktop="<<a.ground.width<<","<<a.ground.height<<" offsets="<<offset.left<<","<<offset.top<<","<<offset.right<<","<<offset.bottom<<"\n";
+            float nearestBottom=INFINITY;
+            for(double fraction:{0.,.25,.5,.75,1.}){
+                a.state.time=a.state.clips[a.state.current].duration*fraction;a.presentState(true);
+                const auto file=out/(wide(mode)+L"-edge-"+std::to_wstring(int(fraction*100))+L".png");
+                a.renderer->render(a.window,a.inputWindow,true,file);a.commitRender();
+                const auto path=utf8(file.wstring());Image image=LoadImage(path.c_str());check(image.data,"Read rendered edge regression frame");auto* pixels=LoadImageColors(image);int bottom=-1;
+                // Ignore isolated subpixel outline remnants of collapsed props;
+                // measure a visible row of the character instead of a stray dot.
+                for(int y=0;y<image.height;++y){int count=0;for(int x=0;x<image.width;++x)count+=pixels[y*image.width+x].a>=16;if(count>=8)bottom=y;}
+                UnloadImageColors(pixels);UnloadImage(image);check(bottom>=0,"Edge frame contains the actual visible character");
+                const float gap=a.work.bottom-(a.renderer->state["surfaceOrigin"][1].get<int>()+a.renderer->surfaceOffset.y+bottom+1);
+                nearestBottom=std::min(nearestBottom,gap);std::cout<<"EDGE visible "<<mode<<" time="<<fraction<<" gap="<<gap<<"\n";
+            }
+            if(argc>4)check(nearestBottom>=-3&&nearestBottom<=std::wcstof(argv[4],nullptr),"Dragging to the bottom must not reserve invisible collapsed geometry below the character");
+        }
+        a.setZoom(savedZoom);a.ground.position=saved;a.selectActionMode("formation",true);
+    }
     const auto anchor=a.ground.position;int firstFormationIdle=a.formationIdle;pointer(1,1);a.yaw=90;tick(2500);a.presentState(true);
     check(Vector3Distance(anchor,a.ground.position)<1e-6&&!a.state.walking&&!a.directed.active&&!a.state.trackingCursor,"Formation never wanders, follows, returns home or tracks the cursor");
     check(a.yaw==0&&a.renderer->state["yaw"]==0,"Formation remains screen-facing");

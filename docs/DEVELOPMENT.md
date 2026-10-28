@@ -48,6 +48,8 @@ cmake --build build --target ba_cafe_lite_interaction_tests -j 4
 ./build/ba_cafe_lite_interaction_tests.exe (Join-Path $PWD ('artifacts/interactions-' + [guid]::NewGuid().ToString('N')))
 ```
 
+附加 `GLB 输出目录 最大底边留白像素 [缩放]` 可验证屏幕底部放置：通过实际 Win32 提放消息，在各可用模式拖到底部，采样待机五个时间点并按渲染像素检查角色底部。像素测量忽略孤立的亚像素描边点。睡衣小雪列队回归使用 80 像素上限，分别检查 0.45、1、1.21 和 1.65 缩放；原故障会留下约 350 像素空白。放置边界仅排除当前姿态已退化的三角形，模型归一化、原始动画与显示范围保持独立。
+
 开机自启与描边数值框的回归：
 
 ```powershell
@@ -105,10 +107,10 @@ cmake --build build --target ba_cafe_lite_model_unification_tests
 打包后可用 Windows 桌面验证单文件启动器的旧记录恢复。脚本将 EXE、模型与数据复制到独立测试目录，不改动实际用户资料：
 
 ```powershell
-python tests/launcher_storage_compatibility.py ./dist/BA-Cafe-Pets-1.1.9-x64.exe
-python tests/tray_integration.py ./dist/BA-Cafe-Pets-1.1.9-portable-x64.zip
-python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.9-portable-x64.zip
-python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.9-x64.exe
+python tests/launcher_storage_compatibility.py ./dist/BA-Cafe-Pets-1.1.10-x64.exe
+python tests/tray_integration.py ./dist/BA-Cafe-Pets-1.1.10-portable-x64.zip
+python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.10-portable-x64.zip
+python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.10-x64.exe
 ```
 
 界面回归检查使用隔离 Windows 桌面，不把模拟模型写入实际用户数据。测试还比较滚动后的实际窗口像素与完整重绘结果，并核对滑块普通绘制和合成绘制一致；覆盖浅色／深色主题及 100%／150%／200% DPI，同时验证滑块拖动和键盘操作。
