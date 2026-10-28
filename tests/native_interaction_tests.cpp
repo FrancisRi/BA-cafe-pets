@@ -58,8 +58,15 @@ int wmain(int argc,wchar_t** argv){try{
     const auto click=[&]{App::inputProc(a.inputWindow,WM_LBUTTONDOWN,MK_LBUTTON,0);App::inputProc(a.inputWindow,WM_LBUTTONUP,0,0);tick();};
     if(a.manualSkill>=0){
         a.clickSequence.reset();click();click();check(a.manualAction&&a.state.current==a.manualSkill,"Double click starts Exs even without battle capability");
+        if(argc>3){
+            const auto out=std::filesystem::absolute(argv[3]);std::filesystem::create_directories(out);
+            a.smooth=false;
+            for(int percent:{10,35,60,85}){a.state.time=a.state.clips[a.manualSkill].duration*percent/100;a.presentState(true);
+                a.renderer->render(a.window,a.inputWindow,true,out/(L"exs-"+std::to_wstring(percent)+L".png"));a.commitRender();}
+            a.state.time=0;
+        }
         const auto anchor=a.ground.position;pointer(1,1);a.yaw=90;tick();a.presentState(true);
-        check(a.yaw==0&&a.renderer->state["yaw"]==0,"Manual Exs stays screen-facing while cursor direction changes");
+        check(a.yaw==0&&a.renderer->state["yaw"]==90,"Manual Exs compensates the authored left-facing release by +90 degrees while ignoring the cursor");
         check(Vector3Distance(a.ground.position,anchor)<1e-6&&!a.directed.active,"Manual Exs pauses positional follow and wandering");
         // Keep the original click position; the third click must override Exs.
         pointer(foot.x,foot.y);click();
@@ -71,6 +78,16 @@ int wmain(int argc,wchar_t** argv){try{
         }
         a.selectMode(false);a.startManualSkill();a.state.time=a.state.clips[a.manualSkill].duration-.001;tick();
         check(!a.manualAction&&!a.battleMode&&a.state.current==a.cafeIdle,"Completed Exs returns to the previous mode idle");
+        a.presentState(true);check(a.renderer->state["yaw"]==0,"Exs facing compensation ends with the skill");
+        a.startManualSkill();foot=a.ground.screen(a.ground.position);pointer(foot.x,foot.y);
+        App::inputProc(a.inputWindow,WM_LBUTTONDOWN,MK_LBUTTON,0);interactionCursor.x+=12;App::inputProc(a.inputWindow,WM_MOUSEMOVE,MK_LBUTTON,0);tick();a.presentState(true);
+        check(!a.manualAction&&a.state.dragging&&a.renderer->state["yaw"]==0,"Pickup interrupts Exs without inheriting its release compensation");
+        App::inputProc(a.inputWindow,WM_LBUTTONUP,0,0);tick();
+        if(a.settings->battleAvailable&&a.battle->clips.skill>=0){
+            a.selectMode(true);a.state.inputActive=true;a.battle->skillProbability=1;a.battle->activityDelta=1000;a.battle->tick(.016);a.yaw=-45;a.presentState(true);
+            check(a.battle->phase==pet::Battle::Phase::Skill&&a.renderer->state["yaw"]==90,"Automatic battle Exs uses the same authored release compensation");
+            a.battle->start();a.presentState(true);check(a.renderer->state["yaw"]==-45,"Ordinary battle idle keeps its own heading");
+        }
     }else{a.clickSequence.reset();click();click();check(!a.manualAction,"A missing Exs never selects an unrelated clip");}
     a.selectMode(false);
     if(a.formationIdle<0){check(!a.selectActionMode("formation")&&!a.formationMode,"A missing Formation_Idle cannot enter a fake formation mode");std::cout<<"Double-click/triple-click interactions and unavailable formation capability passed.\n";return 0;}

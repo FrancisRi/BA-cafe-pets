@@ -141,7 +141,8 @@ struct App {
     int windowWidth=Size,windowHeight=Size,cafeIdle=-1,cafeWalk=-1,cafeJump=-1,formationIdle=-1,formationPickup=-1,manualSkill=-1;
     struct FormationPose {int idle=-1,pickup=-1;};std::vector<FormationPose> formationPoses;size_t formationPoseIndex=0;
     const char* modeName() const {return formationMode?"formation":battleMode?"battle":"cafe";}
-    bool frontLocked() const {return formationMode||manualAction||(battleMode&&battle&&battle->phase==pet::Battle::Phase::Skill);}
+    bool exsPlaying() const {return manualAction||(battleMode&&battle&&battle->phase==pet::Battle::Phase::Skill);}
+    bool frontLocked() const {return formationMode||exsPlaying();}
     POINT windowPosition{LONG_MIN,LONG_MIN};
     POINT committedOrigin{};Vector2 committedFoot{};bool committedFrame=false;
 
@@ -807,7 +808,10 @@ struct App {
             :1.0;
         const bool retreat=battle&&state.current==battle->clips.retreat;
         const bool victory=battleMode&&battle&&(battle->phase==pet::Battle::Phase::VictoryStart||battle->phase==pet::Battle::Phase::VictoryEnd);
-        const float displayYaw=frontLocked()?0:std::remainder(yaw+(retreat?180.0f:0),360.0f);
+        // Exs releases toward screen-left in the authored animation. Rotate the
+        // complete skill (including its props) toward the viewer; keep logical
+        // movement yaw independent so this correction cannot affect other clips.
+        const float displayYaw=exsPlaying()?90.0f:formationMode?0:std::remainder(yaw+(retreat?180.0f:0),360.0f);
         if(retreat && retreatLogged!=state.generation) {
             retreatLogged=state.generation;std::printf("RETREAT facing: base=%.1f render=%.1f offset=180\n",yaw,displayYaw);std::fflush(stdout);
         }
