@@ -381,15 +381,22 @@ struct App {
         state.log(std::string("MODE ")+modeName()+"; battle supported="+(battle->clips.supported()?"1":"0"));
         return true;
     }
+    bool cycleActionMode(bool persist=false){
+        static constexpr std::array<const char*,3> modes{"cafe","battle","formation"};
+        const size_t current=formationMode?2:battleMode?1:0;
+        for(size_t step=1;step<modes.size();++step)
+            if(selectActionMode(modes[(current+step)%modes.size()],persist))return true;
+        return false;
+    }
     bool startManualSkill(){
-        if(formationMode||manualSkill<0||!loaded||state.settingsOpen)return false;
+        if(manualSkill<0||!loaded||state.settingsOpen)return false;
         behavior->halt();stopLocomotion();if(battleMode)battle->start();
         manualAction=true;state.pendingClick=false;state.facingRequest.reset();state.trackingCursor=false;
         state.start(manualSkill,false);state.reaction=0;yaw=0;placementNeeded=false;return true;
     }
     void finishManualSkill(){
         manualAction=false;stopLocomotion();state.pendingClick=false;state.resetCooldown();
-        if(battleMode)battle->start();else{behavior->halt();state.start(cafeIdle,true);}
+        if(battleMode)battle->start();else{behavior->halt();state.start(formationMode?formationIdle:cafeIdle,true);}
         yaw=0;interactionUntil=preciseSeconds()+0.5;placementNeeded=false;
     }
     void initializeBehavior(const Json& message){
@@ -516,19 +523,9 @@ struct App {
         const double idle=idleInputSeconds();
         if(!fixedPose){
             const bool dragging=left&&dragged;
-            if(formationMode){
-                if(!dragging&&(wasDragging||dragStarted))chooseFormationPose(true);
-                const int target=dragging&&formationPickup>=0?formationPickup:formationIdle;
-                if(!state.active||state.current!=target)state.start(target,true);
-                state.dragging=dragging;state.walking=false;state.pendingClick=false;state.trackingCursor=false;state.facingRequest.reset();
-                state.returnRequested=state.returningHome=state.returnArrived=false;
-                if(!state.settingsOpen)state.advance(dt);yaw=0;wasDragging=dragging;
-                click=dragStarted=doubleClickRequest=tripleClickRequest=false;renderFrame();return;
-            }
             if(tripleClickRequest){
                 doubleClickRequest=false;
-                if(battleMode||settings->battleAvailable){manualAction=false;behavior->halt();stopLocomotion();
-                    if(battleMode)battle->retire();else{selectMode(true,!review);if(settingsChanged)settingsChanged();}}
+                if(cycleActionMode(!review)&&settingsChanged)settingsChanged();
                 click=false;
             }else if(doubleClickRequest&&!dragging){startManualSkill();click=false;}
             doubleClickRequest=tripleClickRequest=false;
@@ -538,6 +535,15 @@ struct App {
                 if(!state.settingsOpen)state.advance(dt);
                 if(state.time>=state.clips[state.current].duration)finishManualSkill();
                 click=dragStarted=false;wasDragging=dragging;renderFrame();return;
+            }
+            if(formationMode){
+                if(!dragging&&(wasDragging||dragStarted))chooseFormationPose(true);
+                const int target=dragging&&formationPickup>=0?formationPickup:formationIdle;
+                if(!state.active||state.current!=target)state.start(target,true);
+                state.dragging=dragging;state.walking=false;state.pendingClick=false;state.trackingCursor=false;state.facingRequest.reset();
+                state.returnRequested=state.returningHome=state.returnArrived=false;
+                if(!state.settingsOpen)state.advance(dt);yaw=0;wasDragging=dragging;
+                click=dragStarted=false;renderFrame();return;
             }
             if(observeDebouncedInput(state,idle,elapsed,preferences.inputGrace) && !battleMode&&!preferences.follow&&!directed.active){state.trackingCursor=false;state.returnRequested=state.walkEnabled&&journey.requestReturn(ground.position);if(!state.returnRequested)yaw=0;}
             POINT cursor{};GetCursorPos(&cursor);const Vector2 pixel{float(cursor.x-work.left),float(cursor.y-work.top)};
@@ -866,12 +872,12 @@ struct App {
                     if(!app->frontLocked())app->yaw=std::remainder(app->yaw+(cursor.x-app->previous.x)*0.7f,360.0f);app->previous=cursor;
                 }
                 if(app->left)app->moveCachedDrag();return 0;
-            case WM_LBUTTONUP:if(app->left){app->click=!app->dragged;if(app->click&&!app->formationMode){const auto gesture=app->clickSequence.release(GetTickCount64(),cursor.x,cursor.y,GetDoubleClickTime(),GetSystemMetrics(SM_CXDOUBLECLK),GetSystemMetrics(SM_CYDOUBLECLK));app->doubleClickRequest|=gesture.doubleClick;app->tripleClickRequest|=gesture.tripleClick;}app->releaseMouse();}return 0;
+            case WM_LBUTTONUP:if(app->left){app->click=!app->dragged;if(app->click){const auto gesture=app->clickSequence.release(GetTickCount64(),cursor.x,cursor.y,GetDoubleClickTime(),GetSystemMetrics(SM_CXDOUBLECLK),GetSystemMetrics(SM_CYDOUBLECLK));app->doubleClickRequest|=gesture.doubleClick;app->tripleClickRequest|=gesture.tripleClick;}app->releaseMouse();}return 0;
             case WM_RBUTTONUP:if(app->menuPressed){const bool openMenu=!app->rightDragged;app->releaseMouse();if(BattleDesktopInput::instance)BattleDesktopInput::instance->mouseClick=false;if(openMenu)app->showQuickMenu();}return 0;
             case WM_MBUTTONUP:if(app->right&&!app->menuPressed)app->releaseMouse();return 0;
             case WM_CAPTURECHANGED:app->left=app->right=app->menuPressed=app->rightDragged=false;app->presentState(true);return 0;
             case WM_CANCELMODE:app->releaseMouse();return 0;
-            case WM_MOUSEWHEEL:if(!app->formationMode)app->setZoom(app->zoom*std::pow(1.1f,GET_WHEEL_DELTA_WPARAM(w)/120.0f));return 0;
+            case WM_MOUSEWHEEL:app->setZoom(app->zoom*std::pow(1.1f,GET_WHEEL_DELTA_WPARAM(w)/120.0f));return 0;
             case WM_HOTKEY:if(w==1){if(app->closeRequest)app->closeRequest();else DestroyWindow(hwnd);}else if(w==2&&!app->formationMode){if(app->followRequest)app->followRequest();else{app->preferences.follow=!app->preferences.follow;app->preferences.save(app->settings->ini);app->syncSettings();}}return 0;
             case WM_CLOSE:if(app->closeRequest)app->closeRequest();else DestroyWindow(hwnd);return 0;
             case WM_DESTROY:KillTimer(hwnd,1);if(app->quitHotkey)UnregisterHotKey(hwnd,1);if(app->lookHotkey)UnregisterHotKey(hwnd,2);app->done=true;app->window=nullptr;if(app->destroyedCallback)app->destroyedCallback();else if(!app->grouped)PostQuitMessage(0);return 0;

@@ -26,7 +26,7 @@ int wmain(int argc,wchar_t** argv){try{
     NativePetClicks gesture;
     check(!gesture.release(100,0,0,500,8,8).doubleClick,"First click remains a single click");
     check(gesture.release(200,0,0,500,8,8).doubleClick,"Second click emits the manual skill gesture");
-    check(gesture.release(300,0,0,500,8,8).tripleClick,"Third click preserves the legacy mode/retirement gesture");
+    check(gesture.release(300,0,0,500,8,8).tripleClick,"Third click emits the mode cycle gesture");
     gesture.release(1000,0,0,500,8,8);check(!gesture.release(1700,0,0,500,8,8).doubleClick,"Slow clicks cannot start a double-click skill");
     gesture.reset();gesture.release(2000,0,0,500,8,8);check(!gesture.release(2100,30,0,500,8,8).doubleClick,"A different click location starts a new sequence");
     gesture.reset();gesture.release(3000,0,0,500,8,8);check(!gesture.release(4400,0,0,500,8,8).tripleClick&&gesture.count==1,"An expired sequence cannot switch modes");
@@ -56,6 +56,19 @@ int wmain(int argc,wchar_t** argv){try{
     const auto pointer=[&](float x,float y){interactionCursor={a.work.left+LONG(x),a.work.top+LONG(y)};};
     auto foot=a.ground.screen(a.ground.position);pointer(foot.x,foot.y);
     const auto click=[&]{App::inputProc(a.inputWindow,WM_LBUTTONDOWN,MK_LBUTTON,0);App::inputProc(a.inputWindow,WM_LBUTTONUP,0,0);tick();};
+    std::vector<std::string> modes{"cafe"};if(a.settings->battleAvailable)modes.push_back("battle");if(a.formationIdle>=0)modes.push_back("formation");
+    for(size_t round=0;round<2;++round)for(size_t current=0;current<modes.size();++current){
+        check(a.modeName()==modes[current],"Mode cycle starts in the expected supported mode");
+        a.clickSequence.reset();foot=a.ground.screen(a.ground.position);pointer(foot.x,foot.y);const auto before=a.ground.position;
+        click();click();click();check(a.modeName()==modes[(current+1)%modes.size()],"Triple click cycles cafe -> battle -> formation -> cafe and skips unavailable modes");
+        check(Vector3Distance(before,a.ground.position)<1e-6,"Cycling modes keeps the character at its current position");
+        if(modes.size()>1)check(!a.manualAction,"Third click interrupts Exs before switching mode");
+    }
+    // Exercise all capability combinations independently of the supplied GLB.
+    const auto missing=a.battle->clips.missing;const int formation=a.formationIdle;
+    a.selectMode(false);a.battle->clips.missing="test: no battle";a.formationIdle=-1;
+    a.clickSequence.reset();click();click();click();check(a.modeName()==std::string("cafe"),"A model with only cafe mode stays in cafe on triple click");
+    a.battle->clips.missing=missing;a.formationIdle=formation;a.selectMode(false);
     if(a.manualSkill>=0){
         a.clickSequence.reset();click();click();check(a.manualAction&&a.state.current==a.manualSkill,"Double click starts Exs even without battle capability");
         if(argc>3){
@@ -70,11 +83,11 @@ int wmain(int argc,wchar_t** argv){try{
         check(Vector3Distance(a.ground.position,anchor)<1e-6&&!a.directed.active,"Manual Exs pauses positional follow and wandering");
         // Keep the original click position; the third click must override Exs.
         pointer(foot.x,foot.y);click();
-        if(a.settings->battleAvailable)check(a.battleMode&&!a.manualAction,"Cafe triple click interrupts Exs and enters battle");
-        else check(a.manualAction,"Unavailable battle mode does not interrupt a valid Exs");
+        check(a.modeName()==modes[1%modes.size()],"Cafe triple click interrupts Exs and selects the next supported mode");
+        if(modes.size()==1)check(a.manualAction,"No alternative mode leaves a valid Exs playing");
         if(a.battleMode){
             a.clickSequence.reset();click();click();check(a.manualAction,"Battle double click also starts Exs");click();
-            check(!a.manualAction&&(a.battle->exiting()||a.battle->returnToCafe),"Battle third click interrupts Exs and retires");
+            check(!a.manualAction&&a.modeName()==std::string(a.formationIdle>=0?"formation":"cafe"),"Battle third click interrupts Exs and switches to formation or cafe directly");
         }
         a.selectMode(false);a.startManualSkill();a.state.time=a.state.clips[a.manualSkill].duration-.001;tick();
         check(!a.manualAction&&!a.battleMode&&a.state.current==a.cafeIdle,"Completed Exs returns to the previous mode idle");
@@ -93,10 +106,24 @@ int wmain(int argc,wchar_t** argv){try{
     if(a.formationIdle<0){check(!a.selectActionMode("formation")&&!a.formationMode,"A missing Formation_Idle cannot enter a fake formation mode");std::cout<<"Double-click/triple-click interactions and unavailable formation capability passed.\n";return 0;}
     check(a.selectActionMode("formation",true),"Enter formation mode");
     check(a.formationMode&&!a.battleMode&&a.state.current==a.formationIdle,"Formation starts its actual Formation_Idle clip");
-    const auto anchor=a.ground.position;const int firstFormationIdle=a.formationIdle;pointer(1,1);a.yaw=90;tick(2500);a.presentState(true);
+    const auto anchor=a.ground.position;int firstFormationIdle=a.formationIdle;pointer(1,1);a.yaw=90;tick(2500);a.presentState(true);
     check(Vector3Distance(anchor,a.ground.position)<1e-6&&!a.state.walking&&!a.directed.active&&!a.state.trackingCursor,"Formation never wanders, follows, returns home or tracks the cursor");
     check(a.yaw==0&&a.renderer->state["yaw"]==0,"Formation remains screen-facing");
-    click();click();click();check(a.formationMode&&!a.manualAction&&a.state.current==a.formationIdle&&a.formationIdle==firstFormationIdle,"Formation ignores single, double and triple clicks without changing the selected formation set");
+    a.clickSequence.reset();click();check(a.formationMode&&!a.manualAction&&a.state.current==firstFormationIdle,"A formation single click keeps the selected idle set");click();
+    if(a.manualSkill>=0){
+        check(a.manualAction&&a.formationMode&&a.state.current==a.manualSkill,"Formation double click starts Exs while retaining its mode");
+        pointer(20,20);tick(10);a.presentState(true);
+        check(a.renderer->state["yaw"]==90&&!a.state.trackingCursor&&Vector3Distance(anchor,a.ground.position)<1e-6,"Formation Exs retains its release heading and never follows the cursor");
+        a.state.time=a.state.clips[a.manualSkill].duration-.001;tick();a.presentState(true);
+        check(!a.manualAction&&a.formationMode&&a.state.current==firstFormationIdle&&a.renderer->state["yaw"]==0,"Completed formation Exs restores the same idle set and its front-facing heading");
+        a.startManualSkill();foot=a.ground.screen(a.ground.position);pointer(foot.x,foot.y);
+        App::inputProc(a.inputWindow,WM_LBUTTONDOWN,MK_LBUTTON,0);interactionCursor.x+=12;App::inputProc(a.inputWindow,WM_MOUSEMOVE,MK_LBUTTON,0);tick();
+        check(!a.manualAction&&a.state.dragging&&a.state.current==(a.formationPickup>=0?a.formationPickup:a.formationIdle),"Formation pickup interrupts Exs with the matching pickup clip");
+        App::inputProc(a.inputWindow,WM_LBUTTONUP,0,0);tick();
+    }else check(!a.manualAction&&a.state.current==firstFormationIdle,"Formation without Exs keeps its idle on double click");
+    a.clickSequence.reset();foot=a.ground.screen(a.ground.position);pointer(foot.x,foot.y);click();click();click();
+    check(a.modeName()==std::string("cafe")&&!a.manualAction,"Formation triple click interrupts Exs and wraps back to cafe");
+    check(a.selectActionMode("formation",true),"Return to formation after the gesture cycle");firstFormationIdle=a.formationIdle;
     foot=a.ground.screen(a.ground.position);pointer(foot.x,foot.y);App::inputProc(a.inputWindow,WM_LBUTTONDOWN,MK_LBUTTON,0);pointer(foot.x+50,foot.y-20);App::inputProc(a.inputWindow,WM_MOUSEMOVE,MK_LBUTTON,0);tick();
     check(a.state.current==(a.formationPickup>=0?a.formationPickup:a.formationIdle)&&a.state.dragging,"Formation drag plays its pickup animation");
     check(Vector3Distance(anchor,a.ground.position)>0.01f,"Formation can still be manually placed");
@@ -112,7 +139,15 @@ int wmain(int argc,wchar_t** argv){try{
     App::inputProc(a.inputWindow,WM_RBUTTONDOWN,MK_RBUTTON,0);interactionCursor.x+=40;App::inputProc(a.inputWindow,WM_MOUSEMOVE,MK_RBUTTON,0);App::inputProc(a.inputWindow,WM_RBUTTONUP,0,0);tick();
     check(a.yaw==0,"Right drag cannot rotate formation");
     App::inputProc(a.inputWindow,WM_MBUTTONDOWN,MK_MBUTTON,0);check(!a.right,"Middle drag cannot rotate formation");
-    const auto zoom=a.zoom;App::inputProc(a.inputWindow,WM_MOUSEWHEEL,MAKEWPARAM(0,WHEEL_DELTA),0);check(a.zoom==zoom,"Formation allows pickup/drop rather than wheel interaction");
+    const auto zoom=a.zoom;const int zoomIdle=a.formationIdle;const auto zoomAnchor=a.ground.position;
+    App::inputProc(a.inputWindow,WM_MOUSEWHEEL,MAKEWPARAM(0,WHEEL_DELTA),0);a.presentState(true);
+    check(a.zoom>zoom&&a.formationMode&&a.state.current==zoomIdle&&a.renderer->state["yaw"]==0,"Formation wheel up enlarges the current idle without changing mode or heading");
+    check(Vector3Distance(zoomAnchor,a.ground.position)<1e-6,"Formation zoom preserves its placement away from screen boundaries");
+    App::inputProc(a.inputWindow,WM_MOUSEWHEEL,MAKEWPARAM(0,SHORT(-WHEEL_DELTA)),0);check(std::abs(a.zoom-zoom)<1e-5,"Formation wheel down restores the previous size");
+    for(int i=0;i<20;++i)App::inputProc(a.inputWindow,WM_MOUSEWHEEL,MAKEWPARAM(0,WHEEL_DELTA),0);
+    check(std::abs(a.zoom-1.65f)<1e-5,"Formation wheel uses the standard maximum zoom");
+    for(int i=0;i<30;++i)App::inputProc(a.inputWindow,WM_MOUSEWHEEL,MAKEWPARAM(0,SHORT(-WHEEL_DELTA)),0);
+    check(std::abs(a.zoom-.45f)<1e-5,"Formation wheel uses the standard minimum zoom");a.setZoom(zoom);
     App::inputProc(a.inputWindow,WM_HOTKEY,2,0);check(a.preferences.follow,"Formation hotkeys preserve the saved follow preference");
     check(a.preferences.follow&&a.preferences.wandering&&a.preferences.cafeTracking&&a.state.trackingEnabled,"Formation does not erase shared behavior preferences");
     check(a.settingsSnapshot()["value"]["mode"]=="formation","Settings snapshot exposes the third mode");

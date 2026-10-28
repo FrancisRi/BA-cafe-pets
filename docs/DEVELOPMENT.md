@@ -41,7 +41,7 @@ CMake 会下载并校验固定版本的 raylib 6.0 与 BehaviorTree.CPP 4.8.0。
 
 ## 回归检查
 
-交互模式回归使用独立资料、隐藏真实角色窗口和模拟鼠标，覆盖双击及自动 Exs 的 +90° 释放朝向补偿、技能结束／提起／第三次点击中断、鼠标朝向锁定、列队长时间静止／提放／旋转限制、旧参数保留与模式重启恢复。可额外传入只读 GLB；再追加一个输出目录可导出 Exs 分段截图，检查动画本身的转身及道具朝向。以 Hifumi 模型验证父子补偿缩放在提放过渡中不放大。
+交互模式回归使用独立资料、隐藏真实角色窗口和模拟鼠标，覆盖全模式三连击循环（跳过缺失模式）、列队双击技能及同一套待机恢复、滚轮缩放与范围限制、双击及自动 Exs 的 +90° 释放朝向补偿、技能结束／提起／第三次点击中断、鼠标朝向锁定、列队长时间静止／提放／旋转限制、旧参数保留与模式重启恢复。可额外传入只读 GLB；再追加一个输出目录可导出 Exs 分段截图，检查动画本身的转身及道具朝向。以 Hifumi 模型验证父子补偿缩放在提放过渡中不放大。
 
 ```powershell
 cmake --build build --target ba_cafe_lite_interaction_tests -j 4
@@ -105,10 +105,10 @@ cmake --build build --target ba_cafe_lite_model_unification_tests
 打包后可用 Windows 桌面验证单文件启动器的旧记录恢复。脚本将 EXE、模型与数据复制到独立测试目录，不改动实际用户资料：
 
 ```powershell
-python tests/launcher_storage_compatibility.py ./dist/BA-Cafe-Pets-1.1.8-x64.exe
-python tests/tray_integration.py ./dist/BA-Cafe-Pets-1.1.8-portable-x64.zip
-python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.8-portable-x64.zip
-python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.8-x64.exe
+python tests/launcher_storage_compatibility.py ./dist/BA-Cafe-Pets-1.1.9-x64.exe
+python tests/tray_integration.py ./dist/BA-Cafe-Pets-1.1.9-portable-x64.zip
+python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.9-portable-x64.zip
+python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.9-x64.exe
 ```
 
 界面回归检查使用隔离 Windows 桌面，不把模拟模型写入实际用户数据。测试还比较滚动后的实际窗口像素与完整重绘结果，并核对滑块普通绘制和合成绘制一致；覆盖浅色／深色主题及 100%／150%／200% DPI，同时验证滑块拖动和键盘操作。

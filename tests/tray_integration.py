@@ -154,6 +154,16 @@ try:
     send(mode,0x14E,2);send(panel(),0x111,(1<<16)|100)
     wait_for(lambda: read_roster()['characters'][0]['mode']=='formation','save the shipped formation mode')
     assert not user.IsWindowEnabled(user.GetDlgItem(panel(),105)),'Shipped formation disables follow controls'
+    pet=wait_for(lambda: windows('BaCafeNativeInput'),'formation input window')[0]
+    for next_mode,index in (('cafe',0),('battle',1),('formation',2)):
+        for _ in range(3):
+            send(pet,0x201,1);send(pet,0x202);time.sleep(.025)
+        wait_for(lambda: read_roster()['characters'][0]['mode']==next_mode,'triple-click mode persisted: '+next_mode)
+        wait_for(lambda: send(user.GetDlgItem(panel(),100),0x147)==index,'full interface follows gesture mode: '+next_mode)
+    before_zoom=read_roster()['characters'][0]['zoom'];send(pet,0x20A,120<<16)
+    wait_for(lambda: read_roster()['characters'][0]['zoom']>before_zoom,'formation wheel size saved')
+    zoom=read_roster()['characters'][0]['zoom']
+    assert read_roster()['characters'][0]['mode']=='formation','Scaling formation does not switch modes'
     send(full,0x111,1003);send(panel(),0x111,2100)
     wait_for(lambda: not windows('BaCafeNativePet'),'hide model again')
     send(full,0x111,2);assert process.wait(timeout=10)==0
@@ -183,7 +193,7 @@ try:
     user.PostMessageW(tray_window()[0],0x8000+61,0,(1<<16)|0x7B)
     quick=wait_for(lambda: windows('BaCafeQuickMenu'),'empty-library tray exit menu')[0]
     send(quick,0x111,3012);assert process.wait(timeout=10)==0
-    print('Tray integration passed: hide last model without exiting, tray click/context menu, restore model, persistent all-hidden state, empty library, and explicit exit.')
+    print('Tray integration passed: hide last model, tray menu, full triple-click mode cycle, saved formation wheel size, persistent all-hidden state, restore model, empty library, and explicit exit.')
 finally:
     if process.poll() is None:
         for dialog in windows('#32770'):user.PostMessageW(dialog,0x111,2,0)
