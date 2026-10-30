@@ -9,6 +9,12 @@ with zipfile.ZipFile(Path(sys.argv[1]).resolve()) as bundle: bundle.extractall(P
 SCRATCH=WORK/'profile'
 SCRATCH.mkdir()
 user = c.WinDLL('user32', use_last_error=True)
+kernel = c.WinDLL('kernel32', use_last_error=True)
+kernel.CreateFileW.argtypes = [w.LPCWSTR,w.DWORD,w.DWORD,w.LPVOID,w.DWORD,w.DWORD,w.HANDLE]
+kernel.CreateFileW.restype = w.HANDLE
+kernel.GetFileSizeEx.argtypes = [w.HANDLE,c.POINTER(c.c_longlong)]
+kernel.ReadFile.argtypes = [w.HANDLE,w.LPVOID,w.DWORD,c.POINTER(w.DWORD),w.LPVOID]
+kernel.CloseHandle.argtypes = [w.HANDLE]
 CALLBACK = c.WINFUNCTYPE(w.BOOL, w.HWND, w.LPARAM)
 user.EnumWindows.argtypes = [CALLBACK, w.LPARAM]
 user.GetWindowThreadProcessId.argtypes = [w.HWND, c.POINTER(w.DWORD)]
@@ -61,12 +67,20 @@ def send(hwnd, message, wp=0, lp=0):
     return result.value
 
 def read_roster():
-    # Windows can briefly deny a reader while the host atomically replaces its
-    # history file. Retry the polling read; never interfere with the writer.
+    # Share DELETE as well as READ/WRITE: ordinary Python file reads on Windows
+    # can prevent the host's atomic replacement during this polling window.
     deadline = time.monotonic() + 2
     while True:
         try:
-            return json.loads((SCRATCH / 'characters.json').read_text(encoding='utf-8'))
+            handle=kernel.CreateFileW(str(SCRATCH/'characters.json'),0x80000000,7,None,3,0x80,None)
+            if handle==w.HANDLE(-1).value:raise c.WinError(c.get_last_error())
+            try:
+                size=c.c_longlong();read=w.DWORD()
+                if not kernel.GetFileSizeEx(handle,c.byref(size)):raise c.WinError(c.get_last_error())
+                buffer=c.create_string_buffer(size.value)
+                if not kernel.ReadFile(handle,buffer,size.value,c.byref(read),None):raise c.WinError(c.get_last_error())
+                return json.loads(buffer.raw[:read.value].decode('utf-8'))
+            finally:kernel.CloseHandle(handle)
         except (PermissionError, FileNotFoundError, json.JSONDecodeError):
             if time.monotonic() >= deadline:
                 raise
