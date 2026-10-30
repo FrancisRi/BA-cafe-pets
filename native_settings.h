@@ -58,7 +58,7 @@ struct NativeSettings {
         {"moveBodies",L"走动距离",L"每次自动走动的距离 · 身位",1,L"\xE81D"},
         {"walkTimeJitter",L"等待随机幅度",L"设定等待时间的随机变化 · ±%",1,L"\xE8B1"},
         {"walkDistanceJitter",L"距离随机幅度",L"设定走动距离的随机变化 · ±%",1,L"\xE8B1"},
-        {"cafeTracking",L"视线追踪鼠标",L"持续输入后，咖啡厅角色看向鼠标",0,L"\xE890"},
+        {"cafeTracking",L"视线追踪鼠标",L"关闭跟随和散步后，静止持续追踪",0,L"\xE890"},
         {"cafeLookMode",L"视线追踪方式",L"连续转向，或相差 30° 后再转向",2,L"\xE7AD"},
         {"battleWalking",L"允许战斗走动",L"持续输入触发短走，动画保持原速",0,L"\xE7C1"},
         {"look",L"战斗动作朝向鼠标",L"攻击等战斗动作追踪鼠标方向",0,L"\xE890"},
@@ -382,7 +382,7 @@ struct NativeSettings {
             return;
         }
         if(id==2210&&code==BN_CLICKED){const auto startup=last.value("startup",Json::object());if(startup.value("available",false)&&receive)receive({{"type","set_autostart"},{"enabled",!startup.value("enabled",false)}});sync();return;}
-        if(id==3){nativeMessageBox(window,L"右键：快捷菜单。右键拖动或中键拖动：旋转。\n左键拖拽：移动。滚轮：缩放。\n\n勾选模型显示或隐藏角色；方向键选择，空格勾选，Esc 关闭。\n\n咖啡厅：点击反应；持续输入后追踪鼠标；无输入后散步。\n战斗：按键攻击；句号、回车、分号、问号请求换弹；持续输入可短走或 EX。\n所有模式双击：播放 Exs，锁定释放朝向。\n三连击：第三次中断 Exs；咖啡厅 → 战斗 → 列队 → 咖啡厅循环，跳过不支持的模式。\n列队：固定面向屏幕，可提放、滚轮缩放、双击 Exs、三连击切换；Exs 结束恢复原来的 Formation_Idle。\n缺少对应动画时相应模式或动作不可用。拖拽优先打断。",L"使用说明",MB_OK);return;}
+        if(id==3){nativeMessageBox(window,L"右键：快捷菜单。右键拖动或中键拖动：旋转。\n左键拖拽：移动。滚轮：缩放。\n\n勾选模型显示或隐藏角色；方向键选择，空格勾选，Esc 关闭。\n\n咖啡厅：点击反应；关闭位置跟随和散步后，视线持续追踪鼠标。\n战斗：按键攻击；句号、回车、分号、问号请求换弹；持续输入可短走或 EX。\n所有模式双击：播放 Exs，锁定释放朝向。\n三连击：第三次中断 Exs；咖啡厅 → 战斗 → 列队 → 咖啡厅循环，跳过不支持的模式。\n列队：固定面向屏幕，可提放、滚轮缩放、双击 Exs、三连击切换；Exs 结束恢复原来的 Formation_Idle。\n缺少对应动画时相应模式或动作不可用。拖拽优先打断。",L"使用说明",MB_OK);return;}
         if(id>=1000&&id<1004){hideModelMenu();page=id-1000;if(page==3&&receive)receive({{"type","refresh_models"}});build();return;}
         if(id>=100&&id<100+int(std::size(fields))&&(code==BN_CLICKED||code==CBN_SELCHANGE||code==EN_KILLFOCUS)){if(code==BN_CLICKED)for(auto& c:controls)if(c.input==GetDlgItem(panel,id)&&c.field->kind==0)c.checked=!c.checked;save();return;}
         if(id==2000&&code==LBN_SELCHANGE){const int n=int(SendMessageW(list,LB_GETCURSEL,0,0));if(n>=0&&n<int(last["characters"].size()))highlighted=last["characters"][n]["id"];update();return;}

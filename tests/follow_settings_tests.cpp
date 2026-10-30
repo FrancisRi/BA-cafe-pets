@@ -51,6 +51,21 @@ int main(int argc,char** argv){
   const float beforeInvalid=facing;attentionState.lookYaw=NAN;wrapTurn.update(attentionState,facing,.008,true,true);
   check(facing==beforeInvalid&&!wrapTurn.turning,"Invalid target samples cannot poison orientation or leave a stale turning animation");
   attentionState.lookYaw=90;wrapTurn.update(attentionState,facing,NAN,true,false);check(facing==beforeInvalid,"An invalid time sample preserves the current orientation");
+  attentionState.inputActive=false;attentionState.activeInputSeconds=0;attentionState.activeSecondsOverride=5;attentionState.lookYaw=90;
+  CafeAttention timed;facing=0;timed.update(attentionState,facing,.008,true,false);
+  check(facing==0,"Movement-enabled profiles retain their input-episode activation policy");
+  for(bool threshold:{false,true}){
+   CafeAttention continuous;facing=0;continuous.update(attentionState,facing,.008,true,threshold,true,true);
+   check(facing>0,"Stationary tracking starts without a continuous-input timer");
+   for(int i=0;i<125;++i)continuous.update(attentionState,facing,.008,true,threshold,true,true);
+   check(std::abs(facing-90)<.01,"Stationary tracking finishes its turn even while input is idle");
+   ++attentionState.inputEpoch;attentionState.lookYaw=-90;
+   for(int i=0;i<125;++i)continuous.update(attentionState,facing,.008,true,threshold,true,true);
+   check(std::abs(facing+90)<.01,"A new input episode immediately retargets stationary tracking");
+   const float paused=facing;attentionState.lookYaw=90;continuous.update(attentionState,facing,.008,false,threshold,true,true);
+   check(facing==paused&&!continuous.turning,"Dragging, menus and action overrides still pause stationary tracking");
+   continuous.update(attentionState,facing,.008,true,threshold,false,true);check(facing==paused&&!continuous.chosen,"The look toggle still disables continuous tracking");
+  }
   const auto eye=ground.screen({ground.position.x,1.7f,ground.position.z});float cursorFacing=42;
   for(float scale:{.45f,1.f,1.65f}){ground.modelZoom=scale;check(!ground.faceCursor({eye.x+2.5f,eye.y},1.7f,cursorFacing)&&cursorFacing==42,"Small pointer motions at the head do not change facing across model scales");}
   check(ground.faceCursor({eye.x+100,eye.y},1.7f,cursorFacing)&&std::abs(cursorFacing-90)<.01,"A clear pointer direction still faces right");

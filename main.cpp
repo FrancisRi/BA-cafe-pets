@@ -183,6 +183,9 @@ struct App {
             battle->moveSeconds=geometry.bodyWidth*preferences.moveBodies/(0.792*WalkSpeedMultiplier*3);
             battle->callsignProbability=preferences.clickProbability/100;battle->skillProbability=preferences.skillProbability/100;battle->keyboardIdleSeconds=preferences.keyboardIdle;}
     }
+    bool stationaryCafeTracking() const {
+        return !battleMode&&!formationMode&&preferences.cafeTracking&&!preferences.follow&&!preferences.wandering;
+    }
     Json settingsSnapshot() const {
         auto value=preferences.json();value.update({{"look",state.trackingEnabled},{"outline",state.outlineEnabled},
             {"mode",modeName()},{"idleSeconds",state.inactivityThreshold()},{"activeSeconds",state.activeSecondsOverride.value_or(30)}});
@@ -545,7 +548,7 @@ struct App {
                 if(!state.settingsOpen)state.advance(dt);yaw=0;wasDragging=dragging;
                 click=dragStarted=false;renderFrame();return;
             }
-            if(observeDebouncedInput(state,idle,elapsed,preferences.inputGrace) && !battleMode&&!preferences.follow&&!directed.active){state.trackingCursor=false;state.returnRequested=state.walkEnabled&&journey.requestReturn(ground.position);if(!state.returnRequested)yaw=0;}
+            if(observeDebouncedInput(state,idle,elapsed,preferences.inputGrace) && !battleMode&&!preferences.follow&&!directed.active){state.trackingCursor=false;state.returnRequested=state.walkEnabled&&journey.requestReturn(ground.position);if(!state.returnRequested&&!stationaryCafeTracking())yaw=0;}
             POINT cursor{};GetCursorPos(&cursor);const Vector2 pixel{float(cursor.x-work.left),float(cursor.y-work.top)};
             const auto goal=battleMode&&state.inputActive?ground.planeAt(pixel,1.15f*zoom):ground.floorAt(ground.clampFoot(pixel));const float dx=goal.x-ground.position.x,dz=goal.z-ground.position.z;
             state.cursorTarget=dx*dx+dz*dz>0.04f;state.cursorYaw=std::atan2(dx,dz)*RAD2DEG;
@@ -753,7 +756,7 @@ struct App {
             if(!state.walking&&!directed.active&&!(battleMode&&battle->phase==pet::Battle::Phase::Skill))crowd.reset();
             if(!battleMode)cafeAttention.update(state,yaw,dt,
                 idlePose&&!directed.active&&!restFacing&&!state.returningHome&&!left&&!right&&!front&&!state.settingsOpen
-                    &&preciseNow>=interactionUntil,preferences.cafeLookMode=="threshold",preferences.cafeTracking);
+                    &&preciseNow>=interactionUntil,preferences.cafeLookMode=="threshold",preferences.cafeTracking,stationaryCafeTracking());
             else cafeAttention.reset();
             if(battleMode&&(battle->phase==pet::Battle::Phase::VictoryStart||battle->phase==pet::Battle::Phase::VictoryEnd))yaw=0;
             if(dt>0 && (state.walking||directed.active) && (!state.settingsOpen || directed.jumping || (battleMode && battle->phase==pet::Battle::Phase::Jump))) {

@@ -10,11 +10,13 @@ struct CafeAttention {
     float targetYaw=0;
     void pause(){if(turning){turning=false;++serial;}time=0;}
     void reset(){pause();chosen=false;epoch=UINT64_MAX;}
-    void update(pet::Playback& state,float& yaw,double dt,bool eligible,bool threshold,bool enabled=true){
-        if(!state.inputActive||!enabled){reset();return;}
+    void update(pet::Playback& state,float& yaw,double dt,bool eligible,bool threshold,bool enabled=true,bool continuous=false){
+        // A stationary pet's explicit look toggle is independent of the input
+        // episode timers used to start roaming/following behavior.
+        if(!enabled||(!continuous&&!state.inputActive)){reset();return;}
         if(state.inputEpoch!=epoch){pause();chosen=false;epoch=state.inputEpoch;}
         if(!eligible){pause();return;}
-        chosen=state.activeInputSeconds>=state.activeSecondsOverride.value_or(30);
+        chosen=continuous||state.activeInputSeconds>=state.activeSecondsOverride.value_or(30);
         if(!chosen||!state.lookTarget||!std::isfinite(state.lookYaw)||!std::isfinite(dt)){pause();return;}
         dt=std::max(0.0,dt);
         if(!threshold){pause();

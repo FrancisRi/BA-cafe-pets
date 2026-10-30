@@ -51,6 +51,33 @@ int wmain(int argc,wchar_t** argv){try{
         model.sample(from,0,.09,true);check(extent()<=2*std::max(initial,picked),"Dropping must not inflate the reverse transition");
         model.sample(a.state.clips[a.cafeIdle].modelIndex,0,0,false);model.updateGeometry(false);model.currentClip=-1;model.displayed=false;
     }
+    {
+        const auto savedPreferences=a.preferences;const auto savedInput=a.idleInputSeconds;
+        const auto savedActive=a.state.activeSecondsOverride,savedIdle=a.state.idleSecondsOverride;
+        double idle=0;a.idleInputSeconds=[&]{return idle;};int failures=0;
+        for(const std::string mode:{"smooth","threshold"}){
+            a.selectMode(false);a.preferences.follow=a.preferences.wandering=false;a.preferences.cafeTracking=true;a.preferences.cafeLookMode=mode;
+            a.state.activeSecondsOverride=5;a.state.idleSecondsOverride=30;a.applyPreferences();a.interactionUntil=0;
+            a.geometry.place(a.ground,{a.ground.width*.5f,a.ground.height*.65f},a.zoom);const auto anchor=a.ground.position;
+            const auto eye=a.ground.screen({anchor.x,a.eyeHeight*a.zoom,anchor.z});
+            const auto point=[&](float x,float y){interactionCursor={a.work.left+LONG(std::lround(x)),a.work.top+LONG(std::lround(y))};};
+            idle=0;a.state.inputActive=true;a.state.activeInputSeconds=6;a.state.noInputState=false;++a.state.inputEpoch;
+            point(eye.x+200,eye.y);tick(100);check(std::abs(a.yaw-90)<.1f,"Stationary cafe initially looks at the cursor");
+            idle=4;tick(100);point(eye.x-200,eye.y);idle=0;tick(100);
+            const bool retargeted=std::abs(std::remainder(a.yaw+90,360.f))<.1f;
+            idle=31;tick(10);const float beforeWake=a.yaw;point(eye.x,eye.y);idle=0;tick();
+            const bool keptFacing=std::abs(std::remainder(a.yaw-beforeWake,360.f))<.01f;
+            idle=120;tick(1000);const float beforeKeyboard=a.yaw;point(eye.x-200,eye.y);idle=0;tick();
+            const bool keyboardKeptFacing=std::abs(std::remainder(a.yaw-beforeKeyboard,360.f))<.01f;
+            std::cout<<"Stationary cafe "<<mode<<": retarget after quiet="<<retargeted<<"; hover wake without snap="<<keptFacing<<"; keyboard wake without snap="<<keyboardKeptFacing<<"; yaw="<<a.yaw<<'\n';
+            failures+=!retargeted||!keptFacing||!keyboardKeptFacing;
+            check(Vector3Distance(anchor,a.ground.position)<1e-6&&!a.state.walking&&!a.directed.active,"Stationary eye tracking never changes the ground position");
+            a.preferences.cafeTracking=false;point(eye.x+200,eye.y);const float disabledYaw=a.yaw;tick(100);
+            check(a.yaw==disabledYaw,"Disabling cafe eye tracking still prevents rotation");
+        }
+        a.preferences=savedPreferences;a.idleInputSeconds=savedInput;a.state.activeSecondsOverride=savedActive;a.state.idleSecondsOverride=savedIdle;
+        a.selectMode(false);a.applyPreferences();check(failures==0,"Stationary cafe eye tracking must survive quiet gaps and input resumption without snapping forward");
+    }
     a.preferences.follow=true;a.preferences.wandering=true;a.preferences.battleWalking=true;a.preferences.cafeTracking=true;a.state.trackingEnabled=true;a.applyPreferences();
     a.geometry.place(a.ground,{a.ground.width*.5f,a.ground.height*.65f},a.zoom);
     const auto pointer=[&](float x,float y){interactionCursor={a.work.left+LONG(x),a.work.top+LONG(y)};};
