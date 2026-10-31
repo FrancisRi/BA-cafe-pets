@@ -14,8 +14,8 @@ namespace nativepet {
 using Json=nlohmann::json;
 using Mat=std::array<float,16>; // glTF column-major; independent of raylib's storage convention.
 struct Pose {Vector3 t{},s{1,1,1};Quaternion q{0,0,0,1};std::vector<float> weights;};
-struct Node {std::string name;int parent=-1;bool matrix=false,inScene=false,visible=true;Mat fixed{},world{};Pose rest,current;Json extras;uint64_t worldVersion=0;};
-struct Skin {std::vector<int> joints;std::vector<Mat> inverseBind,palette;std::vector<uint64_t> versions;};
+struct Node {std::string name;int parent=-1;bool matrix=false,inScene=false,visible=true;Mat fixed{},world{};Pose rest,current;Json extras;uint64_t worldVersion=0;float referenceScale=0;};
+struct Skin {std::vector<int> joints;std::vector<Mat> inverseBind,palette;std::vector<uint64_t> versions;std::vector<float> referenceScales;};
 struct Track {int node=-1,path=0,interpolation=0,width=0;std::vector<float> times,values;bool preserveBaseMorph=false;};
 struct Clip {std::string name;double duration=0;std::vector<Track> tracks;Json extras;};
 struct DrawPart {
@@ -34,7 +34,7 @@ struct DrawPart {
     std::vector<unsigned> usedJoints;std::vector<uint64_t> jointVersions;
     std::vector<float> lastMorphWeights;uint64_t nodeVersion=UINT64_MAX;
     Vector3 geometryOrigin{};float geometryFit=0;bool geometryReady=false,needsUpload=false;
-    bool transparent=false,doubleSided=false;float alphaCutoff=-1;
+    bool transparent=false,doubleSided=false,poseHidden=false;float alphaCutoff=-1;
     std::array<float,4> factor{1,1,1,1};
     ~DrawPart();
 };
@@ -58,6 +58,7 @@ public:
     void updateGeometry(bool upload=true);
     void uploadGeometry(); // OpenGL only; CPU preparation can run on workers.
     Bounds bounds(bool normalized=true)const;
+    bool partVisible(const DrawPart&)const;
     Vector3 point(const DrawPart&,size_t vertex,bool normal=false,bool smooth=false,bool cachedSkin=false)const;
     void restore();
 private:

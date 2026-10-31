@@ -12,6 +12,7 @@
 #include "native_renderer.h"
 #include "native_health.h"
 #include "native_frame.h"
+#include "shared/model_view.h"
 #include "rlgl.h"
 #include <algorithm>
 #include <cstring>
@@ -89,7 +90,7 @@ void NativeRenderer::render(HWND display,HWND input,bool screenshot,const std::f
  // appearance and action visibility must all agree before reusing a frame.
  if(frameValid&&!changed&&!model->updatedParts&&key==frameKey&&!screenshot){++reusedFrames;statistics(now);return;}
  NativeHealth::mark("GPU mesh upload");const double uploadStart=diagnostics?clock():0;model->uploadGeometry();if(diagnostics)uploadMs+=(clock()-uploadStart)*1000;
- const float angle=s["yaw"].get<float>()*DEG2RAD,z=s["zoom"];Mat actor=identity();actor[0]=std::cos(angle)*z;actor[2]=-std::sin(angle)*z;actor[5]=z;actor[8]=std::sin(angle)*z;actor[10]=std::cos(angle)*z;actor[12]=position[0];actor[13]=position[1];actor[14]=position[2];const Matrix pose=matrix(actor);
+ Mat actor=ModelView::matrix(s["yaw"].get<float>(),s["zoom"].get<float>());actor[12]=position[0];actor[13]=position[1];actor[14]=position[2];const Matrix pose=matrix(actor);
  // Keep the full desktop projection, but allocate/read only the current pose.
  // Bounds come from all deformed vertices, never from sparse animation samples
  // or alpha thresholds. The display crop cannot change the ground anchor.
@@ -97,7 +98,7 @@ void NativeRenderer::render(HWND display,HWND input,bool screenshot,const std::f
  float left=INFINITY,right=-INFINITY,up=INFINITY,bottom=-INFINITY;
  const auto include=[&](float x0,float y0,float x1,float y1){x0=std::max(0.0f,x0);y0=std::max(0.0f,y0);x1=std::min(float(logicalWidth),x1);y1=std::min(float(logicalHeight),y1);if(x1>=x0&&y1>=y0){left=std::min(left,x0);right=std::max(right,x1);up=std::min(up,y0);bottom=std::max(bottom,y1);}};
  const auto forward=Vector3Normalize(Vector3Subtract(camera.target,camera.position));
- for(const auto& part:model->parts){bool show=model->nodes[part->node].inScene;for(int i=part->node;i>=0;i=model->nodes[i].parent)show&=model->nodes[i].visible;if(!show)continue;
+ for(const auto& part:model->parts){if(part->poseHidden)continue;
   const auto& b=part->posedBounds;float x0=INFINITY,y0=INFINITY,x1=-INFINITY,y1=-INFINITY,nearDepth=INFINITY,farDepth=-INFINITY;
   for(int corner=0;corner<8;corner++){const Vector3 point{corner&1?b.max.x:b.min.x,corner&2?b.max.y:b.min.y,corner&4?b.max.z:b.min.z};const auto world=Vector3Transform(point,pose);const float depth=Vector3DotProduct(Vector3Subtract(world,camera.position),forward);nearDepth=std::min(nearDepth,depth);farDepth=std::max(farDepth,depth);const auto pixel=GetWorldToScreenEx(world,camera,desktop[0],desktop[1]);if(!std::isfinite(pixel.x)||!std::isfinite(pixel.y))continue;const float x=pixel.x-crop[0].get<float>(),y=pixel.y-crop[1].get<float>();x0=std::min(x0,x);y0=std::min(y0,y);x1=std::max(x1,x);y1=std::max(y1,y);}
   if(farDepth<5||nearDepth>s["far"].get<float>())continue;
@@ -129,9 +130,9 @@ void NativeRenderer::render(HWND display,HWND input,bool screenshot,const std::f
  if(mode==2){SetShaderValue(hull,hullWidthLocation,&outline,SHADER_UNIFORM_FLOAT);rlEnableBackfaceCulling();rlSetCullFace(RL_CULL_FACE_FRONT);
   // A hidden Morph still has its original normals: inflating its collapsed
   // vertices would resurrect it as a black line, especially with mixed bones.
-  for(const auto& part:model->parts){bool show=true;for(int i=part->node;i>=0;i=model->nodes[i].parent)show&=model->nodes[i].visible;if(!show||part->transparent||part->outlineCollapsed)continue;auto material=part->material;material.shader=hull;DrawMesh(part->mesh,material,pose);}rlSetCullFace(RL_CULL_FACE_BACK);
+  for(const auto& part:model->parts){if(part->poseHidden||part->transparent||part->outlineCollapsed)continue;auto material=part->material;material.shader=hull;DrawMesh(part->mesh,material,pose);}rlSetCullFace(RL_CULL_FACE_BACK);
  }
- auto draw=[&](const auto& part){bool show=true;for(int i=part->node;i>=0;i=model->nodes[i].parent)show&=model->nodes[i].visible;if(!show)return;auto material=part->material;material.shader=unlit;const int alpha=part->transparent?2:part->alphaCutoff>=0?1:0;
+ auto draw=[&](const auto& part){if(part->poseHidden)return;auto material=part->material;material.shader=unlit;const int alpha=part->transparent?2:part->alphaCutoff>=0?1:0;
   SetShaderValue(unlit,factorLocation,part->factor.data(),SHADER_UNIFORM_VEC4);SetShaderValue(unlit,alphaLocation,&alpha,SHADER_UNIFORM_INT);SetShaderValue(unlit,cutoffLocation,&part->alphaCutoff,SHADER_UNIFORM_FLOAT);
   if(part->doubleSided)rlDisableBackfaceCulling();else rlEnableBackfaceCulling();DrawMesh(part->mesh,material,pose);
  };

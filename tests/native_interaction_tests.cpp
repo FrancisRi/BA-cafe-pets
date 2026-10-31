@@ -40,6 +40,20 @@ int wmain(int argc,wchar_t** argv){try{
     scene.frameClock.reset(preciseSeconds()+3600);
     const auto tick=[&](int count=1){for(int i=0;i<count;++i){a.lastTick=preciseSeconds()-.016;scene.tick();}};tick();
     check(a.loaded,"Load actual GLB with current animation discovery");
+    {
+        auto& model=*a.renderer->model;const int idle=model.catalog["cafe"]["idle"],pickup=model.catalog["cafe"]["pickup"];
+        const auto collapsed=[](Vector3 value,Vector3 base){return std::abs(value.x)<=std::abs(base.x)*.0011f&&std::abs(value.y)<=std::abs(base.y)*.0011f&&std::abs(value.z)<=std::abs(base.z)*.0011f;};
+        model.sample(idle,0,0,false);std::vector<nativepet::Pose> idlePose;for(const auto& n:model.nodes)idlePose.push_back(n.current);
+        model.sample(pickup,0,0,false);std::vector<nativepet::Pose> pickedPose;for(const auto& n:model.nodes)pickedPose.push_back(n.current);
+        std::vector<size_t> switches;for(size_t n=0;n<model.nodes.size();++n)if(collapsed(idlePose[n].s,model.nodes[n].rest.s)!=collapsed(pickedPose[n].s,model.nodes[n].rest.s))switches.push_back(n);
+        for(bool reverse:{false,true}){
+            model.sample(reverse?pickup:idle,0,0,false);model.sample(reverse?idle:pickup,0,.09,true);
+            const auto& expected=reverse?idlePose:pickedPose;
+            for(size_t n:switches)check(Vector3Distance(model.nodes[n].current.t,expected[n].t)<1e-6&&Vector3Distance(model.nodes[n].current.s,expected[n].s)<1e-6,"A bone-scaled hidden prop must switch in place instead of flying between its hiding position and the hand");
+        }
+        model.sample(idle,0,0,false);model.updateGeometry(false);model.currentClip=-1;model.displayed=false;
+        std::cout<<"Hidden prop pickup/drop transitions: "<<switches.size()<<" scale visibility switches passed.\n";
+    }
     if(a.formationIdle>=0&&a.formationPickup>=0){
         auto& model=*a.renderer->model;
         const auto extent=[&]{model.updateGeometry(false);float result=0;for(const auto& part:model.parts){bool visible=model.nodes[part->node].inScene;for(int n=part->node;n>=0;n=model.nodes[n].parent)visible&=model.nodes[n].visible;if(!visible)continue;const auto b=part->posedBounds;result=std::max(result,std::max({b.max.x-b.min.x,b.max.y-b.min.y,b.max.z-b.min.z}));}return result;};
@@ -59,7 +73,7 @@ int wmain(int argc,wchar_t** argv){try{
             a.selectMode(false);a.preferences.follow=a.preferences.wandering=false;a.preferences.cafeTracking=true;a.preferences.cafeLookMode=mode;
             a.state.activeSecondsOverride=5;a.state.idleSecondsOverride=30;a.applyPreferences();a.interactionUntil=0;
             a.geometry.place(a.ground,{a.ground.width*.5f,a.ground.height*.65f},a.zoom);const auto anchor=a.ground.position;
-            const auto eye=a.ground.screen({anchor.x,a.eyeHeight*a.zoom,anchor.z});
+            const auto eye=a.ground.eyePixel(a.eyeHeight*a.zoom);
             const auto point=[&](float x,float y){interactionCursor={a.work.left+LONG(std::lround(x)),a.work.top+LONG(std::lround(y))};};
             idle=0;a.state.inputActive=true;a.state.activeInputSeconds=6;a.state.noInputState=false;++a.state.inputEpoch;
             point(eye.x+200,eye.y);tick(100);check(std::abs(a.yaw-90)<.1f,"Stationary cafe initially looks at the cursor");

@@ -4,6 +4,15 @@
 #include <algorithm>
 #include <cmath>
 
+// Exporters use a thousandth-size bone as an instantaneous visibility switch.
+// Do not invent a travel/growth animation between its hiding place and hand.
+template<class Vector>
+bool collapsedScale(const Vector& value,const Vector& reference){
+    const auto axis=[](float a,float b){return std::isfinite(a)&&std::isfinite(b)&&std::abs(a)<=std::abs(b)*.0011f;};
+    return std::max({std::abs(reference.x),std::abs(reference.y),std::abs(reference.z)})>1e-12f
+        &&axis(value.x,reference.x)&&axis(value.y,reference.y)&&axis(value.z,reference.z);
+}
+
 // Some clips express the same size with opposite, very large ancestor/child
 // scales (for example .01 * 100 versus .0001 * 10000). Independent TRS lerps
 // create a huge intermediate mesh. Keep such unit-conversion switches atomic.

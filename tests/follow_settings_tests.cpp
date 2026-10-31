@@ -66,7 +66,15 @@ int main(int argc,char** argv){
    check(facing==paused&&!continuous.turning,"Dragging, menus and action overrides still pause stationary tracking");
    continuous.update(attentionState,facing,.008,true,threshold,false,true);check(facing==paused&&!continuous.chosen,"The look toggle still disables continuous tracking");
   }
-  const auto eye=ground.screen({ground.position.x,1.7f,ground.position.z});float cursorFacing=42;
+  for(float yaw:{0.f,90.f,180.f,-90.f})for(float zoom:{.45f,1.f,1.65f}){
+   const auto view=ModelView::matrix(yaw,zoom);const auto origin=ModelView::apply(view,{0,0,0});
+   const auto up=ModelView::apply(view,{0,1,0});
+   check(origin.x==0&&origin.y==0&&origin.z==0,"Presentation pitch preserves the ground anchor at every facing and scale");
+   check(up.x==0&&up.y>0&&up.z<0&&std::abs(std::hypot(up.y,up.z)-zoom)<1e-6,"Presentation pitch is uniform and never leans side-facing characters sideways");
+  }
+  const auto forward=ModelView::apply(ModelView::matrix(0,1),{0,0,1});
+  check(forward.y>0&&std::abs(std::atan2(forward.y,forward.z)*RAD2DEG-5.f)<.001,"Front-facing presentation looks five degrees higher");
+  const auto eye=ground.eyePixel(1.7f);float cursorFacing=42;
   for(float scale:{.45f,1.f,1.65f}){ground.modelZoom=scale;check(!ground.faceCursor({eye.x+2.5f,eye.y},1.7f,cursorFacing)&&cursorFacing==42,"Small pointer motions at the head do not change facing across model scales");}
   check(ground.faceCursor({eye.x+100,eye.y},1.7f,cursorFacing)&&std::abs(cursorFacing-90)<.01,"A clear pointer direction still faces right");
   cursorFacing=42;check(!ground.faceCursor({NAN,eye.y},1.7f,cursorFacing)&&cursorFacing==42,"An invalid pointer sample leaves the last valid direction intact");

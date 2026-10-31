@@ -31,11 +31,10 @@ struct DesktopGeometry {
     PetGround::Area projectBoxes(const PetGround& ground,float zoom,const std::vector<BoundingBox>& boxes,float facing) const {
         PetGround::Area offsets{INFINITY,INFINITY,-INFINITY,-INFINITY};
         const auto foot=ground.screen(ground.position);
-        const float angle=facing*DEG2RAD,cosine=std::cos(angle),sine=std::sin(angle);
+        const auto transform=ModelView::matrix(facing,zoom);
         for(const auto& box:boxes)for(int x=0;x<2;++x)for(int y=0;y<2;++y)for(int z=0;z<2;++z) {
-            const float dx=(x?box.max.x:box.min.x)*zoom,dz=(z?box.max.z:box.min.z)*zoom;
-            const auto p=ground.screen({ground.position.x+dx*cosine+dz*sine,
-                (y?box.max.y:box.min.y)*zoom,ground.position.z+dz*cosine-dx*sine});
+            const auto point=ModelView::apply(transform,{x?box.max.x:box.min.x,y?box.max.y:box.min.y,z?box.max.z:box.min.z});
+            const auto p=ground.screen({ground.position.x+point.x,ground.position.y+point.y,ground.position.z+point.z});
             offsets.left=std::min(offsets.left,p.x-foot.x-EdgeClearance);offsets.right=std::max(offsets.right,p.x-foot.x+EdgeClearance);
             offsets.top=std::min(offsets.top,p.y-foot.y-EdgeClearance);offsets.bottom=std::max(offsets.bottom,p.y-foot.y+EdgeClearance);
         }

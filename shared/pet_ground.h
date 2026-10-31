@@ -1,5 +1,6 @@
 #pragma once
 #include "raylib.h"
+#include "model_view.h"
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -30,8 +31,12 @@ struct PetGround {
         return {ray.position.x + ray.direction.x*t, elevation, ray.position.z + ray.direction.z*t};
     }
     Vector3 floorAt(Vector2 pixel) const { return planeAt(pixel, 0); }
+    Vector2 eyePixel(float eyeHeight) const {
+        const auto eye=ModelView::apply(ModelView::matrix(0,1),{0,eyeHeight,0});
+        return screen({position.x+eye.x,position.y+eye.y,position.z+eye.z});
+    }
     bool faceCursor(Vector2 pixel, float eyeHeight, float& yaw) const {
-        const auto eye = screen({position.x, eyeHeight, position.z});
+        const auto eye = eyePixel(eyeHeight);
         const float dx=pixel.x-eye.x,dy=pixel.y-eye.y;
         // Near the eyes, tiny pointer movements can imply a half-turn. Scale
         // this quiet region with the pet so it also works at small/large zoom.

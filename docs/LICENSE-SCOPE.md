@@ -44,6 +44,7 @@ Git 的新增行和提交作者记录用于追溯，不单独证明某行的版�
 - `native_tray.h`
 - `native_pet_clicks.h`
 - `animation_scale_transition.h`
+- `shared/model_view.h`
 - `tests/antialias_tests.cpp`
 - `tests/autostart_tests.cpp`
 - `tests/launcher_storage_compatibility.py`
@@ -64,9 +65,11 @@ Git 的新增行和提交作者记录用于追溯，不单独证明某行的版�
 **不表示整个文件已经改用 GPL**：
 
 - `main.cpp`、`native_input.h`、`native_renderer.cpp`、`native_renderer.h`
+- `gltf_model.cpp`、`gltf_model.h`
 - `native_settings.h`、`scene.h`
 - `shared/cafe_attention.h`、`shared/crowd_steering.h`、`shared/desktop_path.h`
 - `shared/pet_ground.h`、`shared/scene_state.h`
+- `shared/desktop_geometry.h`
 - `.gitignore`、`CMakeLists.txt`、`build.ps1`、`package.ps1`
 - `release_launcher.cpp`、`version.rc.in`
 - `tests/crowd_steering_tests.cpp`、`tests/follow_settings_tests.cpp`

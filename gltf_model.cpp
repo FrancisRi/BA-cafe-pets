@@ -15,6 +15,7 @@
 #include <stdexcept>
 
 namespace nativepet {
+static float basisScale(const Mat& m){float maximum=0;for(int column=0;column<3;++column){const int i=column*4;maximum=std::max(maximum,std::sqrt(m[i]*m[i]+m[i+1]*m[i+1]+m[i+2]*m[i+2]));}return maximum;}
 Mat identity(){return {1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};}
 Mat multiply(const Mat& a,const Mat& b){Mat out{};for(int c=0;c<4;c++)for(int r=0;r<4;r++)for(int k=0;k<4;k++)out[c*4+r]+=a[k*4+r]*b[c*4+k];return out;}
 Vector3 transform(const Mat& m,Vector3 p,bool direction){const float w=direction?0:1;return {m[0]*p.x+m[4]*p.y+m[8]*p.z+m[12]*w,m[1]*p.x+m[5]*p.y+m[9]*p.z+m[13]*w,m[2]*p.x+m[6]*p.y+m[10]*p.z+m[14]*w};}
@@ -194,7 +195,9 @@ GltfModel::GltfModel(const std::filesystem::path& file,const std::function<void(
     if(!expand){mesh.indices=static_cast<unsigned short*>(MemAlloc(drawIndices.size()*sizeof(unsigned short)));if(!mesh.indices)throw std::bad_alloc();for(size_t k=0;k<drawIndices.size();k++)mesh.indices[k]=static_cast<unsigned short>(drawIndices[k]);}UploadMesh(&mesh,true);if(!mesh.vaoId)throw std::runtime_error("Cannot upload GLB mesh");parts.push_back(std::move(part));
    }
   }
-  if(parts.empty())throw std::runtime_error("No visible mesh in GLB scene");size_t full=0,used=0;for(const auto& p:parts){full+=p->positions.size();used+=p->source.size();}TraceLog(LOG_INFO,"MESH referenced vertices: %d / %d; unchanged triangle topology",int(used),int(full));preparePartGuards();preparePickupFaceGuard();analyze(progress);progress(100,"原始 GLB 就绪，无转换步骤");
+  if(parts.empty())throw std::runtime_error("No visible mesh in GLB scene");size_t full=0,used=0;for(const auto& p:parts){full+=p->positions.size();used+=p->source.size();}TraceLog(LOG_INFO,"MESH referenced vertices: %d / %d; unchanged triangle topology",int(used),int(full));
+  restore();for(auto& node:nodes)node.referenceScale=basisScale(node.world);for(auto& skin:skins)for(const auto& palette:skin.palette)skin.referenceScales.push_back(basisScale(palette));
+  preparePartGuards();preparePickupFaceGuard();analyze(progress);progress(100,"原始 GLB 就绪，无转换步骤");
  }catch(...){parts.clear();for(auto t:textures)if(t.id)UnloadTexture(t);textures.clear();throw;}
 }
 void GltfModel::restore(){for(auto& n:nodes)n.current=n.rest;hierarchy();}
@@ -283,7 +286,9 @@ void GltfModel::sample(int clip,double seconds,double elapsed,bool blend){
  if(changed){frozen.clear();if(displayed&&blend)for(const auto& n:nodes)frozen.push_back(n.current);currentClip=clip;transition=0;blendSeconds=clip>=0?std::min(0.18,clips[clip].duration*0.35):0.18;visibility(clip);}
  transition+=std::max(0.0,elapsed);evaluate(clip,seconds);
  if(changed&&!frozen.empty()&&compensatingScaleTransition(nodes,frozen))frozen.clear();
- if(!frozen.empty()&&blendSeconds>0){float t=float(std::clamp(transition/blendSeconds,0.0,1.0));t=t*t*(3-2*t);for(size_t i=0;i<nodes.size();i++){auto& p=nodes[i].current;const auto& from=frozen[i];p.t=Vector3Lerp(from.t,p.t,t);p.s=Vector3Lerp(from.s,p.s,t);p.q=QuaternionSlerp(from.q,p.q,t);for(size_t j=0;j<p.weights.size();j++)p.weights[j]=(j<from.weights.size()?from.weights[j]:0)*(1-t)+p.weights[j]*t;}if(t>=1)frozen.clear();}
+ if(!frozen.empty()&&blendSeconds>0){float t=float(std::clamp(transition/blendSeconds,0.0,1.0));t=t*t*(3-2*t);for(size_t i=0;i<nodes.size();i++){auto& p=nodes[i].current;const auto& from=frozen[i];
+  if(collapsedScale(from.s,nodes[i].rest.s)!=collapsedScale(p.s,nodes[i].rest.s))continue;
+  p.t=Vector3Lerp(from.t,p.t,t);p.s=Vector3Lerp(from.s,p.s,t);p.q=QuaternionSlerp(from.q,p.q,t);for(size_t j=0;j<p.weights.size();j++)p.weights[j]=(j<from.weights.size()?from.weights[j]:0)*(1-t)+p.weights[j]*t;}if(t>=1)frozen.clear();}
  hierarchy();displayed=true;
 }
 Vector3 GltfModel::point(const DrawPart& p,size_t index,bool normal,bool smooth,bool cachedSkin)const{
@@ -295,8 +300,18 @@ Vector3 GltfModel::point(const DrawPart& p,size_t index,bool normal,bool smooth,
  return normal?Vector3Normalize(value):value;
 }
 static bool visible(const std::vector<Node>& nodes,int index){for(int i=index;i>=0;i=nodes[i].parent)if(!nodes[i].visible)return false;return nodes[index].inScene;}
+bool GltfModel::partVisible(const DrawPart& p)const{
+ if(!visible(nodes,p.node))return false;
+ const auto hidden=[](float current,float reference){return reference>1e-12f&&current<=reference*.0011f;};
+ if(p.skin<0)return !hidden(basisScale(nodes[p.node].world),nodes[p.node].referenceScale);
+ const auto& skin=skins[p.skin];if(p.usedJoints.empty())return true;
+ // Compare composed skin matrices to their bind/rest scale, so compensating
+ // ancestor unit conversions and ordinary small props are retained.
+ for(unsigned joint:p.usedJoints)if(!hidden(basisScale(skin.palette[joint]),skin.referenceScales[joint]))return true;
+ return false;
+}
 void GltfModel::updateGeometry(bool upload){
- updatedParts=0;for(auto& ptr:parts){auto& p=*ptr;if(!visible(nodes,p.node))continue;const auto& n=nodes[p.node];
+ updatedParts=0;for(auto& ptr:parts){auto& p=*ptr;const bool hidden=!partVisible(p);if(p.poseHidden!=hidden){p.poseHidden=hidden;++updatedParts;}if(hidden)continue;const auto& n=nodes[p.node];
   bool dirty=!p.geometryReady||p.nodeVersion!=n.worldVersion||p.geometryFit!=fit||p.geometryOrigin.x!=origin.x||p.geometryOrigin.y!=origin.y||p.geometryOrigin.z!=origin.z;
   if(!p.morphPositions.empty())dirty|=p.lastMorphWeights!=n.current.weights;
   if(p.skin>=0)for(size_t j=0;j<p.usedJoints.size();j++)dirty|=p.jointVersions[j]!=skins[p.skin].versions[p.usedJoints[j]];
@@ -314,7 +329,7 @@ void GltfModel::uploadGeometry(){
  for(auto& part:parts)if(part->needsUpload){auto& mesh=part->mesh;UpdateMeshBuffer(mesh,0,mesh.vertices,mesh.vertexCount*3*sizeof(float),0);UpdateMeshBuffer(mesh,2,mesh.normals,mesh.vertexCount*3*sizeof(float),0);part->needsUpload=false;}
 }
 Bounds GltfModel::bounds(bool normalized)const{
- Bounds body;std::vector<Bounds> props;for(const auto& p:parts){if(!visible(nodes,p->node))continue;Bounds part;for(size_t i=0;i<p->positions.size();i++){auto v=point(*p,i);if(normalized)v=Vector3Scale(Vector3Add(v,origin),fit);part.add(v);}if(has(compact(p->name),{"weapon","shield","bullet","prop","effect"}))props.push_back(part);else body.join(part);}
+ Bounds body;std::vector<Bounds> props;for(const auto& p:parts){if(!partVisible(*p))continue;Bounds part;for(unsigned i:p->source){auto v=point(*p,i);if(normalized)v=Vector3Scale(Vector3Add(v,origin),fit);part.add(v);}if(has(compact(p->name),{"weapon","shield","bullet","prop","effect"}))props.push_back(part);else body.join(part);}
  const auto core=body;const float reach=core.valid()?std::max(3.0f,Vector3Length(Vector3Subtract(core.high,core.low))*2):INFINITY;
  for(auto& p:props){const Vector3 d{std::max({0.0f,core.low.x-p.high.x,p.low.x-core.high.x}),std::max({0.0f,core.low.y-p.high.y,p.low.y-core.high.y}),std::max({0.0f,core.low.z-p.high.z,p.low.z-core.high.z})};if(!core.valid()||Vector3Length(d)<=reach)body.join(p);}return body;
 }
@@ -349,7 +364,7 @@ void GltfModel::analyze(const std::function<void(int,const std::string&)>& progr
    // them to a distant point. They occupy no surface but their vertices can
    // extend far below the feet. Only non-degenerate posed triangles constrain
    // placement; normalization, render geometry and its envelope stay intact.
-   for(size_t k=0;k<parts.size();++k){const auto& p=*parts[k];if(!visible(nodes,p.node))continue;
+   for(size_t k=0;k<parts.size();++k){const auto& p=*parts[k];if(!partVisible(p))continue;
     std::vector<Vector3> vertices;vertices.reserve(p.source.size());
     for(unsigned vertex:p.source)vertices.push_back(Vector3Scale(Vector3Add(point(p,vertex),origin),fit));
     for(int triangle=0;triangle<p.mesh.triangleCount;++triangle){const int i=triangle*3;
