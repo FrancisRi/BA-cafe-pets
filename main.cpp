@@ -118,7 +118,7 @@ struct App {
     pet::Playback state;std::unique_ptr<pet::Behavior> behavior;std::unique_ptr<PetSettings> settings;
     std::unique_ptr<pet::Battle> battle;NativeDesktopInput battleInput;
     bool battleMode=false,formationMode=false;
-    PetGround ground;PetJourney journey;RECT work{};float primaryHeight=1,eyeHeight=1.7f,yaw=0,zoom=1;
+    PetGround ground;PetJourney journey;RECT work{};float primaryHeight=1,eyeHeight=1.7f,yaw=0,zoom=1,skillYaw=0;
     POINT down{},previous{};bool left=false,right=false,menuPressed=false,rightDragged=false,dragged=false,wasDragging=false,click=false,dragStarted=false;
     bool lookHotkey=false,quitHotkey=false;uint64_t walkGeneration=0;
     ULONGLONG started=0,readyAt=0;int exitCode=0;
@@ -393,14 +393,15 @@ struct App {
     }
     bool startManualSkill(){
         if(manualSkill<0||!loaded||state.settingsOpen)return false;
+        skillYaw=formationMode?0:yaw;
         behavior->halt();stopLocomotion();if(battleMode)battle->start();
         manualAction=true;state.pendingClick=false;state.facingRequest.reset();state.trackingCursor=false;
-        state.start(manualSkill,false);state.reaction=0;yaw=0;placementNeeded=false;return true;
+        state.start(manualSkill,false);state.reaction=0;yaw=skillYaw;placementNeeded=false;return true;
     }
     void finishManualSkill(){
         manualAction=false;stopLocomotion();state.pendingClick=false;state.resetCooldown();
         if(battleMode)battle->start();else{behavior->halt();state.start(formationMode?formationIdle:cafeIdle,true);}
-        yaw=0;interactionUntil=preciseSeconds()+0.5;placementNeeded=false;
+        yaw=formationMode?0:skillYaw;interactionUntil=preciseSeconds()+0.5;placementNeeded=false;
     }
     void initializeBehavior(const Json& message){
         if(!grouped)battleInput.enable(false);battle.reset();behavior.reset();state.clips.clear();state.active=false;state.current=-1;
@@ -534,7 +535,7 @@ struct App {
             doubleClickRequest=tripleClickRequest=false;
             if(manualAction&&dragging)finishManualSkill();
             if(manualAction){
-                yaw=0;state.pendingClick=false;state.trackingCursor=false;state.facingRequest.reset();
+                yaw=skillYaw;state.pendingClick=false;state.trackingCursor=false;state.facingRequest.reset();
                 if(!state.settingsOpen)state.advance(dt);
                 if(state.time>=state.clips[state.current].duration)finishManualSkill();
                 click=dragStarted=false;wasDragging=dragging;renderFrame();return;
@@ -555,7 +556,8 @@ struct App {
             float lookYaw=0;state.lookTarget=ground.faceCursor(pixel,eyeHeight*zoom,lookYaw);state.lookYaw=lookYaw;
             const bool front=click||dragStarted||wasDragging!=dragging;
             if((front&&!directed.jumping)||dragging||right){blockedCursor.reset();cafeAttention.pause();directed.cancel();deferredInput={};deferredCafeClick=false;restFacing.reset();interactionUntil=preciseNow+2;placementNeeded=true;}
-            if(front&&!directed.jumping)yaw=0;if(front||dragging||right||!state.walkEnabled){journey.route.clear();state.returnRequested=false;}
+            // The first click of a double click must retain the user's facing.
+            if(front&&!click&&!directed.jumping)yaw=0;if(front||dragging||right||!state.walkEnabled){journey.route.clear();state.returnRequested=false;}
             if(battleMode){
                 auto events=grouped?sharedEvents:battleInput.take(false,dragging,false);events.petClick=false;events.dragging=dragging;
                 if(directed.jumping){
@@ -608,6 +610,7 @@ struct App {
                 const bool allowWalk=state.walkEnabled;state.walkEnabled=preferences.automaticWalk(true,state.inputActive)&&(!preferences.follow||!state.inputActive)&&!directed.active;
                 const bool menuOpen=state.settingsOpen;if(directed.jumping)state.settingsOpen=true;
                 battle->activityDelta=elapsed;battle->tick(dt,events);state.settingsOpen=menuOpen;state.walkEnabled=allowWalk;
+                if(battle->phase==pet::Battle::Phase::Skill&&phaseBefore!=pet::Battle::Phase::Skill)skillYaw=yaw;
                 if(phaseBefore==pet::Battle::Phase::MoveEnd){
                     endingClip=clipBefore;
                     endingFrom=std::max(0.0,(loopBefore?pet::Battle::StopFallbackSeconds:state.clips[clipBefore].duration)-remainingBefore);
@@ -626,9 +629,10 @@ struct App {
                     walkGeneration=state.generation;
                 }
                 if(battle->returnToCafe)selectMode(false,!review);
-                else if(state.facingRequest&&battle->phase!=pet::Battle::Phase::Idle&&!dragging&&!right
+                else if(state.facingRequest&&battle->phase!=pet::Battle::Phase::Idle&&battle->phase!=pet::Battle::Phase::Skill&&!dragging&&!right
                     &&!(stopTurn.active&&(phaseBefore==pet::Battle::Phase::MoveEnd||battle->phase==pet::Battle::Phase::MoveEnd)))
                     yaw=float(*state.facingRequest);
+                if(battle->phase==pet::Battle::Phase::Skill)yaw=skillYaw;
                 if(battle->phase!=pet::Battle::Phase::Moving&&battle->phase!=pet::Battle::Phase::MoveEnd)stopTurn.reset();
             }else{
                 if(dragStarted&&!dragging)behavior->tick(0,false,true);
@@ -818,9 +822,9 @@ struct App {
         const bool retreat=battle&&state.current==battle->clips.retreat;
         const bool victory=battleMode&&battle&&(battle->phase==pet::Battle::Phase::VictoryStart||battle->phase==pet::Battle::Phase::VictoryEnd);
         // Exs releases toward screen-left in the authored animation. Rotate the
-        // complete skill (including its props) toward the viewer; keep logical
-        // movement yaw independent so this correction cannot affect other clips.
-        const float displayYaw=exsPlaying()?90.0f:formationMode?0:std::remainder(yaw+(retreat?180.0f:0),360.0f);
+        // complete skill (including props) relative to its trigger heading;
+        // keep this authored correction separate from the logical movement yaw.
+        const float displayYaw=exsPlaying()?std::remainder(skillYaw+90.0f,360.0f):formationMode?0:std::remainder(yaw+(retreat?180.0f:0),360.0f);
         if(retreat && retreatLogged!=state.generation) {
             retreatLogged=state.generation;std::printf("RETREAT facing: base=%.1f render=%.1f offset=180\n",yaw,displayYaw);std::fflush(stdout);
         }

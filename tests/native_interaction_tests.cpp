@@ -111,6 +111,7 @@ int wmain(int argc,wchar_t** argv){try{
     a.clickSequence.reset();click();click();click();check(a.modeName()==std::string("cafe"),"A model with only cafe mode stays in cafe on triple click");
     a.battle->clips.missing=missing;a.formationIdle=formation;a.selectMode(false);
     if(a.manualSkill>=0){
+        a.yaw=70;
         a.clickSequence.reset();click();click();check(a.manualAction&&a.state.current==a.manualSkill,"Double click starts Exs even without battle capability");
         if(argc>3){
             const auto out=std::filesystem::absolute(argv[3]);std::filesystem::create_directories(out);
@@ -120,7 +121,7 @@ int wmain(int argc,wchar_t** argv){try{
             a.state.time=0;
         }
         const auto anchor=a.ground.position;pointer(1,1);a.yaw=90;tick();a.presentState(true);
-        check(a.yaw==0&&a.renderer->state["yaw"]==90,"Manual Exs compensates the authored left-facing release by +90 degrees while ignoring the cursor");
+        check(a.yaw==70&&a.renderer->state["yaw"]==160,"Manual Exs retains its trigger heading, adds the authored +90 compensation and ignores the cursor");
         check(Vector3Distance(a.ground.position,anchor)<1e-6&&!a.directed.active,"Manual Exs pauses positional follow and wandering");
         // Keep the original click position; the third click must override Exs.
         pointer(foot.x,foot.y);click();
@@ -130,17 +131,25 @@ int wmain(int argc,wchar_t** argv){try{
             a.clickSequence.reset();click();click();check(a.manualAction,"Battle double click also starts Exs");click();
             check(!a.manualAction&&a.modeName()==std::string(a.formationIdle>=0?"formation":"cafe"),"Battle third click interrupts Exs and switches to formation or cafe directly");
         }
-        a.selectMode(false);a.startManualSkill();a.state.time=a.state.clips[a.manualSkill].duration-.001;tick();
+        a.selectMode(false);a.yaw=-30;a.startManualSkill();a.state.time=a.state.clips[a.manualSkill].duration-.001;tick();
         check(!a.manualAction&&!a.battleMode&&a.state.current==a.cafeIdle,"Completed Exs returns to the previous mode idle");
-        a.presentState(true);check(a.renderer->state["yaw"]==0,"Exs facing compensation ends with the skill");
+        a.presentState(true);check(a.renderer->state["yaw"]==-30,"Exs facing compensation ends with the skill while retaining its trigger heading");
         a.startManualSkill();foot=a.ground.screen(a.ground.position);pointer(foot.x,foot.y);
         App::inputProc(a.inputWindow,WM_LBUTTONDOWN,MK_LBUTTON,0);interactionCursor.x+=12;App::inputProc(a.inputWindow,WM_MOUSEMOVE,MK_LBUTTON,0);tick();a.presentState(true);
         check(!a.manualAction&&a.state.dragging&&a.renderer->state["yaw"]==0,"Pickup interrupts Exs without inheriting its release compensation");
         App::inputProc(a.inputWindow,WM_LBUTTONUP,0,0);tick();
         if(a.settings->battleAvailable&&a.battle->clips.skill>=0){
-            a.selectMode(true);a.state.inputActive=true;a.battle->skillProbability=1;a.battle->activityDelta=1000;a.battle->tick(.016);a.yaw=-45;a.presentState(true);
-            check(a.battle->phase==pet::Battle::Phase::Skill&&a.renderer->state["yaw"]==90,"Automatic battle Exs uses the same authored release compensation");
+            a.selectMode(true);a.state.inputActive=true;a.battle->skillProbability=1;const auto active=a.state.activeSecondsOverride;a.state.activeSecondsOverride=0;a.yaw=-45;tick();a.presentState(true);a.state.activeSecondsOverride=active;
+            check(a.battle->phase==pet::Battle::Phase::Skill&&a.yaw==-45&&a.renderer->state["yaw"]==45,"Automatic battle Exs captures the current heading and uses the same relative compensation");
+            pointer(200,200);tick(5);a.presentState(true);check(a.yaw==-45&&a.renderer->state["yaw"]==45,"Automatic Exs ignores cursor changes during the skill");
             a.battle->start();a.presentState(true);check(a.renderer->state["yaw"]==-45,"Ordinary battle idle keeps its own heading");
+        }
+        for(float heading:{-150.f,-45.f,0.f,60.f,179.f}){
+            a.selectMode(false);a.yaw=heading;a.clickSequence.reset();foot=a.ground.screen(a.ground.position);pointer(foot.x,foot.y);
+            click();check(std::abs(std::remainder(a.yaw-heading,360.f))<.01,"The first click preserves the direction intended for a double-click Exs");click();a.presentState(true);
+            check(a.manualAction&&std::abs(std::remainder(a.renderer->state["yaw"].get<float>()-heading-90,360.f))<.01,"Exs follows arbitrary trigger headings across angle wrap");
+            a.state.time=a.state.clips[a.manualSkill].duration-.001;tick();a.presentState(true);
+            check(!a.manualAction&&std::abs(std::remainder(a.yaw-heading,360.f))<.01,"Exs completion retains the trigger heading without leaving the authored compensation on idle");
         }
     }else{a.clickSequence.reset();click();click();check(!a.manualAction,"A missing Exs never selects an unrelated clip");}
     a.selectMode(false);
