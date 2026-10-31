@@ -1,6 +1,6 @@
 #pragma once
 struct NativePreferences {
-    bool follow=false,cafeTracking=true,wandering=true,battleWalking=true;
+    bool follow=false,cafeTracking=true,wandering=true,battleWalking=true,rightDragRotation=true;
     bool automaticWalk(bool battle,bool inputActive) const {return inputActive?battle&&battleWalking:wandering;}
     std::string cafeLookMode="smooth";
     int outlineMode=2,renderQuality=2;
@@ -9,17 +9,18 @@ struct NativePreferences {
     static constexpr const char* names[]={"followNear","followFar","moveInterval","moveBodies","clickProbability","skillProbability","keyboardIdle","inputGrace","outlineWidth","walkTimeJitter","walkDistanceJitter"};
     static constexpr double minimum[]={0,0.5,1,0.5,0,0,1,0.1,10,0,0},maximum[]={20,20,600,20,100,100,3600,10,300,50,50};
     std::vector<double*> values(){return {&followNear,&followFar,&moveInterval,&moveBodies,&clickProbability,&skillProbability,&keyboardIdle,&inputGrace,&outlineWidth,&walkTimeJitter,&walkDistanceJitter};}
-    Json json() const {return {{"wandering",wandering},{"battleWalking",battleWalking},{"cafeTracking",cafeTracking},{"cafeLookMode",cafeLookMode},{"follow",follow},{"outlineMode",outlineMode},{"renderQuality",renderQuality},{"followNear",followNear},{"followFar",followFar},{"moveInterval",moveInterval},{"moveBodies",moveBodies},{"clickProbability",clickProbability},{"skillProbability",skillProbability},{"keyboardIdle",keyboardIdle},{"inputGrace",inputGrace},{"outlineWidth",outlineWidth},{"walkTimeJitter",walkTimeJitter},{"walkDistanceJitter",walkDistanceJitter}};}
+    Json json() const {return {{"rightDragRotation",rightDragRotation},{"wandering",wandering},{"battleWalking",battleWalking},{"cafeTracking",cafeTracking},{"cafeLookMode",cafeLookMode},{"follow",follow},{"outlineMode",outlineMode},{"renderQuality",renderQuality},{"followNear",followNear},{"followFar",followFar},{"moveInterval",moveInterval},{"moveBodies",moveBodies},{"clickProbability",clickProbability},{"skillProbability",skillProbability},{"keyboardIdle",keyboardIdle},{"inputGrace",inputGrace},{"outlineWidth",outlineWidth},{"walkTimeJitter",walkTimeJitter},{"walkDistanceJitter",walkDistanceJitter}};}
     bool apply(const Json& j){
         auto v=values();for(size_t i=0;i<v.size();++i){if(i==7)continue;if(!j.contains(names[i])||!j[names[i]].is_number())return false;const double n=j[names[i]];if(!std::isfinite(n)||n<minimum[i]||n>maximum[i])return false;}
         const auto lookMode=j.value("cafeLookMode",cafeLookMode);if(lookMode!="smooth"&&lookMode!="threshold")return false;
         if(j.contains("cafeTracking")&&!j["cafeTracking"].is_boolean())return false;
+        if(j.contains("rightDragRotation")&&!j["rightDragRotation"].is_boolean())return false;
         for(const char* key:{"wandering","battleWalking"})if(!j.contains(key)||!j[key].is_boolean())return false;
         if(!j.contains("follow")||!j["follow"].is_boolean())return false;
         if(!j.contains("outlineMode")||!j["outlineMode"].is_number_integer()||j["outlineMode"].get<int>()<0||j["outlineMode"].get<int>()>2)return false;
         if(j.contains("renderQuality")&&(!j["renderQuality"].is_number_integer()||j["renderQuality"].get<int>()<0||j["renderQuality"].get<int>()>2))return false;
         if(j["followNear"].get<double>()>j["followFar"].get<double>())return false;
-        for(size_t i=0;i<v.size();++i)if(i!=7)*v[i]=j[names[i]];inputGrace=3;wandering=j["wandering"];battleWalking=j["battleWalking"];cafeTracking=j.value("cafeTracking",cafeTracking);cafeLookMode=lookMode;follow=j["follow"];outlineMode=j["outlineMode"];renderQuality=j.value("renderQuality",renderQuality);return true;
+        for(size_t i=0;i<v.size();++i)if(i!=7)*v[i]=j[names[i]];inputGrace=3;wandering=j["wandering"];battleWalking=j["battleWalking"];cafeTracking=j.value("cafeTracking",cafeTracking);rightDragRotation=j.value("rightDragRotation",rightDragRotation);cafeLookMode=lookMode;follow=j["follow"];outlineMode=j["outlineMode"];renderQuality=j.value("renderQuality",renderQuality);return true;
     }
     void load(const std::wstring& ini){
         const int legacyWalking=GetPrivateProfileIntW(L"Behavior",L"Walking",1,ini.c_str());
@@ -28,6 +29,7 @@ struct NativePreferences {
         wchar_t lookMode[32]{};GetPrivateProfileStringW(L"Three",L"CafeLookMode",L"smooth",lookMode,32,ini.c_str());cafeLookMode=std::wcscmp(lookMode,L"threshold")==0?"threshold":"smooth";
         cafeTracking=GetPrivateProfileIntW(L"Three",L"CafeTracking",GetPrivateProfileIntW(L"Behavior",L"Tracking",1,ini.c_str()),ini.c_str())!=0;
         follow=GetPrivateProfileIntW(L"Three",L"Follow",0,ini.c_str())!=0;
+        rightDragRotation=GetPrivateProfileIntW(L"Three",L"RightDragRotation",1,ini.c_str())!=0;
         outlineMode=GetPrivateProfileIntW(L"Three",L"OutlineMode",GetPrivateProfileIntW(L"Behavior",L"Outline",1,ini.c_str())?2:0,ini.c_str());if(outlineMode<0||outlineMode>2)outlineMode=2;
         renderQuality=GetPrivateProfileIntW(L"Three",L"RenderQuality",2,ini.c_str());if(renderQuality<0||renderQuality>2)renderQuality=2;
         // Migrate the previous target setting without changing other options.
@@ -41,6 +43,7 @@ struct NativePreferences {
         WritePrivateProfileStringW(L"Behavior",L"Wandering",wandering?L"1":L"0",ini.c_str());
         WritePrivateProfileStringW(L"Behavior",L"BattleWalking",battleWalking?L"1":L"0",ini.c_str());
         WritePrivateProfileStringW(L"Three",L"CafeTracking",cafeTracking?L"1":L"0",ini.c_str());
+        WritePrivateProfileStringW(L"Three",L"RightDragRotation",rightDragRotation?L"1":L"0",ini.c_str());
         WritePrivateProfileStringW(L"Three",L"AttentionProbability",nullptr,ini.c_str());
         inputGrace=3;WritePrivateProfileStringW(L"Three",L"CafeLookMode",cafeLookMode=="threshold"?L"threshold":L"smooth",ini.c_str());
         WritePrivateProfileStringW(L"Three",L"Follow",follow?L"1":L"0",ini.c_str());auto v=values();

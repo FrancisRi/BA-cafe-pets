@@ -109,7 +109,10 @@ int main(int argc,char** argv){
   WritePrivateProfileStringW(L"Behavior",L"Wandering",nullptr,ini.c_str());WritePrivateProfileStringW(L"Behavior",L"BattleWalking",nullptr,ini.c_str());
   WritePrivateProfileStringW(L"Behavior",L"Walking",L"0",ini.c_str());NativePreferences migrated;migrated.load(ini);check(!migrated.wandering&&!migrated.battleWalking,"An old disabled Walking flag migrates to both toggles");
   WritePrivateProfileStringW(L"Behavior",L"Walking",L"1",ini.c_str());migrated.load(ini);check(migrated.wandering&&migrated.battleWalking,"An old enabled Walking flag migrates to both toggles");
-  settings.save(ini);NativePreferences loaded;loaded.load(ini);check(loaded.followNear==0&&loaded.wandering&&!loaded.battleWalking,"Zero nearest and independent toggles survive restart");
+  check(migrated.rightDragRotation,"Old profiles default to enabled manual rotation");
+  value=settings.json();value["rightDragRotation"]=false;check(settings.apply(value)&&!settings.rightDragRotation,"Global rotation switch accepts false");
+  value["rightDragRotation"]="yes";check(!settings.apply(value)&&!settings.rightDragRotation,"Invalid rotation values are rejected without modifying the preference");
+  settings.save(ini);NativePreferences loaded;loaded.load(ini);check(loaded.followNear==0&&loaded.wandering&&!loaded.battleWalking&&!loaded.rightDragRotation,"Movement flags and global rotation switch survive restart");
   std::cout<<"Cursor orientation, adaptive quiet region, live threshold retargeting, angle wrap, follow bands, independent movement flags and INI migration passed\n";return 0;
  }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

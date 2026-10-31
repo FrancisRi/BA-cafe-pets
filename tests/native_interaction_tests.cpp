@@ -148,12 +148,28 @@ int wmain(int argc,wchar_t** argv){try{
             a.selectMode(false);a.yaw=heading;a.clickSequence.reset();foot=a.ground.screen(a.ground.position);pointer(foot.x,foot.y);
             click();check(std::abs(std::remainder(a.yaw-heading,360.f))<.01,"The first click preserves the direction intended for a double-click Exs");click();a.presentState(true);
             check(a.manualAction&&std::abs(std::remainder(a.renderer->state["yaw"].get<float>()-heading-90,360.f))<.01,"Exs follows arbitrary trigger headings across angle wrap");
+            if(heading==60){
+                const auto rotate=[&]{App::inputProc(a.inputWindow,WM_RBUTTONDOWN,MK_RBUTTON,0);interactionCursor.x+=40;App::inputProc(a.inputWindow,WM_MOUSEMOVE,MK_RBUTTON,0);App::inputProc(a.inputWindow,WM_RBUTTONUP,0,0);tick();a.presentState(true);};
+                rotate();check(a.manualAction&&std::abs(a.yaw-88)<.01&&std::abs(a.renderer->state["yaw"].get<float>()-178)<.01,"Right drag rotates an active Exs without restarting or interrupting it");
+                a.preferences.rightDragRotation=false;rotate();check(std::abs(a.yaw-88)<.01,"Disabling the global switch blocks right-drag rotation during Exs");
+                a.preferences.rightDragRotation=true;heading=88;
+            }
             a.state.time=a.state.clips[a.manualSkill].duration-.001;tick();a.presentState(true);
             check(!a.manualAction&&std::abs(std::remainder(a.yaw-heading,360.f))<.01,"Exs completion retains the trigger heading without leaving the authored compensation on idle");
         }
+        const auto savedRotationPreferences=a.preferences;
+        for(const auto& mode:modes){
+            a.selectActionMode(mode);a.preferences.follow=a.preferences.wandering=a.preferences.cafeTracking=false;a.state.trackingEnabled=false;a.preferences.rightDragRotation=true;a.applyPreferences();a.yaw=13;
+            a.startManualSkill();const auto generation=a.state.generation;const auto location=a.ground.position;
+            const auto dragRight=[&]{App::inputProc(a.inputWindow,WM_RBUTTONDOWN,MK_RBUTTON,0);interactionCursor.x+=40;App::inputProc(a.inputWindow,WM_MOUSEMOVE,MK_RBUTTON,0);App::inputProc(a.inputWindow,WM_RBUTTONUP,0,0);tick();a.presentState(true);};
+            dragRight();check(a.manualAction&&a.state.generation==generation&&std::abs(a.yaw-41)<.01&&std::abs(a.renderer->state["yaw"].get<float>()-131)<.01&&Vector3Distance(location,a.ground.position)<1e-6,"Global rotation overrides every mode's active Exs without restarting or moving the pet");
+            a.preferences.rightDragRotation=false;a.applyPreferences();const float disabled=a.yaw;dragRight();check(a.manualAction&&a.yaw==disabled&&a.state.generation==generation,"Disabling global rotation blocks Exs rotation in every mode");
+        }
+        a.preferences=savedRotationPreferences;a.state.trackingEnabled=true;a.applyPreferences();
     }else{a.clickSequence.reset();click();click();check(!a.manualAction,"A missing Exs never selects an unrelated clip");}
     a.selectMode(false);
     if(a.formationIdle<0){check(!a.selectActionMode("formation")&&!a.formationMode,"A missing Formation_Idle cannot enter a fake formation mode");std::cout<<"Double-click/triple-click interactions and unavailable formation capability passed.\n";return 0;}
+    a.preferences.rightDragRotation=false;a.applyPreferences();
     check(a.selectActionMode("formation",true),"Enter formation mode");
     check(a.formationMode&&!a.battleMode&&a.state.current==a.formationIdle,"Formation starts its actual Formation_Idle clip");
     if(argc>3){
@@ -215,6 +231,12 @@ int wmain(int argc,wchar_t** argv){try{
     App::inputProc(a.inputWindow,WM_RBUTTONDOWN,MK_RBUTTON,0);interactionCursor.x+=40;App::inputProc(a.inputWindow,WM_MOUSEMOVE,MK_RBUTTON,0);App::inputProc(a.inputWindow,WM_RBUTTONUP,0,0);tick();
     check(a.yaw==0,"Right drag cannot rotate formation");
     App::inputProc(a.inputWindow,WM_MBUTTONDOWN,MK_MBUTTON,0);check(!a.right,"Middle drag cannot rotate formation");
+    a.preferences.rightDragRotation=true;a.applyPreferences();
+    const auto rotateFormation=[&]{App::inputProc(a.inputWindow,WM_RBUTTONDOWN,MK_RBUTTON,0);interactionCursor.x+=40;App::inputProc(a.inputWindow,WM_MOUSEMOVE,MK_RBUTTON,0);App::inputProc(a.inputWindow,WM_RBUTTONUP,0,0);tick();a.presentState(true);};
+    const auto rotationAnchor=a.ground.position;rotateFormation();tick(100);a.presentState(true);
+    check(std::abs(a.yaw-28)<.01&&std::abs(a.renderer->state["yaw"].get<float>()-28)<.01&&Vector3Distance(a.ground.position,rotationAnchor)<1e-6,"Enabled global rotation overrides formation's front lock without enabling movement or tracking");
+    if(a.manualSkill>=0){a.startManualSkill();rotateFormation();check(a.manualAction&&a.formationMode&&std::abs(a.yaw-56)<.01&&std::abs(a.renderer->state["yaw"].get<float>()-146)<.01,"Formation Exs can rotate while playing");a.state.time=a.state.clips[a.manualSkill].duration-.001;tick();check(!a.manualAction&&std::abs(a.yaw-56)<.01,"Formation idle retains the manually rotated Exs heading");}
+    a.preferences.rightDragRotation=false;a.applyPreferences();tick();check(a.yaw==0,"Disabling rotation restores formation's default front-facing idle");
     const auto zoom=a.zoom;const int zoomIdle=a.formationIdle;const auto zoomAnchor=a.ground.position;
     App::inputProc(a.inputWindow,WM_MOUSEWHEEL,MAKEWPARAM(0,WHEEL_DELTA),0);a.presentState(true);
     check(a.zoom>zoom&&a.formationMode&&a.state.current==zoomIdle&&a.renderer->state["yaw"]==0,"Formation wheel up enlarges the current idle without changing mode or heading");

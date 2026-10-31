@@ -66,7 +66,7 @@ Git 的新增行和提交作者记录用于追溯，不单独证明某行的版�
 
 - `main.cpp`、`native_input.h`、`native_renderer.cpp`、`native_renderer.h`
 - `gltf_model.cpp`、`gltf_model.h`
-- `native_settings.h`、`scene.h`
+- `native_settings.h`、`native_preferences.h`、`scene.h`
 - `shared/cafe_attention.h`、`shared/crowd_steering.h`、`shared/desktop_path.h`
 - `shared/pet_ground.h`、`shared/scene_state.h`
 - `shared/desktop_geometry.h`

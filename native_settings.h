@@ -64,7 +64,8 @@ struct NativeSettings {
         {"look",L"战斗动作朝向鼠标",L"攻击等战斗动作追踪鼠标方向",0,L"\xE890"},
         {"skillProbability",L"EX 技能触发概率",L"持续输入时触发技能的概率 · %",1,L"\xE945"},
         {"clickProbability",L"点击指挥概率",L"点击时触发指挥动作的概率 · %",1,L"\xE8B0"},
-        {"keyboardIdle",L"无键盘输入收枪",L"停止键盘输入后的等待时间 · 秒",1,L"\xE823"}
+        {"keyboardIdle",L"无键盘输入收枪",L"停止键盘输入后的等待时间 · 秒",1,L"\xE823"},
+        {"rightDragRotation",L"右键拖动旋转",L"所有模式与 Exs 中均可手动调整朝向",0,L"\xE7AD"}
     };
     ~NativeSettings(){closing=true;editingOutline=false;if(modelMenu)DestroyWindow(modelMenu);if(quickWindow)DestroyWindow(quickWindow);if(window)DestroyWindow(window);}
     int u(int value) const {return ui.px(value);}
@@ -178,8 +179,10 @@ struct NativeSettings {
             note(L"删除会将本地副本移入回收站并移除记录。自带模型保留；隐藏或删除全部角色后，程序仍在托盘运行。",40);
         }else{
             note(page==0?L"显示与行为参数由所有角色共享，动作模式只应用于当前角色。":page==1?L"日常陪伴、视线与转向。位置跟随距离可在全局设置中调整。":L"保留按键攻击、换弹、EX、点击指挥与走动的原有规则。");
-            for(size_t i=0;i<std::size(fields);++i){
-                if((page==0&&i>=14)||(page==1&&(i<14||i>=16))||(page==2&&i<16))continue;const auto& f=fields[i];
+            for(size_t ordinal=0;ordinal<std::size(fields);++ordinal){
+                // Keep stable control IDs while placing manual rotation near appearance.
+                const size_t i=ordinal<4?ordinal:ordinal==4?21:ordinal-1;
+                if((page==0&&i>=14&&i!=21)||(page==1&&(i<14||i>=16))||(page==2&&(i<16||i>=21)))continue;const auto& f=fields[i];
                 if(i==0)section(L"角色与显示");if(i==4)section(L"移动与跟随");if(i==8)section(L"时间与随机变化");if(i==14)section(L"视线追踪");if(i==16)section(L"战斗动作");
                 HWND input{},label{},hint{};
                 if(f.kind==0)input=control(panel,L"BUTTON",f.title,BS_OWNERDRAW,100+int(i),16,y,panelWidth(),68);
@@ -233,6 +236,7 @@ struct NativeSettings {
         if(id==3001||id==3005)return last.value("battleAvailable",false);if(id==3002)return last.value("canFollow",false);return true;
     }
     bool quickChecked(int id) const {
+        if(id==3007)return last.value("value",Json::object()).value("rightDragRotation",true);
         const auto value=last.value("value",Json::object());if(id==3000||id==3001||id==3006)return value.value("mode",std::string{})==(id==3000?"cafe":id==3001?"battle":"formation");
         if(formationSelected())return false;
         const char* key=id==3002?"follow":id==3003?"wandering":id==3004?(value.value("mode",std::string{})=="battle"?"look":"cafeTracking"):"battleWalking";return value.value(key,false);
@@ -242,7 +246,7 @@ struct NativeSettings {
         if(last.value("busy",false))return std::to_wstring(last.value("percent",0))+L"%  "+wide(last.value("detail",std::string{}));
         const auto notice=last.value("notice",std::string{});if(!notice.empty())return wide(notice);
         if(last.value("activeCount",1)==0)return L"所有模型已隐藏 · 可从列表或任务栏托盘重新显示";
-        if(formationSelected())return L"列队 · 滚轮缩放，双击 Exs，三击切换";
+        if(formationSelected())return last.value("value",Json::object()).value("rightDragRotation",true)?L"列队 · 可右键旋转，滚轮缩放，双击 Exs":L"列队 · 滚轮缩放，双击 Exs，三击切换";
         return compact?L"更改自动保存 · Esc 关闭菜单":L"更改已自动保存   ·   角色保持活动";
     }
     std::wstring samplingText() const {
@@ -261,11 +265,11 @@ struct NativeSettings {
         if(window){
             SetWindowTextW(GetDlgItem(window,10),pages[page]);const auto sub=wide(last.value("name",std::string{"角色"}))+L"  ·  "+modeTitle(value.value("mode",std::string{}))+L"模式  ·  "+std::to_wstring(last.value("activeCount",1))+L" 个角色已显示";SetWindowTextW(GetDlgItem(window,11),sub.c_str());
             for(auto& c:controls){const std::string key=c.field->key;if(!value.contains(key))continue;const auto& v=value[key];
-                if(c.field->kind==0)c.checked=!formationSelected()&&v.get<bool>();else if(c.field->kind==3){SendMessageW(c.input,TBM_SETPOS,TRUE,v.get<int>());SetWindowTextW(c.hint,L"描边宽度 · 点击右侧数字输入");if(outlineValue&&!editingOutline)SetWindowTextW(outlineValue,(std::to_wstring(v.get<int>())+L"%").c_str());}
+                if(c.field->kind==0)c.checked=(!formationSelected()||key=="rightDragRotation")&&v.get<bool>();else if(c.field->kind==3){SendMessageW(c.input,TBM_SETPOS,TRUE,v.get<int>());SetWindowTextW(c.hint,L"描边宽度 · 点击右侧数字输入");if(outlineValue&&!editingOutline)SetWindowTextW(outlineValue,(std::to_wstring(v.get<int>())+L"%").c_str());}
                 else if(c.field->kind==2){const int index=key=="mode"?modeIndex(v.get<std::string>()):key=="cafeLookMode"?(v=="threshold"):v.get<int>();SendMessageW(c.input,CB_SETCURSEL,index,0);}
                 else if(GetFocus()!=c.input){auto text=v.dump();if(text.ends_with(".0"))text.resize(text.size()-2);SetWindowTextW(c.input,wide(text).c_str());}
                 bool enabled=!last.value("busy",false)&&(page!=2||last.value("battleAvailable",false));if(key=="follow")enabled&=last.value("canFollow",false);if(key=="followNear"||key=="followFar")enabled&=last.value("canFollow",false)&&value.value("follow",false);if(key=="cafeLookMode")enabled&=value.value("cafeTracking",true);if(key=="outlineWidth")enabled&=value.value("outlineMode",2)!=0;
-                if(formationSelected()&&key!="mode"&&key!="renderQuality"&&key!="outlineMode"&&key!="outlineWidth")enabled=false;
+                if(formationSelected()&&key!="mode"&&key!="renderQuality"&&key!="outlineMode"&&key!="outlineWidth"&&key!="rightDragRotation")enabled=false;
                 EnableWindow(c.input,enabled);if(c.label)EnableWindow(c.label,enabled);if(c.hint)EnableWindow(c.hint,enabled);InvalidateRect(c.input,nullptr,FALSE);
                 if(c.field->kind==3&&outlineValue){if(!enabled&&editingOutline)cancelOutline();EnableWindow(outlineHost,enabled);EnableWindow(outlineValue,enabled);RedrawWindow(outlineHost,nullptr,nullptr,RDW_INVALIDATE|RDW_ALLCHILDREN);}
             }
@@ -280,7 +284,7 @@ struct NativeSettings {
         }
         if(quickWindow){
             SetWindowTextW(GetDlgItem(quickWindow,3100),wide(last.value("name",std::string{"桌面角色"})).c_str());SetWindowTextW(GetDlgItem(quickWindow,3101),(L"已导入的模型  ·  "+std::to_wstring(last.value("activeCount",0))+L" / 5 已显示").c_str());
-            for(int id:{3000,3001,3006,3002,3003,3004,3005,3010,3011,3012,3013}){EnableWindow(GetDlgItem(quickWindow,id),quickEnabled(id));InvalidateRect(GetDlgItem(quickWindow,id),nullptr,FALSE);}
+            for(int id:{3000,3001,3006,3002,3003,3004,3005,3007,3010,3011,3012,3013}){EnableWindow(GetDlgItem(quickWindow,id),quickEnabled(id));InvalidateRect(GetDlgItem(quickWindow,id),nullptr,FALSE);}
             SetWindowTextW(GetDlgItem(quickWindow,3004),value.value("mode",std::string{})=="battle"?L"战斗朝向鼠标":L"视线追踪鼠标");SetWindowTextW(GetDlgItem(quickWindow,3102),statusText(true).c_str());fillRoster(quickList,true);
             const bool empty=last.value("characters",Json::array()).empty();ShowWindow(quickList,empty?SW_HIDE:SW_SHOW);ShowWindow(GetDlgItem(quickWindow,3103),empty?SW_SHOW:SW_HIDE);
         }
@@ -369,7 +373,7 @@ struct NativeSettings {
     }
     void quickCommand(int id){
         if(!quickEnabled(id))return;if(id==3011){show(nullptr,defaultsFile.parent_path());return;}if(id==3010){page=3;show(nullptr,defaultsFile.parent_path());receive({{"type","import"}});return;}if(id==3012){receive({{"type","exit"}});return;}if(id==3013){hideQuick();receive({{"type","open_models_folder"}});return;}
-        auto value=last.at("value");if(id==3000||id==3001||id==3006)value["mode"]=id==3000?"cafe":id==3001?"battle":"formation";else{const char* key=id==3002?"follow":id==3003?"wandering":id==3004?(value.value("mode",std::string{})=="battle"?"look":"cafeTracking"):"battleWalking";value[key]=!value.value(key,false);}sendValue(std::move(value));
+        auto value=last.at("value");if(id==3007){value["rightDragRotation"]=!value.value("rightDragRotation",true);sendValue(std::move(value));return;}if(id==3000||id==3001||id==3006)value["mode"]=id==3000?"cafe":id==3001?"battle":"formation";else{const char* key=id==3002?"follow":id==3003?"wandering":id==3004?(value.value("mode",std::string{})=="battle"?"look":"cafeTracking"):"battleWalking";value[key]=!value.value(key,false);}sendValue(std::move(value));
     }
     void command(int id,int code){
         if(closing)return;
@@ -382,7 +386,7 @@ struct NativeSettings {
             return;
         }
         if(id==2210&&code==BN_CLICKED){const auto startup=last.value("startup",Json::object());if(startup.value("available",false)&&receive)receive({{"type","set_autostart"},{"enabled",!startup.value("enabled",false)}});sync();return;}
-        if(id==3){nativeMessageBox(window,L"右键：快捷菜单。右键拖动或中键拖动：旋转。\n左键拖拽：移动。滚轮：缩放。\n\n勾选模型显示或隐藏角色；方向键选择，空格勾选，Esc 关闭。\n\n咖啡厅：点击反应；关闭位置跟随和散步后，视线持续追踪鼠标。\n战斗：按键攻击；句号、回车、分号、问号请求换弹；持续输入可短走或 EX。\n所有模式双击：播放 Exs，锁定释放朝向。\n三连击：第三次中断 Exs；咖啡厅 → 战斗 → 列队 → 咖啡厅循环，跳过不支持的模式。\n列队：固定面向屏幕，可提放、滚轮缩放、双击 Exs、三连击切换；Exs 结束恢复原来的 Formation_Idle。\n缺少对应动画时相应模式或动作不可用。拖拽优先打断。",L"使用说明",MB_OK);return;}
+        if(id==3){nativeMessageBox(window,L"右键：快捷菜单。开启全局旋转开关后，右键拖动或中键拖动可在所有模式及 Exs 中旋转。\n左键拖拽：移动。滚轮：缩放。\n\n勾选模型显示或隐藏角色；方向键选择，空格勾选，Esc 关闭。\n\n咖啡厅：点击反应；关闭位置跟随和散步后，视线持续追踪鼠标。\n战斗：按键攻击；句号、回车、分号、问号请求换弹；持续输入可短走或 EX。\n所有模式双击：沿当前朝向播放 Exs；技能中可手动旋转。\n三连击：第三次中断 Exs；咖啡厅 → 战斗 → 列队 → 咖啡厅循环，跳过不支持的模式。\n列队：关闭旋转开关时固定面向屏幕，可提放、滚轮缩放、双击 Exs、三连击切换；Exs 结束恢复原来的 Formation_Idle。\n缺少对应动画时相应模式或动作不可用。拖拽优先打断。",L"使用说明",MB_OK);return;}
         if(id>=1000&&id<1004){hideModelMenu();page=id-1000;if(page==3&&receive)receive({{"type","refresh_models"}});build();return;}
         if(id>=100&&id<100+int(std::size(fields))&&(code==BN_CLICKED||code==CBN_SELCHANGE||code==EN_KILLFOCUS)){if(code==BN_CLICKED)for(auto& c:controls)if(c.input==GetDlgItem(panel,id)&&c.field->kind==0)c.checked=!c.checked;save();return;}
         if(id==2000&&code==LBN_SELCHANGE){const int n=int(SendMessageW(list,LB_GETCURSEL,0,0));if(n>=0&&n<int(last["characters"].size()))highlighted=last["characters"][n]["id"];update();return;}
@@ -418,9 +422,9 @@ struct NativeSettings {
             RECT icon{r.left+theme.px(8),r.top,r.left+theme.px(32),r.bottom};theme.glyph(dc,id==4000?L"\xE890":id==4001?L"\xE73E":id==4002?L"\xE8B7":L"\xE74D",icon,disabled?theme.disabled:color);
             r.left+=theme.px(44);theme.label(dc,title,r,theme.font,disabled?theme.disabled:color);
         }else if(compact){
-            const bool mode=id==3000||id==3001||id==3006,checked=quickChecked(id),isToggle=id>=3002&&id<=3005;auto fill=pressed?theme.pressed:hover?theme.hover:theme.surface;if(mode&&checked)fill=theme.selection;NativeFluent::round(dc,r,fill,mode?theme.line:fill,theme.px(6));if(id==3012)color=theme.danger;
+            const bool mode=id==3000||id==3001||id==3006,checked=quickChecked(id),isToggle=(id>=3002&&id<=3005)||id==3007;auto fill=pressed?theme.pressed:hover?theme.hover:theme.surface;if(mode&&checked)fill=theme.selection;NativeFluent::round(dc,r,fill,mode?theme.line:fill,theme.px(6));if(id==3012)color=theme.danger;
             if(mode)theme.label(dc,title,r,theme.font,disabled?theme.disabled:checked?theme.accent:color,DT_CENTER|DT_SINGLELINE|DT_VCENTER);
-            else{const wchar_t* icon=id==3002?L"\xE7C2":id==3003?L"\xE7C1":id==3004?L"\xE890":id==3005?L"\xE7FC":id==3010?L"\xE710":id==3011?L"\xE713":id==3013?L"\xE8B7":L"\xE7E8";RECT glyph{r.left+theme.px(8),r.top,r.left+theme.px(32),r.bottom};theme.glyph(dc,icon,glyph,color);RECT text{r.left+theme.px(44),r.top,r.right-theme.px(isToggle?56:36),r.bottom};theme.label(dc,title,text,theme.font,color);
+            else{const wchar_t* icon=id==3007?L"\xE7AD":id==3002?L"\xE7C2":id==3003?L"\xE7C1":id==3004?L"\xE890":id==3005?L"\xE7FC":id==3010?L"\xE710":id==3011?L"\xE713":id==3013?L"\xE8B7":L"\xE7E8";RECT glyph{r.left+theme.px(8),r.top,r.left+theme.px(32),r.bottom};theme.glyph(dc,icon,glyph,color);RECT text{r.left+theme.px(44),r.top,r.right-theme.px(isToggle?56:36),r.bottom};theme.label(dc,title,text,theme.font,color);
                 if(isToggle){RECT track{r.right-theme.px(46),r.top+theme.px(8),r.right-theme.px(8),r.top+theme.px(28)};theme.toggle(dc,track,checked,!disabled);}if(id==3011){RECT arrow{r.right-theme.px(28),r.top,r.right-theme.px(8),r.bottom};theme.glyph(dc,L"\xE76C",arrow,color);}}
         }else if(id>=1000&&id<1004){
             const bool selected=page==id-1000;const auto fill=selected?theme.pressed:pressed?theme.pressed:hover?theme.line:theme.canvas;NativeFluent::round(dc,r,fill,fill,theme.px(6));RECT icon{r.left+theme.px(10),r.top,r.left+theme.px(36),r.bottom};theme.glyph(dc,pageIcons[id-1000],icon,color);auto text=r;text.left+=theme.px(48);theme.label(dc,title,text,theme.font,color);if(selected){RECT indicator{r.left,r.top+theme.px(12),r.left+theme.px(3),r.bottom-theme.px(12)};NativeFluent::round(dc,indicator,theme.accent,theme.accent,theme.px(3));}
@@ -538,15 +542,15 @@ struct NativeSettings {
         auto h=control(quickWindow,L"STATIC",L"桌面角色",SS_ENDELLIPSIS,3100,20,14,300,24,true);SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(quickUi.heading),FALSE);h=control(quickWindow,L"STATIC",L"已导入的模型",0,3101,20,44,300,22,true);SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(quickUi.small),FALSE);SetPropW(h,L"FluentMuted",reinterpret_cast<HANDLE>(1));
         quickList=control(quickWindow,L"LISTBOX",L"勾选显示模型，空格切换，回车设为当前角色",LBS_NOTIFY|LBS_OWNERDRAWFIXED|LBS_HASSTRINGS|LBS_NOINTEGRALHEIGHT|WS_VSCROLL,3200,8,72,328,144,true);SetWindowSubclass(quickList,listProc,2,reinterpret_cast<DWORD_PTR>(this));SendMessageW(quickList,LB_SETITEMHEIGHT,0,quickUi.px(36));
         control(quickWindow,L"STATIC",L"尚未导入模型",SS_CENTER,3103,20,72,304,36,true);
-        for(auto [id,text]:{std::pair{3000,L"咖啡厅"},{3001,L"战斗"},{3006,L"列队"},{3002,L"位置跟随鼠标"},{3003,L"允许散步"},{3004,L"视线追踪鼠标"},{3005,L"允许战斗走动"},{3011,L"显示完整界面"},{3013,L"打开模型文件夹"},{3010,L"导入模型…"},{3012,L"退出桌宠"}})control(quickWindow,L"BUTTON",text,BS_OWNERDRAW,id,8,0,328,36,true);
+        for(auto [id,text]:{std::pair{3000,L"咖啡厅"},{3001,L"战斗"},{3006,L"列队"},{3002,L"位置跟随鼠标"},{3003,L"允许散步"},{3004,L"视线追踪鼠标"},{3005,L"允许战斗走动"},{3007,L"右键拖动旋转"},{3011,L"显示完整界面"},{3013,L"打开模型文件夹"},{3010,L"导入模型…"},{3012,L"退出桌宠"}})control(quickWindow,L"BUTTON",text,BS_OWNERDRAW,id,8,0,328,36,true);
         h=control(quickWindow,L"STATIC",L"",0,3102,20,0,304,34,true);SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(quickUi.small),FALSE);SetPropW(h,L"FluentMuted",reinterpret_cast<HANDLE>(1));
     }
     int layoutQuick(){
         RECT rect{};GetWindowRect(quickWindow,&rect);MONITORINFO info{sizeof(info)};GetMonitorInfoW(MonitorFromRect(&rect,MONITOR_DEFAULTTONEAREST),&info);const int maxDip=quickUi.dip(info.rcWork.bottom-info.rcWork.top)-24;
-        quickRows=std::clamp(int(last.value("characters",Json::array()).size()),1,std::clamp((maxDip-484)/36,1,4));
+        quickRows=std::clamp(int(last.value("characters",Json::array()).size()),1,std::clamp((maxDip-520)/36,1,4));
         const auto place=[&](int id,int x,int y,int w,int h){SetWindowPos(GetDlgItem(quickWindow,id),nullptr,quickUi.px(x),quickUi.px(y),quickUi.px(w),quickUi.px(h),SWP_NOZORDER|SWP_NOACTIVATE);};
         place(3100,20,14,300,24);place(3101,20,44,300,22);place(3200,8,72,328,quickRows*36);place(3103,20,72,304,36);SendMessageW(quickList,LB_SETITEMHEIGHT,0,quickUi.px(36));int y=72+quickRows*36+12;place(3000,12,y,100,36);place(3001,120,y,100,36);place(3006,228,y,100,36);y+=48;
-        for(int id:{3002,3003,3004,3005}){place(id,8,y,328,36);y+=36;}y+=12;for(int id:{3011,3013,3010,3012}){place(id,8,y,328,36);y+=36;}y+=8;place(3102,20,y,304,34);return y+44;
+        for(int id:{3002,3003,3004,3005,3007}){place(id,8,y,328,36);y+=36;}y+=12;for(int id:{3011,3013,3010,3012}){place(id,8,y,328,36);y+=36;}y+=8;place(3102,20,y,304,34);return y+44;
     }
     void showQuick(HWND owner,const std::filesystem::path& directory,bool toggleIfVisible=true){
         hideModelMenu();if(receive)receive({{"type","refresh_models"}});

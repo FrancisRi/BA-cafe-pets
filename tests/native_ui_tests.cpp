@@ -157,6 +157,8 @@ int main(int argc,char** argv){
         check(state["value"]["mode"]=="formation"&&menu.quickChecked(3006)&&!menu.quickChecked(3000),"Quick formation mode is independently selected");
         const auto formationSaved=state["value"];for(int id:{3002,3003,3004,3005}){check(!IsWindowEnabled(GetDlgItem(menu.quickWindow,id)),"Formation disables movement and tracking toggles");menu.command(id,BN_CLICKED);}
         check(state["value"]==formationSaved,"Disabled formation toggles preserve existing behavior settings");
+        check(IsWindowEnabled(GetDlgItem(menu.quickWindow,3007))&&menu.quickChecked(3007),"Formation exposes the enabled global rotation switch in the quick menu");
+        menu.command(3007,BN_CLICKED);check(!state["value"]["rightDragRotation"].get<bool>()&&!menu.quickChecked(3007),"Quick rotation switch saves while in formation");menu.command(3007,BN_CLICKED);
         menu.command(3000,BN_CLICKED);check(state["value"]["mode"]=="cafe"&&state["value"]["follow"]==formationSaved["follow"],"Leaving formation restores the saved follow preference");
         state["battleAvailable"]=false;menu.sync();check(menu.modeChoices()==std::vector<std::string>({"cafe","formation"})&&menu.modeIndex("formation")==1,"Formation combo mapping works without a battle option");
         state["formationAvailable"]=false;menu.sync();const auto noFormation=sent.size();menu.command(3006,BN_CLICKED);check(sent.size()==noFormation,"Missing Formation_Idle disables formation mode");state["formationAvailable"]=state["battleAvailable"]=true;menu.sync();
@@ -167,7 +169,8 @@ int main(int argc,char** argv){
         check(!menu.pausesPets()&&pauses==std::vector<bool>({true,false}),"Switching from quick menu to full settings resumes pets");
         const auto chooseMode=[&](int index){auto combo=GetDlgItem(menu.panel,100);SendMessageW(combo,CB_SETCURSEL,index,0);menu.command(100,CBN_SELCHANGE);pump(menu);};
         chooseMode(2);check(state["value"]["mode"]=="formation","Full interface selects formation through its actual combo/save path");
-        const auto savedFollow=state["value"]["follow"];for(const auto& c:menu.controls)if(c.field->kind==0)check(!IsWindowEnabled(c.input),"Full formation settings disable behavior toggles");
+        const auto savedFollow=state["value"]["follow"];for(const auto& c:menu.controls)if(c.field->kind==0)check(bool(IsWindowEnabled(c.input))==(std::string(c.field->key)=="rightDragRotation"),"Formation keeps global rotation available and disables autonomous behavior toggles");
+        const bool rotation=state["value"]["rightDragRotation"];menu.command(121,BN_CLICKED);check(state["value"]["rightDragRotation"]==!rotation,"Full formation interface saves the global rotation switch");menu.command(121,BN_CLICKED);
         menu.save();check(state["value"]["follow"]==savedFollow,"Saving formation appearance does not overwrite disabled behavior values");
         chooseMode(0);check(state["value"]["mode"]=="cafe"&&state["value"]["follow"]==savedFollow,"Full interface restores cafe preferences");
         state["battleAvailable"]=false;menu.sync();chooseMode(1);check(state["value"]["mode"]=="formation","Full interface maps the second combo choice to formation when battle is unavailable");chooseMode(0);state["battleAvailable"]=true;menu.sync();
@@ -182,7 +185,7 @@ int main(int argc,char** argv){
         SendMessageW(menu.window,WM_CHANGEUISTATE,MAKEWPARAM(UIS_CLEAR,UISF_HIDEFOCUS),0);const auto navigation=GetDlgItem(menu.window,1000);check(drawButton(menu,navigation,0)!=drawButton(menu,navigation,ODS_FOCUS),"Keyboard navigation retains a visible Fluent focus cue");
         menu.quickCommand(3013);check(sent.back().at("type")=="open_models_folder","Quick menu opens the persistent model folder");
         size_t fieldCount=0;for(int p=0;p<3;++p){menu.page=p;menu.build();fieldCount+=menu.controls.size();for(const auto& c:menu.controls)check(IsWindow(c.input),"Every existing setting has a real input control");}
-        check(fieldCount==21,"All twenty-one settings survive the redesign");
+        check(fieldCount==22,"All existing settings and the global rotation switch have native controls");
         menu.page=0;menu.build();checkRepainting(menu);SetWindowTextW(GetDlgItem(menu.panel,108),L"not a number");const auto invalidCount=sent.size();menu.save();check(sent.size()==invalidCount,"Invalid numeric input is not submitted");
         const auto quality=GetDlgItem(menu.panel,101);wchar_t qualityLabel[80]{};SendMessageW(quality,CB_GETLBTEXT,2,reinterpret_cast<LPARAM>(qualityLabel));check(std::wstring(qualityLabel).find(L"4× MSAA")!=std::wstring::npos,"Quality choice explicitly identifies MSAA");
         const auto samplingLabel=GetDlgItem(menu.panel,2111);check(samplingLabel,"Global settings expose actual sampling status");

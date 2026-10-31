@@ -142,7 +142,7 @@ struct App {
     struct FormationPose {int idle=-1,pickup=-1;};std::vector<FormationPose> formationPoses;size_t formationPoseIndex=0;
     const char* modeName() const {return formationMode?"formation":battleMode?"battle":"cafe";}
     bool exsPlaying() const {return manualAction||(battleMode&&battle&&battle->phase==pet::Battle::Phase::Skill);}
-    bool frontLocked() const {return formationMode||exsPlaying();}
+    bool rotationLocked() const {return !preferences.rightDragRotation;}
     POINT windowPosition{LONG_MIN,LONG_MIN};
     POINT committedOrigin{};Vector2 committedFoot{};bool committedFrame=false;
 
@@ -175,6 +175,7 @@ struct App {
     }
     uint64_t displayGeneration() const {return state.generation*100000+directed.serial*2+(directed.active?1:0)+cafeAttention.serial*1000000000ULL;}
     void applyPreferences(){
+        if(formationMode&&!preferences.rightDragRotation){yaw=0;if(exsPlaying())skillYaw=0;}
         state.walkEnabled=preferences.wandering;
         state.walkIntervalOverride=preferences.moveInterval;state.walkTimeJitter=preferences.walkTimeJitter/100;state.walkDistanceJitter=preferences.walkDistanceJitter/100;
         state.walkDurationOverride=geometry.bodyWidth*preferences.moveBodies/(0.792*WalkSpeedMultiplier);
@@ -393,7 +394,7 @@ struct App {
     }
     bool startManualSkill(){
         if(manualSkill<0||!loaded||state.settingsOpen)return false;
-        skillYaw=formationMode?0:yaw;
+        skillYaw=yaw;
         behavior->halt();stopLocomotion();if(battleMode)battle->start();
         manualAction=true;state.pendingClick=false;state.facingRequest.reset();state.trackingCursor=false;
         state.start(manualSkill,false);state.reaction=0;yaw=skillYaw;placementNeeded=false;return true;
@@ -401,7 +402,7 @@ struct App {
     void finishManualSkill(){
         manualAction=false;stopLocomotion();state.pendingClick=false;state.resetCooldown();
         if(battleMode)battle->start();else{behavior->halt();state.start(formationMode?formationIdle:cafeIdle,true);}
-        yaw=formationMode?0:skillYaw;interactionUntil=preciseSeconds()+0.5;placementNeeded=false;
+        yaw=formationMode&&!preferences.rightDragRotation?0:skillYaw;interactionUntil=preciseSeconds()+0.5;placementNeeded=false;
     }
     void initializeBehavior(const Json& message){
         if(!grouped)battleInput.enable(false);battle.reset();behavior.reset();state.clips.clear();state.active=false;state.current=-1;
@@ -546,7 +547,7 @@ struct App {
                 if(!state.active||state.current!=target)state.start(target,true);
                 state.dragging=dragging;state.walking=false;state.pendingClick=false;state.trackingCursor=false;state.facingRequest.reset();
                 state.returnRequested=state.returningHome=state.returnArrived=false;
-                if(!state.settingsOpen)state.advance(dt);yaw=0;wasDragging=dragging;
+                if(!state.settingsOpen)state.advance(dt);if(!preferences.rightDragRotation)yaw=0;wasDragging=dragging;
                 click=dragStarted=false;renderFrame();return;
             }
             if(observeDebouncedInput(state,idle,elapsed,preferences.inputGrace) && !battleMode&&!preferences.follow&&!directed.active){state.trackingCursor=false;state.returnRequested=state.walkEnabled&&journey.requestReturn(ground.position);if(!state.returnRequested&&!stationaryCafeTracking())yaw=0;}
@@ -824,7 +825,7 @@ struct App {
         // Exs releases toward screen-left in the authored animation. Rotate the
         // complete skill (including props) relative to its trigger heading;
         // keep this authored correction separate from the logical movement yaw.
-        const float displayYaw=exsPlaying()?std::remainder(skillYaw+90.0f,360.0f):formationMode?0:std::remainder(yaw+(retreat?180.0f:0),360.0f);
+        const float displayYaw=exsPlaying()?std::remainder(skillYaw+90.0f,360.0f):std::remainder(yaw+(retreat?180.0f:0),360.0f);
         if(retreat && retreatLogged!=state.generation) {
             retreatLogged=state.generation;std::printf("RETREAT facing: base=%.1f render=%.1f offset=180\n",yaw,displayYaw);std::fflush(stdout);
         }
@@ -870,13 +871,13 @@ struct App {
             case WM_TIMER:if(!app->session.paused()){if(app->tickCallback)app->tickCallback();else app->tick();}return 0;
             case WM_LBUTTONDOWN:if(app->right||app->menuPressed)return 0;app->left=true;app->dragged=false;app->down=app->previous=cursor;app->captureMouse();return 0;
             case WM_RBUTTONDOWN:if(app->left||app->right)return 0;app->right=app->menuPressed=true;app->rightDragged=false;app->down=app->previous=cursor;app->captureMouse();return 0;
-            case WM_MBUTTONDOWN:if(app->left||app->menuPressed||app->frontLocked())return 0;app->right=true;app->previous=cursor;app->captureMouse();return 0;
+            case WM_MBUTTONDOWN:if(app->left||app->menuPressed||app->rotationLocked())return 0;app->right=true;app->previous=cursor;app->captureMouse();return 0;
             case WM_MOUSEMOVE:
                 if(app->left){const bool before=app->dragged;app->dragged|=std::abs(cursor.x-app->down.x)>4||std::abs(cursor.y-app->down.y)>4;
                     if(app->dragged){app->clickSequence.reset();app->doubleClickRequest=app->tripleClickRequest=false;app->dragStarted|=!before;auto foot=app->ground.screen(app->ground.position);foot.x+=cursor.x-(before?app->previous.x:app->down.x);foot.y+=cursor.y-(before?app->previous.y:app->down.y);app->updatePlacementShape();app->geometry.place(app->ground,foot,app->zoom);}app->previous=cursor;}
                 if(app->right){
                     if(app->menuPressed&&!app->rightDragged){app->rightDragged=std::abs(cursor.x-app->down.x)>4||std::abs(cursor.y-app->down.y)>4;if(!app->rightDragged)return 0;}
-                    if(!app->frontLocked())app->yaw=std::remainder(app->yaw+(cursor.x-app->previous.x)*0.7f,360.0f);app->previous=cursor;
+                    if(!app->rotationLocked()){app->yaw=std::remainder(app->yaw+(cursor.x-app->previous.x)*0.7f,360.0f);if(app->exsPlaying())app->skillYaw=app->yaw;}app->previous=cursor;
                 }
                 if(app->left)app->moveCachedDrag();return 0;
             case WM_LBUTTONUP:if(app->left){app->click=!app->dragged;if(app->click){const auto gesture=app->clickSequence.release(GetTickCount64(),cursor.x,cursor.y,GetDoubleClickTime(),GetSystemMetrics(SM_CXDOUBLECLK),GetSystemMetrics(SM_CYDOUBLECLK));app->doubleClickRequest|=gesture.doubleClick;app->tripleClickRequest|=gesture.tripleClick;}app->releaseMouse();}return 0;
