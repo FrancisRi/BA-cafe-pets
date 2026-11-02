@@ -140,7 +140,7 @@ struct Scene {
         a.quickMenuRequest=[this,&a]{roster.selected=a.actorId;save();leader().nativeSettings->showQuick(a.window,leader().directory);};
         a.closeRequest=[this,&a]{close(a.displayed?a.actorId:roster.selected);};
         a.tickCallback=[this]{tick();};a.settingsChanged=[this,&a]{changed(a);};
-        a.followRequest=[this]{auto& a=selected();if(a.formationMode)return;a.preferences.follow=!a.preferences.follow;if(a.preferences.follow){a.blockedCursor.reset();a.followPlanAt=0;a.interactionUntil=0;}a.preferences.save(a.settings->ini);changed(a);};
+        a.followRequest=[this]{auto& a=selected();if(a.formationMode||a.inspectionActive)return;a.preferences.follow=!a.preferences.follow;if(a.preferences.follow){a.blockedCursor.reset();a.followPlanAt=0;a.interactionUntil=0;}a.preferences.save(a.settings->ini);changed(a);};
         a.avoidHeading=[this,&a](float yaw,double distance){return steer(a,yaw,distance);};
         a.depthRequest=[this]{orderDepth();};
         if(first)a.sessionChanged=[this]{frameClock.reset(preciseSeconds());frameStatsAt=previousFrameAt=0;frameIntervals.clear();frameCosts.clear();armFrame();input.clear();input.lastKeyboard=0;const double now=preciseSeconds();for(auto& actor:actors){actor->lastTick=now;actor->nextRender=0;actor->pendingRender=false;actor->motionVelocity={};actor->motionRemaining=0;if(actor->renderer)actor->renderer->resume();}};

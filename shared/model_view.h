@@ -9,17 +9,17 @@
 // Pitch in screen/world space AFTER facing, so side views never lean sideways.
 struct ModelView {
     static constexpr float PitchDegrees=-5.0f;
-    static std::array<float,16> matrix(float yaw,float zoom) {
+    static std::array<float,16> matrix(float yaw,float zoom,float pitch=0,float pivot=0) {
         const float cy=std::cos(yaw*DEG2RAD),sy=std::sin(yaw*DEG2RAD);
-        const float cp=std::cos(PitchDegrees*DEG2RAD),sp=std::sin(PitchDegrees*DEG2RAD);
+        const float cp=std::cos((PitchDegrees+pitch)*DEG2RAD),sp=std::sin((PitchDegrees+pitch)*DEG2RAD);
         return {cy*zoom,sp*sy*zoom,-cp*sy*zoom,0,
                 0,cp*zoom,sp*zoom,0,
                 sy*zoom,-sp*cy*zoom,cp*cy*zoom,0,
-                0,0,0,1};
+                0,zoom*pivot*(std::cos(PitchDegrees*DEG2RAD)-cp),zoom*pivot*(std::sin(PitchDegrees*DEG2RAD)-sp),1};
     }
     static Vector3 apply(const std::array<float,16>& m,Vector3 point) {
-        return {m[0]*point.x+m[4]*point.y+m[8]*point.z,
-                m[1]*point.x+m[5]*point.y+m[9]*point.z,
-                m[2]*point.x+m[6]*point.y+m[10]*point.z};
+        return {m[0]*point.x+m[4]*point.y+m[8]*point.z+m[12],
+                m[1]*point.x+m[5]*point.y+m[9]*point.z+m[13],
+                m[2]*point.x+m[6]*point.y+m[10]*point.z+m[14]};
     }
 };

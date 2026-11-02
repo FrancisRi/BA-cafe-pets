@@ -142,7 +142,37 @@ struct App {
     struct FormationPose {int idle=-1,pickup=-1;};std::vector<FormationPose> formationPoses;size_t formationPoseIndex=0;
     const char* modeName() const {return formationMode?"formation":battleMode?"battle":"cafe";}
     bool exsPlaying() const {return manualAction||(battleMode&&battle&&battle->phase==pet::Battle::Phase::Skill);}
-    bool rotationLocked() const {return !preferences.rightDragRotation;}
+    bool inspectionActive=false;float inspectionPitch=0,inspectionYaw=0;
+    bool rotationLocked() const {return !inspectionActive&&!preferences.rightDragRotation;}
+    float inspectionPivot() const {return inspectionActive?(geometry.minimum.y+geometry.maximum.y)*0.5f:0;}
+    void prepareViewport(){
+        const auto low=geometry.renderMinimum,high=geometry.renderMaximum;
+        if(inspectionActive){
+            // Reserve every pitch/yaw around the body center, including Exs props.
+            const float pivot=inspectionPivot();
+            const float radius=Vector3Length({std::max(std::abs(low.x),std::abs(high.x)),std::max(std::abs(low.y-pivot),std::abs(high.y-pivot)),std::max(std::abs(low.z),std::abs(high.z))});
+            geometry.renderMinimum={-radius,pivot-radius,-radius};geometry.renderMaximum={radius,pivot+radius,radius};
+        }
+        geometry.prepareViewport(ground,zoom);geometry.renderMinimum=low;geometry.renderMaximum=high;
+    }
+    void updateInspection(){
+        if(!loaded||inspectionActive==preferences.inspectionMode)return;
+        if(preferences.inspectionMode)inspectionYaw=yaw;
+        inspectionActive=preferences.inspectionMode;inspectionPitch=0;
+        behavior->halt();stopLocomotion();manualAction=false;deferredInput={};deferredCafeClick=false;
+        clickSequence.reset();click=doubleClickRequest=tripleClickRequest=dragStarted=wasDragging=false;
+        state.pendingClick=state.dragging=state.trackingCursor=false;state.facingRequest.reset();
+        if(battleMode)battle->start();else state.start(formationMode?formationIdle:cafeIdle,true);
+        if(!inspectionActive)yaw=formationMode&&!preferences.rightDragRotation?0:inspectionYaw;
+        skillYaw=yaw;blockedCursor.reset();hasFollowPlan=false;followPlanAt=0;
+        state.resetCooldown();interactionUntil=preciseSeconds()+0.5;placementNeeded=false;
+        updatePlacementShape();prepareViewport();
+        if(!inspectionActive){
+            const auto before=ground.position;geometry.place(ground,ground.screen(before),zoom);
+            if(Vector3Distance(before,ground.position)>1e-6)journey.place(ground.position);
+        }
+        placementGeneration=state.generation;
+    }
     POINT windowPosition{LONG_MIN,LONG_MIN};
     POINT committedOrigin{};Vector2 committedFoot{};bool committedFrame=false;
 
@@ -175,8 +205,9 @@ struct App {
     }
     uint64_t displayGeneration() const {return state.generation*100000+directed.serial*2+(directed.active?1:0)+cafeAttention.serial*1000000000ULL;}
     void applyPreferences(){
-        if(formationMode&&!preferences.rightDragRotation){yaw=0;if(exsPlaying())skillYaw=0;}
-        state.walkEnabled=preferences.wandering;
+        updateInspection();
+        if(formationMode&&!preferences.rightDragRotation&&!inspectionActive){yaw=0;if(exsPlaying())skillYaw=0;}
+        state.walkEnabled=!inspectionActive&&preferences.wandering;
         state.walkIntervalOverride=preferences.moveInterval;state.walkTimeJitter=preferences.walkTimeJitter/100;state.walkDistanceJitter=preferences.walkDistanceJitter/100;
         state.walkDurationOverride=geometry.bodyWidth*preferences.moveBodies/(0.792*WalkSpeedMultiplier);
         state.attentionProbabilityOverride=1; // Legacy BT chance is disabled in this host; cafe tracking uses its toggle.
@@ -402,9 +433,10 @@ struct App {
     void finishManualSkill(){
         manualAction=false;stopLocomotion();state.pendingClick=false;state.resetCooldown();
         if(battleMode)battle->start();else{behavior->halt();state.start(formationMode?formationIdle:cafeIdle,true);}
-        yaw=formationMode&&!preferences.rightDragRotation?0:skillYaw;interactionUntil=preciseSeconds()+0.5;placementNeeded=false;
+        yaw=formationMode&&!preferences.rightDragRotation&&!inspectionActive?0:skillYaw;interactionUntil=preciseSeconds()+0.5;placementNeeded=false;
     }
     void initializeBehavior(const Json& message){
+        loaded=false;inspectionActive=false;inspectionPitch=0;
         if(!grouped)battleInput.enable(false);battle.reset();behavior.reset();state.clips.clear();state.active=false;state.current=-1;
         for(const auto& c:message.at("clips")){
             const double duration=c.at("duration").get<double>();
@@ -505,6 +537,34 @@ struct App {
         if(settingsOnLoad){settingsOnLoad=false;showSettings();}
     }
     void capture(){if(capturing||snapshot.empty()||!renderer||!loaded)return;capturing=true;renderer->render(window,inputWindow,true,snapshot);DestroyWindow(window);}
+    void tickInspection(float dt,double elapsed,double idle,bool dragging){
+        observeDebouncedInput(state,idle,elapsed,preferences.inputGrace);
+        state.cursorTarget=state.lookTarget=state.trackingCursor=false;
+        const bool look=state.trackingEnabled;state.trackingEnabled=false;state.walkEnabled=false;
+        if(formationMode){
+            if(!dragging&&(wasDragging||dragStarted))chooseFormationPose(true);
+            const int target=dragging&&formationPickup>=0?formationPickup:formationIdle;
+            if(!state.active||state.current!=target)state.start(target,true);
+            state.dragging=dragging;if(!state.settingsOpen)state.advance(dt);
+        }else if(battleMode){
+            auto events=grouped?sharedEvents:battleInput.take(false,dragging,false);
+            events.petClick=events.boundary=false;events.dragging=dragging;
+            if(dragStarted&&!dragging){auto drag=events;drag.dragging=true;drag.mouseClick=drag.keyPressed=drag.windowClosed=false;battle->tick(0,drag);}
+            const auto phase=battle->phase;battle->activityDelta=elapsed;battle->tick(dt,events);
+            if(battle->phase==pet::Battle::Phase::Skill&&phase!=pet::Battle::Phase::Skill)skillYaw=yaw;
+            if(battle->returnToCafe)selectMode(false,!review);
+        }else{
+            if(dragStarted&&!dragging)behavior->tick(0,false,true);
+            const auto generation=state.generation;const double time=state.time;
+            const bool idlePose=state.current==cafeIdle&&state.loop;
+            behavior->tick(dt,click,dragging);
+            if(idlePose&&state.generation==generation&&state.current==cafeIdle)
+                state.time=std::fmod(time+(state.settingsOpen?0:dt*.75),state.clips[cafeIdle].duration);
+        }
+        state.trackingEnabled=look;state.walking=false;state.facingRequest.reset();
+        state.returnRequested=state.returningHome=state.returnArrived=false;
+        wasDragging=dragging;click=dragStarted=false;placementNeeded=false;
+    }
     void tick(){
         NativeHealth::mark("behavior / import");
         const auto now=GetTickCount64();const double preciseNow=preciseSeconds();
@@ -528,7 +588,7 @@ struct App {
         const double idle=idleInputSeconds();
         if(!fixedPose){
             const bool dragging=left&&dragged;
-            if(tripleClickRequest){
+            if(tripleClickRequest&&!inspectionActive){
                 doubleClickRequest=false;
                 if(cycleActionMode(!review)&&settingsChanged)settingsChanged();
                 click=false;
@@ -541,6 +601,7 @@ struct App {
                 if(state.time>=state.clips[state.current].duration)finishManualSkill();
                 click=dragStarted=false;wasDragging=dragging;renderFrame();return;
             }
+            if(inspectionActive){tickInspection(dt,elapsed,idle,dragging);renderFrame();return;}
             if(formationMode){
                 if(!dragging&&(wasDragging||dragStarted))chooseFormationPose(true);
                 const int target=dragging&&formationPickup>=0?formationPickup:formationIdle;
@@ -786,13 +847,14 @@ struct App {
         if(frameReady&&!snapshot.empty()&&now>=readyAt&&now-readyAt>600)capture();
     }
     int retreatDisplacement()const{
+        if(inspectionActive)return 0;
         if(!battleMode||!battle||battle->phase!=pet::Battle::Phase::Retreat)return 0;
         const double t=std::clamp(battle->retreatProgress,0.0,1.0);
         // Ease in: preserve the animation duration and total travel, accelerate upward.
         return int(t*t*(geometry.crop.y+geometry.height+20));
     }
     void updatePlacementShape(){
-        geometry.yaw=yaw;int idle=cafeIdle;
+        geometry.yaw=yaw;geometry.pitch=inspectionActive?inspectionPitch:0;geometry.pivot=inspectionPivot();int idle=cafeIdle;
         if(formationMode)idle=formationIdle;
         if(battleMode&&battle)idle=battle->idleClip();
         const int clip=idle>=0&&idle<int(state.clips.size())?state.clips[idle].modelIndex:-1;
@@ -840,7 +902,7 @@ struct App {
             {"desktop",{ground.width,ground.height}},{"viewport",{windowWidth,windowHeight}},{"crop",{crop.x,crop.y}},{"surfaceOrigin",{surfaceOrigin.x,surfaceOrigin.y}},{"position",{displayPosition.x,0,displayPosition.z}},
             {"velocity",{motionVelocity.x,0,motionVelocity.z}},{"motionRemaining",motionRemaining},{"sampleTime",lastTick*1000},{"playbackRate",playbackRate},
             {"smooth",smooth},{"menuHint",menuHintVisible&&!state.settingsOpen},
-            {"zoom",zoom},{"yaw",victory?0:displayYaw},{"outline",state.outlineEnabled},{"outlineMode",preferences.outlineMode},{"renderQuality",preferences.renderQuality},{"outlineWidth",preferences.outlineWidth},{"interacting",left||right},
+            {"zoom",zoom},{"yaw",victory&&!inspectionActive?0:displayYaw},{"inspectionPitch",inspectionActive?inspectionPitch:0},{"inspectionPivot",inspectionPivot()},{"outline",state.outlineEnabled},{"outlineMode",preferences.outlineMode},{"renderQuality",preferences.renderQuality},{"outlineWidth",preferences.outlineWidth},{"interacting",left||right},
             {"resting",!manualAction&&!left&&!right&&!state.walking&&!directed.active&&!turningWalk&&(formationMode?state.current==formationIdle:battleMode?battle->phase==pet::Battle::Phase::Idle:state.current==cafeIdle)}});
     }
     void captureMouse(){
@@ -852,7 +914,7 @@ struct App {
         if(left&&dragged){
             // Commit the final cafe resting pose before remembering its home;
             // the drag may have been clamped using the previous facing.
-            if(!battleMode&&!formationMode){yaw=0;updatePlacementShape();geometry.place(ground,ground.screen(ground.position),zoom);}
+            if(!battleMode&&!formationMode&&!inspectionActive){yaw=0;updatePlacementShape();geometry.place(ground,ground.screen(ground.position),zoom);}
             journey.place(ground.position);
         }
         if(right)placementNeeded=true;
@@ -876,7 +938,7 @@ struct App {
                     else {app->lastTick=preciseSeconds();app->nextRender=0;if(app->renderer)app->renderer->resume();}
                     app->state.log(app->session.paused()?"DESKTOP paused: sleep / lock / display off":"DESKTOP resumed: reset frame clock");
                 }return message==WM_POWERBROADCAST?TRUE:0;
-            case WM_DISPLAYCHANGE:app->refreshDisplays();app->geometry.prepareViewport(app->ground,app->zoom);app->geometry.place(app->ground,app->ground.screen(app->ground.position),app->zoom);app->placementNeeded=true;app->presentState(true);return 0;
+            case WM_DISPLAYCHANGE:app->refreshDisplays();app->prepareViewport();app->geometry.place(app->ground,app->ground.screen(app->ground.position),app->zoom);app->placementNeeded=true;app->presentState(true);return 0;
             case WM_TIMER:if(!app->session.paused()){if(app->tickCallback)app->tickCallback();else app->tick();}return 0;
             case WM_LBUTTONDOWN:if(app->right||app->menuPressed)return 0;app->left=true;app->dragged=false;app->down=app->previous=cursor;app->captureMouse();return 0;
             case WM_RBUTTONDOWN:if(app->left||app->right)return 0;app->right=app->menuPressed=true;app->rightDragged=false;app->down=app->previous=cursor;app->captureMouse();return 0;
@@ -886,7 +948,7 @@ struct App {
                     if(app->dragged){app->clickSequence.reset();app->doubleClickRequest=app->tripleClickRequest=false;app->dragStarted|=!before;auto foot=app->ground.screen(app->ground.position);foot.x+=cursor.x-(before?app->previous.x:app->down.x);foot.y+=cursor.y-(before?app->previous.y:app->down.y);app->updatePlacementShape();app->geometry.place(app->ground,foot,app->zoom);}app->previous=cursor;}
                 if(app->right){
                     if(app->menuPressed&&!app->rightDragged){app->rightDragged=std::abs(cursor.x-app->down.x)>4||std::abs(cursor.y-app->down.y)>4;if(!app->rightDragged)return 0;}
-                    if(!app->rotationLocked()){app->yaw=std::remainder(app->yaw+(cursor.x-app->previous.x)*0.7f,360.0f);if(app->exsPlaying())app->skillYaw=app->yaw;}app->previous=cursor;
+                    if(!app->rotationLocked()){if(app->inspectionActive)app->inspectionPitch=std::remainder(app->inspectionPitch+(cursor.y-app->previous.y)*0.7f,360.0f);app->yaw=std::remainder(app->yaw+(cursor.x-app->previous.x)*0.7f,360.0f);if(app->exsPlaying())app->skillYaw=app->yaw;}app->previous=cursor;
                 }
                 if(app->left)app->moveCachedDrag();return 0;
             case WM_LBUTTONUP:if(app->left){app->click=!app->dragged;if(app->click){const auto gesture=app->clickSequence.release(GetTickCount64(),cursor.x,cursor.y,GetDoubleClickTime(),GetSystemMetrics(SM_CXDOUBLECLK),GetSystemMetrics(SM_CYDOUBLECLK));app->doubleClickRequest|=gesture.doubleClick;app->tripleClickRequest|=gesture.tripleClick;}app->releaseMouse();}return 0;
@@ -895,7 +957,7 @@ struct App {
             case WM_CAPTURECHANGED:app->left=app->right=app->menuPressed=app->rightDragged=false;app->presentState(true);return 0;
             case WM_CANCELMODE:app->releaseMouse();return 0;
             case WM_MOUSEWHEEL:app->setZoom(app->zoom*std::pow(1.1f,GET_WHEEL_DELTA_WPARAM(w)/120.0f));return 0;
-            case WM_HOTKEY:if(w==1){if(app->closeRequest)app->closeRequest();else DestroyWindow(hwnd);}else if(w==2&&!app->formationMode){if(app->followRequest)app->followRequest();else{app->preferences.follow=!app->preferences.follow;app->preferences.save(app->settings->ini);app->syncSettings();}}return 0;
+            case WM_HOTKEY:if(w==1){if(app->closeRequest)app->closeRequest();else DestroyWindow(hwnd);}else if(w==2&&!app->formationMode&&!app->inspectionActive){if(app->followRequest)app->followRequest();else{app->preferences.follow=!app->preferences.follow;app->preferences.save(app->settings->ini);app->syncSettings();}}return 0;
             case WM_CLOSE:if(app->closeRequest)app->closeRequest();else DestroyWindow(hwnd);return 0;
             case WM_DESTROY:KillTimer(hwnd,1);if(app->quitHotkey)UnregisterHotKey(hwnd,1);if(app->lookHotkey)UnregisterHotKey(hwnd,2);app->done=true;app->window=nullptr;if(app->destroyedCallback)app->destroyedCallback();else if(!app->grouped)PostQuitMessage(0);return 0;
             default:return DefWindowProcW(hwnd,message,w,l);

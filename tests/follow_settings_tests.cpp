@@ -20,6 +20,7 @@ using Json=nlohmann::json;
 #include "native_preferences.h"
 #include "shared/directed_walk.h"
 #include "shared/cafe_attention.h"
+#include "raymath.h"
 static void check(bool value,const char* text){if(!value)throw std::runtime_error(text);}
 int main(int argc,char** argv){
  try{
@@ -73,6 +74,12 @@ int main(int argc,char** argv){
    check(up.x==0&&up.y>0&&up.z<0&&std::abs(std::hypot(up.y,up.z)-zoom)<1e-6,"Presentation pitch is uniform and never leans side-facing characters sideways");
   }
   const auto forward=ModelView::apply(ModelView::matrix(0,1),{0,0,1});
+  for(float pitch:{-180.f,-90.f,0.f,90.f,180.f})for(float yaw:{0.f,90.f,180.f}){
+   const auto view=ModelView::matrix(yaw,1.24f,pitch,1.2f);
+   const auto center=ModelView::apply(view,{0,1.2f,0}),baseline=ModelView::apply(ModelView::matrix(0,1.24f),{0,1.2f,0});
+   check(Vector3Distance(center,baseline)<1e-5,"Inspection rotates around a stable body center instead of orbiting the feet");
+   const auto edge=ModelView::apply(view,{1,1.2f,0});check(std::abs(Vector3Distance(center,edge)-1.24f)<1e-5,"Inspection preserves model size through full horizontal and vertical turns");
+  }
   check(forward.y>0&&std::abs(std::atan2(forward.y,forward.z)*RAD2DEG-5.f)<.001,"Front-facing presentation looks five degrees higher");
   const auto eye=ground.eyePixel(1.7f);float cursorFacing=42;
   for(float scale:{.45f,1.f,1.65f}){ground.modelZoom=scale;check(!ground.faceCursor({eye.x+2.5f,eye.y},1.7f,cursorFacing)&&cursorFacing==42,"Small pointer motions at the head do not change facing across model scales");}
@@ -110,6 +117,10 @@ int main(int argc,char** argv){
   WritePrivateProfileStringW(L"Behavior",L"Walking",L"0",ini.c_str());NativePreferences migrated;migrated.load(ini);check(!migrated.wandering&&!migrated.battleWalking,"An old disabled Walking flag migrates to both toggles");
   WritePrivateProfileStringW(L"Behavior",L"Walking",L"1",ini.c_str());migrated.load(ini);check(migrated.wandering&&migrated.battleWalking,"An old enabled Walking flag migrates to both toggles");
   check(migrated.rightDragRotation,"Old profiles default to enabled manual rotation");
+  check(!migrated.inspectionMode,"Old profiles default to inspection off");
+  value=settings.json();value["inspectionMode"]=true;check(settings.apply(value)&&settings.inspectionMode,"Inspection accepts a boolean setting");
+  value["inspectionMode"]="yes";check(!settings.apply(value)&&settings.inspectionMode,"Malformed inspection settings cannot mutate preferences");
+  settings.save(ini);NativePreferences inspected;inspected.load(ini);check(inspected.inspectionMode,"Inspection setting persists across restart");
   value=settings.json();value["rightDragRotation"]=false;check(settings.apply(value)&&!settings.rightDragRotation,"Global rotation switch accepts false");
   value["rightDragRotation"]="yes";check(!settings.apply(value)&&!settings.rightDragRotation,"Invalid rotation values are rejected without modifying the preference");
   settings.save(ini);NativePreferences loaded;loaded.load(ini);check(loaded.followNear==0&&loaded.wandering&&!loaded.battleWalking&&!loaded.rightDragRotation,"Movement flags and global rotation switch survive restart");

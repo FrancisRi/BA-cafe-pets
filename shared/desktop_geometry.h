@@ -12,7 +12,7 @@ struct DesktopGeometry {
     float above=448,below=64;
     static constexpr float ViewportZoom=1.65f; // Reserve the complete supported wheel range once.
     static constexpr float EdgeClearance=2; // Half the previous 4 px screen-edge clearance.
-    float yaw=0;
+    float yaw=0,pitch=0,pivot=0;
     std::map<int,std::vector<BoundingBox>> restingBoxes;
     int restingClip=-1;
     Vector2 crop{};
@@ -31,7 +31,7 @@ struct DesktopGeometry {
     PetGround::Area projectBoxes(const PetGround& ground,float zoom,const std::vector<BoundingBox>& boxes,float facing) const {
         PetGround::Area offsets{INFINITY,INFINITY,-INFINITY,-INFINITY};
         const auto foot=ground.screen(ground.position);
-        const auto transform=ModelView::matrix(facing,zoom);
+        const auto transform=ModelView::matrix(facing,zoom,pitch,pivot);
         for(const auto& box:boxes)for(int x=0;x<2;++x)for(int y=0;y<2;++y)for(int z=0;z<2;++z) {
             const auto point=ModelView::apply(transform,{x?box.max.x:box.min.x,y?box.max.y:box.min.y,z?box.max.z:box.min.z});
             const auto p=ground.screen({ground.position.x+point.x,ground.position.y+point.y,ground.position.z+point.z});

@@ -98,6 +98,62 @@ int wmain(int argc,wchar_t** argv){try{
     auto foot=a.ground.screen(a.ground.position);pointer(foot.x,foot.y);
     const auto click=[&]{App::inputProc(a.inputWindow,WM_LBUTTONDOWN,MK_LBUTTON,0);App::inputProc(a.inputWindow,WM_LBUTTONUP,0,0);tick();};
     std::vector<std::string> modes{"cafe"};if(a.settings->battleAvailable)modes.push_back("battle");if(a.formationIdle>=0)modes.push_back("formation");
+    {
+        const auto saved=a.preferences;const auto savedInput=a.idleInputSeconds;
+        const auto savedIdle=a.state.idleSecondsOverride;
+        const auto toggle=[&](bool enabled){auto value=a.settingsSnapshot()["value"];value["inspectionMode"]=enabled;a.settingsMessage({{"type","save"},{"value",value}});};
+        const auto rotate=[&](int x,int y){App::inputProc(a.inputWindow,WM_RBUTTONDOWN,MK_RBUTTON,0);interactionCursor.x+=x;interactionCursor.y+=y;App::inputProc(a.inputWindow,WM_MOUSEMOVE,MK_RBUTTON,0);App::inputProc(a.inputWindow,WM_RBUTTONUP,0,0);tick();};
+        for(const auto& mode:modes){
+            a.selectActionMode(mode);a.preferences=saved;a.preferences.follow=a.preferences.wandering=a.preferences.cafeTracking=a.preferences.battleWalking=true;
+            a.preferences.rightDragRotation=false;a.applyPreferences();a.yaw=mode=="formation"?0:37;
+            const float heading=a.yaw;a.state.idleSecondsOverride=1;
+            a.idleInputSeconds=[] {return 120.0;};
+            a.geometry.place(a.ground,{a.ground.width*.5f,a.ground.height*.6f},a.zoom);
+            const auto anchor=a.ground.position;const auto options=a.preferences.json();
+            a.beginDirected({anchor.x+.1f,anchor.y,anchor.z},true);
+            toggle(true);tick(500);
+            check(a.inspectionActive&&!a.state.walkEnabled&&!a.state.walking&&!a.directed.active,"Inspection cancels pending travel and disables idle/battle walking");
+            check(a.modeName()==mode&&a.yaw==heading&&Vector3Distance(a.ground.position,anchor)<1e-6,"Inspection retains the primary mode and stays anchored despite idle input");
+            a.idleInputSeconds=[] {return 0.0;};pointer(0,0);tick(200);
+            check(a.yaw==heading&&!a.state.trackingCursor&&Vector3Distance(a.ground.position,anchor)<1e-6,"Resumed input cannot cause inspection follow, gaze, or return movement");
+            auto foot=a.ground.screen(a.ground.position);pointer(foot.x,foot.y);a.clickSequence.reset();click();
+            if(mode=="cafe")check(a.state.clips[a.state.current].name.find("Reaction")!=std::string::npos,"Cafe single click still plays the head-pat reaction in inspection");
+            rotate(200,100);a.presentState(true);
+            check(std::abs(a.inspectionPitch-70)<.01&&std::abs(std::remainder(a.yaw-heading,360.f)-140)<.01,"Inspection overrides disabled normal rotation and rotates horizontally and vertically");
+            check(a.renderer->state["inspectionPitch"]==a.inspectionPitch&&Vector3Distance(a.ground.position,anchor)<1e-6,"Inspection pitch reaches the renderer without moving the ground anchor");
+            a.clickSequence.reset();foot=a.ground.screen(a.ground.position);pointer(foot.x,foot.y);click();click();
+            if(a.manualSkill>=0)check(a.manualAction&&a.state.current==a.manualSkill,"Inspection double click plays Exs in every supported primary mode");
+            click();check(a.modeName()==mode,"Inspection third click cannot switch the primary mode");
+            if(a.manualSkill>=0)check(a.manualAction,"Inspection third click does not interrupt Exs");
+            const auto time=a.state.time;const auto actionGeneration=a.state.generation;rotate(520,300);
+            check(a.state.generation==actionGeneration&&a.state.time>=time,"Right rotation does not restart an active inspection animation");
+            a.presentState(true);a.finishRender();check(a.renderer->surfaceWidth>1&&a.renderer->surfaceHeight>1,"A flipped animated model still renders a nonempty frame");
+            App::inputProc(a.inputWindow,WM_LBUTTONDOWN,MK_LBUTTON,0);interactionCursor.x-=90;interactionCursor.y-=40;App::inputProc(a.inputWindow,WM_MOUSEMOVE,MK_LBUTTON,0);tick();
+            check(a.state.dragging&&!a.manualAction,"Inspection left drag interrupts Exs and plays pickup");
+            App::inputProc(a.inputWindow,WM_LBUTTONUP,0,0);tick();const auto dropped=a.ground.position;
+            check(Vector3Distance(dropped,anchor)>.01,"Inspection left drag can relocate the pet");
+            const float rotated=a.yaw;tick(100);check(a.yaw==rotated&&Vector3Distance(a.ground.position,dropped)<1e-6,"Inspection drop retains the inspected angle and new location");
+            if(a.manualSkill>=0)a.startManualSkill();
+            toggle(false);a.presentState(true);
+            check(!a.inspectionActive&&a.inspectionPitch==0&&a.yaw==heading&&!a.manualAction,"Leaving inspection clears flipped angles and restores the entry heading even during Exs");
+            check(a.preferences.json()==options&&a.state.trackingEnabled&&a.state.walkEnabled,"Leaving inspection restores every saved behavior option including disabled normal rotation");
+            check(Vector3Distance(a.ground.position,anchor)>.01&&!a.directed.active&&!a.state.returnRequested,"Leaving inspection retains the manual drop and clears suspended movement");
+            toggle(true);toggle(false);check(a.yaw==heading&&a.inspectionPitch==0,"Repeated inspection toggles do not accumulate rotations");
+            toggle(true);const bool paused=a.state.settingsOpen;a.state.settingsOpen=true;
+            for(float pitch:{0.f,90.f,180.f,-90.f}){
+                a.inspectionPitch=pitch;a.presentState(true);
+                const auto shot=profile/(L"inspection-"+wide(mode)+L"-"+std::to_wstring(int(pitch))+L".png");
+                a.renderer->render(a.window,a.inputWindow,true,shot);
+                Image image=LoadImage(utf8(shot.wstring()).c_str());check(image.data,"Read actual rotated GPU output");
+                auto* pixels=LoadImageColors(image);size_t visible=0;
+                for(int i=0;i<image.width*image.height;++i)visible+=pixels[i].a>16;
+                UnloadImageColors(pixels);UnloadImage(image);check(visible>100,"Quarter-turn and upside-down inspection frames must contain the visible model");
+            }
+            a.state.settingsOpen=paused;toggle(false);
+            std::cout<<"Inspection "<<mode<<": stationary, interactions, full rotation, drop and restore passed.\n";
+        }
+        a.preferences=saved;a.idleInputSeconds=savedInput;a.state.idleSecondsOverride=savedIdle;a.selectMode(false);a.applyPreferences();
+    }
     for(size_t round=0;round<2;++round)for(size_t current=0;current<modes.size();++current){
         check(a.modeName()==modes[current],"Mode cycle starts in the expected supported mode");
         a.clickSequence.reset();foot=a.ground.screen(a.ground.position);pointer(foot.x,foot.y);const auto before=a.ground.position;

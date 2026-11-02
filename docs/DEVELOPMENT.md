@@ -121,10 +121,10 @@ cmake --build build --target ba_cafe_lite_model_unification_tests
 打包后可用 Windows 桌面验证单文件启动器的旧记录恢复。脚本将 EXE、模型与数据复制到独立测试目录，不改动实际用户资料：
 
 ```powershell
-python tests/launcher_storage_compatibility.py ./dist/BA-Cafe-Pets-1.1.12-x64.exe
-python tests/tray_integration.py ./dist/BA-Cafe-Pets-1.1.12-portable-x64.zip
-python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.12-portable-x64.zip
-python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.12-x64.exe
+python tests/launcher_storage_compatibility.py ./dist/BA-Cafe-Pets-1.1.13-x64.exe
+python tests/tray_integration.py ./dist/BA-Cafe-Pets-1.1.13-portable-x64.zip
+python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.13-portable-x64.zip
+python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.13-x64.exe
 ```
 
 界面回归检查使用隔离 Windows 桌面，不把模拟模型写入实际用户数据。测试还比较滚动后的实际窗口像素与完整重绘结果，并核对滑块普通绘制和合成绘制一致；覆盖浅色／深色主题及 100%／150%／200% DPI，同时验证滑块拖动和键盘操作。
@@ -173,3 +173,7 @@ pwsh -File ./package.ps1 -SkipBuild -BinaryDirectory ./build/bin/Release -CoreEx
 单文件启动器仍使用原数据目录 `%LOCALAPPDATA%/ba_cafe_lite_native/data/`，与原版共用该位置。需要完全独立配置时，可使用便携版或通过原生程序的 `--data-dir` 指定目录。升级前退出旧进程，并在关闭程序后备份整个 `data/`。
 
 应用图标源文件为 `assets/app-icon.svg`。修改后运行 `python tools/generate_app_icon.py` 生成多尺寸 ICO；该开发脚本依赖 Pillow，发行程序不需要 Python。
+
+观赏模式通过 `NativePreferences::inspectionMode` 保存共享开关，运行时覆盖行为而不改写原选项。`App::updateInspection` 处理进入／退出，清除暂停的移动与手势，退出恢复进入时 yaw；`tickInspection` 复用原模式动画触发，跳过位置、朝向和三击切换逻辑。右键更新 yaw 和独立 pitch，渲染缓存同时跟踪 pitch／pivot；`ModelView` 围绕角色中心翻转，渲染与放置使用同一矩阵，并为完整旋转预留画面。
+
+原生交互测试覆盖各可用主模式的观赏开关、长时间闲置／恢复输入、旋转与动画连续性、点击和 Exs、三击屏蔽、提放和退出复原；GPU 输出覆盖正向、两个侧翻及倒置角度。UI 测试覆盖完整界面和快捷菜单的共享开关、禁用控件与原值恢复，设置测试覆盖旧配置默认关闭和持久化。

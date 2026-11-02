@@ -14,11 +14,11 @@ class NativeRenderer {
     unsigned reusedFrames=0,reusedMasks=0;double changedMeshes=0;
     HFONT hintFont{};std::vector<RECT> inputRegion;std::vector<unsigned char> regionBytes;
     HWND regionWindow{};int regionWidth=0,regionHeight=0;
-    std::array<double,21> frameKey{};bool frameValid=false;
+    std::array<double,23> frameKey{};bool frameValid=false;
     bool cpuPrepared=false,preparedChanged=false;double preparedAt=0,uploadMs=0;
     struct PendingPresentation {
         HWND display{},input{};bool ready=false,screenshot=false;double now=0;
-        std::filesystem::path output;std::array<double,21> key{};
+        std::filesystem::path output;std::array<double,23> key{};
     } pending;
     void statistics(double);
     int factorLocation=-1,alphaLocation=-1,cutoffLocation=-1,hullWidthLocation=-1,texelLocation=-1,radiusLocation=-1,contourSampleLocation=-1;

@@ -85,12 +85,12 @@ void NativeRenderer::prepareCpu(double now){
 void NativeRenderer::render(HWND display,HWND input,bool screenshot,const std::filesystem::path& output,bool deferPresentation){
  didDraw=false;if(!model||state.empty())return;if(!cpuPrepared)prepareCpu(clock());const auto& s=state;const double now=preparedAt;const bool changed=preparedChanged;cpuPrepared=false;
  const auto desktop=s["desktop"],crop=s["crop"],cameraPos=s["camera"],position=s["position"];Camera3D camera{{cameraPos[0],cameraPos[1],cameraPos[2]},{0,0,0},{0,1,0},s["fov"],CAMERA_PERSPECTIVE};
- const std::array<double,21> key{cameraPos[0],cameraPos[1],cameraPos[2],s["fov"],s["far"],desktop[0],desktop[1],s["viewport"][0],s["viewport"][1],crop[0],crop[1],position[0],position[1],position[2],s["yaw"],s["zoom"],double(s.value("outlineMode",2)),s.value("outlineWidth",100.0),s.value("menuHint",false)?1.0:0.0,double(s.value("hintBelow",64)),double(s.value("renderQuality",2))};
+ const std::array<double,23> key{cameraPos[0],cameraPos[1],cameraPos[2],s["fov"],s["far"],desktop[0],desktop[1],s["viewport"][0],s["viewport"][1],crop[0],crop[1],position[0],position[1],position[2],s["yaw"],s["zoom"],double(s.value("outlineMode",2)),s.value("outlineWidth",100.0),s.value("menuHint",false)?1.0:0.0,double(s.value("hintBelow",64)),double(s.value("renderQuality",2)),s.value("inspectionPitch",0.0),s.value("inspectionPivot",0.0)};
  // Exact dependency checks: animated geometry, expression weights, projection,
  // appearance and action visibility must all agree before reusing a frame.
  if(frameValid&&!changed&&!model->updatedParts&&key==frameKey&&!screenshot){++reusedFrames;statistics(now);return;}
  NativeHealth::mark("GPU mesh upload");const double uploadStart=diagnostics?clock():0;model->uploadGeometry();if(diagnostics)uploadMs+=(clock()-uploadStart)*1000;
- Mat actor=ModelView::matrix(s["yaw"].get<float>(),s["zoom"].get<float>());actor[12]=position[0];actor[13]=position[1];actor[14]=position[2];const Matrix pose=matrix(actor);
+ Mat actor=ModelView::matrix(s["yaw"].get<float>(),s["zoom"].get<float>(),s.value("inspectionPitch",0.f),s.value("inspectionPivot",0.f));actor[12]+=position[0].get<float>();actor[13]+=position[1].get<float>();actor[14]+=position[2].get<float>();const Matrix pose=matrix(actor);
  // Keep the full desktop projection, but allocate/read only the current pose.
  // Bounds come from all deformed vertices, never from sparse animation samples
  // or alpha thresholds. The display crop cannot change the ground anchor.

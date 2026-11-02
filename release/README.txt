@@ -1,4 +1,4 @@
-BA Cafe Pets 1.1.12 · Windows x64
+BA Cafe Pets 1.1.13 · Windows x64
 
 基于 maxiumlee（Max）的 ba-cafe-lite 继续开发。
 原作者：https://github.com/maxiumlee/ba-cafe-lite
@@ -8,7 +8,7 @@ BA Cafe Pets 1.1.12 · Windows x64
 便携版请退出旧程序后解压到原目录，运行 BA-Cafe-Pets.exe；旧 ba_cafe_lite.exe 不自动删除，请勿再启动。
 
 启动
-  单文件版双击 BA-Cafe-Pets-1.1.12-x64.exe；便携版解压后运行 BA-Cafe-Pets.exe。
+  单文件版双击 BA-Cafe-Pets-1.1.13-x64.exe；便携版解压后运行 BA-Cafe-Pets.exe。
   默认角色 Shiroko。
   不需要 Blender、浏览器、WebView2、Python 或开发环境。
   便携 ZIP 请完整解压，保留 model、defaults.ini、behavior 和 licenses。
@@ -29,6 +29,8 @@ BA Cafe Pets 1.1.12 · Windows x64
   咖啡厅关闭位置跟随和散步后，视线追踪持续生效，无需等待连续输入；静止后恢复鼠标或键盘输入不会突然回正。
   咖啡厅开启散步、关闭位置跟随后，恢复鼠标或键盘活动会回到上次拖放位置；鼠标位于任务栏时同样生效，边缘转身和自动位置修正不会中断回位。
   全局设置和快捷菜单均有“右键拖动旋转”开关，默认开启并保存，覆盖所有模式与 Exs。
+  “观赏模式”：三个主模式中均可启用，临时屏蔽散步、跟随、战斗走动、普通旋转及三击切换；右键左右旋转、上下翻转，左键提放和双击 Exs 保留。
+  退出观赏恢复进入前朝向及原功能设置，清除翻转，保留手动拖放的新落点。
   角色显示角度整体上仰 5°，更接近平视屏幕；拖放边界和眼部缓冲区同步调整。
   修复 Hifumi 的隐藏武器影响模型大小及拖动范围、提放时武器飞入飞出的现象。
   所有模式双击角色：沿触发时的模型朝向播放 Exs，保留相对 +90° 动画补偿；技能期间暂停移动和鼠标追踪，可用全局开关允许手动旋转，完成后回到原模式待机。
