@@ -102,6 +102,10 @@ cmake --build build --target ba_cafe_lite_morph_outline_tests
 
 咖啡厅拖动回归还覆盖快速拖放、旋转中断后继续散步、再次拖放更新返回点，以及遇阻停止后恢复输入返回最后拖放位置。`ba_cafe_lite_presentation_tests` 另外检查临时路线清空及完成返回后仍保留该位置。
 
+拖动回归追加长距离散步后的边缘回位检查：右下角、底边和中央落点，分别用桌面坐标及工作区下方的任务栏坐标恢复输入，并验证实际落点、保存的 home 和回位结束状态。位置修正中的恢复输入通过生产 `beginDirected` 路径复现。可在模型、模式、缩放参数后追加 `return-only`，只执行散步／回位场景，便于检查不适用完整跟随测试的模型。
+
+回位采用 `DesktopGeometry::projectedBounds(..., 0)` 对应的最终正面待机边界检查下一步，其他移动继续使用当前朝向的边界；碰撞避让保持生效。咖啡厅释放拖动时先完成待机边界校正，再记录 home。恢复输入后，有效的回位请求可取消正在进行的位置修正。
+
 模型库测试会创建文件并测试回收站删除，参数必须是尚不存在的独立测试目录：
 
 ```powershell
@@ -117,10 +121,10 @@ cmake --build build --target ba_cafe_lite_model_unification_tests
 打包后可用 Windows 桌面验证单文件启动器的旧记录恢复。脚本将 EXE、模型与数据复制到独立测试目录，不改动实际用户资料：
 
 ```powershell
-python tests/launcher_storage_compatibility.py ./dist/BA-Cafe-Pets-1.1.11-x64.exe
-python tests/tray_integration.py ./dist/BA-Cafe-Pets-1.1.11-portable-x64.zip
-python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.11-portable-x64.zip
-python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.11-x64.exe
+python tests/launcher_storage_compatibility.py ./dist/BA-Cafe-Pets-1.1.12-x64.exe
+python tests/tray_integration.py ./dist/BA-Cafe-Pets-1.1.12-portable-x64.zip
+python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.12-portable-x64.zip
+python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.12-x64.exe
 ```
 
 界面回归检查使用隔离 Windows 桌面，不把模拟模型写入实际用户数据。测试还比较滚动后的实际窗口像素与完整重绘结果，并核对滑块普通绘制和合成绘制一致；覆盖浅色／深色主题及 100%／150%／200% DPI，同时验证滑块拖动和键盘操作。

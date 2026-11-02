@@ -43,10 +43,13 @@ struct DesktopGeometry {
     void measureBox(PetGround& ground,float zoom) const {
         ground.bodyOffsets=projectBoxes(ground,zoom,{{minimum,maximum}},0);
     }
-    void measure(PetGround& ground,float zoom) const {
+    PetGround::Area projectedBounds(const PetGround& ground,float zoom,float facing) const {
         const auto shapes=restingBoxes.find(restingClip);
-        if(shapes!=restingBoxes.end()&&!shapes->second.empty())ground.bodyOffsets=projectBoxes(ground,zoom,shapes->second,yaw);
-        else measureBox(ground,zoom);
+        if(shapes!=restingBoxes.end()&&!shapes->second.empty())return projectBoxes(ground,zoom,shapes->second,facing);
+        return projectBoxes(ground,zoom,{{minimum,maximum}},0);
+    }
+    void measure(PetGround& ground,float zoom) const {
+        ground.bodyOffsets=projectedBounds(ground,zoom,yaw);
     }
     void place(PetGround& ground,Vector2 foot,float zoom) const {
         // Bounds depend on perspective depth: solve the edge clamp at the

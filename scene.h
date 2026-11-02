@@ -114,8 +114,11 @@ struct Scene {
         // O(1) cached radii and at most four peers. No vertex scans, allocations,
         // screen enumeration or full-path tests in the local avoidance planner.
         for(size_t i=0;i<crowdCount;++i)if(crowdBodies[i].id==self.id){self.radius=crowdBodies[i].radius;break;}
+        // A return ends in the same front-facing idle used to place the home.
+        // A turning arm/weapon must not invalidate that route at a screen edge.
+        const auto bounds=a.state.returningHome?a.geometry.projectedBounds(a.ground,a.zoom,0):a.ground.bodyOffsets;
         const auto choice=a.crowd.step(self,std::span<const CrowdBody>(crowdBodies.data(),crowdCount),heading,travel,a.movementDt,
-            [&](float angle,double distance){return DesktopPath::stepAllowed(a.ground,angle,distance);});
+            [&](float angle,double distance){return DesktopPath::stepAllowed(a.ground,angle,distance,bounds);});
         return choice;
     }
     void placeNew(App& a){

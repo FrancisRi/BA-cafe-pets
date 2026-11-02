@@ -70,6 +70,7 @@ Git 的新增行和提交作者记录用于追溯，不单独证明某行的版�
 - `shared/cafe_attention.h`、`shared/crowd_steering.h`、`shared/desktop_path.h`
 - `shared/pet_ground.h`、`shared/scene_state.h`
 - `shared/desktop_geometry.h`
+- `shared/desktop_path.h`
 - `.gitignore`、`CMakeLists.txt`、`build.ps1`、`package.ps1`
 - `release_launcher.cpp`、`version.rc.in`
 - `tests/crowd_steering_tests.cpp`、`tests/follow_settings_tests.cpp`

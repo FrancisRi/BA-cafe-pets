@@ -49,8 +49,8 @@ struct DesktopPath {
         }
         return to>=0&&from!=to;
     }
-    static bool stepAllowed(const PetGround& ground,float heading,double distance){
-        const auto p=ground.screen(ground.step(heading,float(distance)));const auto b=ground.bodyOffsets;
+    static bool stepAllowed(const PetGround& ground,float heading,double distance,std::optional<PetGround::Area> bounds={}){
+        const auto p=ground.screen(ground.step(heading,float(distance)));const auto b=bounds.value_or(ground.bodyOffsets);
         // Do not clamp a moving foot to each individual monitor. That would
         // stop it at an internal seam/gap after the trip had already been accepted.
         if(!std::isfinite(p.x)||!std::isfinite(p.y))return false;

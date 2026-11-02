@@ -550,7 +550,11 @@ struct App {
                 if(!state.settingsOpen)state.advance(dt);if(!preferences.rightDragRotation)yaw=0;wasDragging=dragging;
                 click=dragStarted=false;renderFrame();return;
             }
-            if(observeDebouncedInput(state,idle,elapsed,preferences.inputGrace) && !battleMode&&!preferences.follow&&!directed.active){state.trackingCursor=false;state.returnRequested=state.walkEnabled&&journey.requestReturn(ground.position);if(!state.returnRequested&&!stationaryCafeTracking())yaw=0;}
+            if(observeDebouncedInput(state,idle,elapsed,preferences.inputGrace) && !battleMode&&!preferences.follow){
+                state.trackingCursor=false;state.returnRequested=state.walkEnabled&&journey.requestReturn(ground.position);
+                if(state.returnRequested){directed.cancel();restFacing.reset();}
+                else if(!directed.active&&!stationaryCafeTracking())yaw=0;
+            }
             POINT cursor{};GetCursorPos(&cursor);const Vector2 pixel{float(cursor.x-work.left),float(cursor.y-work.top)};
             const auto goal=battleMode&&state.inputActive?ground.planeAt(pixel,1.15f*zoom):ground.floorAt(ground.clampFoot(pixel));const float dx=goal.x-ground.position.x,dz=goal.z-ground.position.z;
             state.cursorTarget=dx*dx+dz*dz>0.04f;state.cursorYaw=std::atan2(dx,dz)*RAD2DEG;
@@ -845,7 +849,12 @@ struct App {
         presentState(true);
     }
     void releaseMouse(){
-        if(left&&dragged)journey.place(ground.position);
+        if(left&&dragged){
+            // Commit the final cafe resting pose before remembering its home;
+            // the drag may have been clamped using the previous facing.
+            if(!battleMode&&!formationMode){yaw=0;updatePlacementShape();geometry.place(ground,ground.screen(ground.position),zoom);}
+            journey.place(ground.position);
+        }
         if(right)placementNeeded=true;
         left=right=menuPressed=rightDragged=false;ReleaseCapture();presentState(true);
     }

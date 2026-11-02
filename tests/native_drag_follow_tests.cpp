@@ -47,7 +47,9 @@ int wmain(int argc,wchar_t** argv){try{
         if(needsTravel)check(std::hypot(a.windowPosition.x-origin.x,a.windowPosition.y-origin.y)>20,"The committed window must move with the simulated pet");
         if(!a.battleMode&&!a.directed.active)check(std::abs(std::remainder(a.yaw-float(a.state.lookYaw),360.f))<1,"Idle eye tracking resumes after following");
     };
-    follow("before drag");
+    const bool returnOnly=argc>5&&std::wstring(argv[5])==L"return-only";
+    const Vector2 middle{a.ground.width*.5f,a.ground.height*.65f};Vector2 start{};
+    if(!returnOnly){follow("before drag");
     for(Vector2 destination:std::vector<Vector2>{{a.ground.width*.5f,a.ground.height*.65f},{4,a.ground.height*.75f},{a.ground.width-4.f,a.ground.height*.75f},{a.ground.width*.5f,4},{a.ground.width*.5f,a.ground.height-4.f}}){
         const auto start=a.ground.screen(a.ground.position);pointer(start);App::inputProc(a.inputWindow,WM_LBUTTONDOWN,MK_LBUTTON,0);
         for(int i=1;i<=5;++i){pointer({start.x+(destination.x-start.x)*i/5,start.y+(destination.y-start.y)*i/5});App::inputProc(a.inputWindow,WM_MOUSEMOVE,MK_LBUTTON,0);tick(1);present();}
@@ -56,9 +58,9 @@ int wmain(int argc,wchar_t** argv){try{
     }
     // One actor only: keep changing the cursor after a central drop, including
     // targets at screen edges that need clamping and later replanning.
-    const Vector2 middle{a.ground.width*.5f,a.ground.height*.65f};
-    auto start=a.ground.screen(a.ground.position);pointer(start);App::inputProc(a.inputWindow,WM_LBUTTONDOWN,MK_LBUTTON,0);pointer(middle);App::inputProc(a.inputWindow,WM_MOUSEMOVE,MK_LBUTTON,0);tick(1);present();App::inputProc(a.inputWindow,WM_LBUTTONUP,0,0);tick(1);
+    start=a.ground.screen(a.ground.position);pointer(start);App::inputProc(a.inputWindow,WM_LBUTTONDOWN,MK_LBUTTON,0);pointer(middle);App::inputProc(a.inputWindow,WM_MOUSEMOVE,MK_LBUTTON,0);tick(1);present();App::inputProc(a.inputWindow,WM_LBUTTONUP,0,0);tick(1);
     for(Vector2 target:std::vector<Vector2>{{2,a.ground.height*.65f},{a.ground.width-2.f,a.ground.height*.65f},{a.ground.width*.8f,2},{a.ground.width*.2f,a.ground.height-2.f}})follow("single actor cursor retarget",target);
+    }
     if(!a.battleMode){
         double inputIdle=0;a.idleInputSeconds=[&]{return inputIdle;};
         a.preferences.follow=false;a.preferences.wandering=true;a.preferences.cafeTracking=false;
@@ -68,7 +70,7 @@ int wmain(int argc,wchar_t** argv){try{
         const auto drop=[&](Vector2 target,bool tickDuringDrag){
             const auto origin=a.ground.screen(a.ground.position);pointer(origin);App::inputProc(a.inputWindow,WM_LBUTTONDOWN,MK_LBUTTON,0);
             pointer(target);App::inputProc(a.inputWindow,WM_MOUSEMOVE,MK_LBUTTON,0);if(tickDuringDrag)tick(1);
-            const auto placed=a.ground.position;App::inputProc(a.inputWindow,WM_LBUTTONUP,0,0);tick(1);
+            App::inputProc(a.inputWindow,WM_LBUTTONUP,0,0);const auto placed=a.ground.position;tick(1);
             check(a.journey.home&&distance(*a.journey.home,placed)<1e-5,"Mouse release must remember the drop even if no tick observed the drag");
             return placed;
         };
@@ -93,9 +95,32 @@ int wmain(int argc,wchar_t** argv){try{
         const auto steering=a.avoidHeading;a.avoidHeading=[](float,double){return MovementChoice{std::numeric_limits<float>::quiet_NaN()};};
         tick(1);a.avoidHeading=steering;
         check(a.journey.route.empty()&&!a.state.walking,"A blocked walk clears only its transient route");returnOnInput(replacement);
+        // Taskbar coordinates are outside the monitor work area. Resuming there
+        // must return to the manual drop just like resuming over the desktop.
+        a.preferences.moveBodies=5;a.preferences.cafeTracking=true;a.preferences.cafeLookMode="threshold";a.applyPreferences();
+        for(bool taskbar:{false,true})for(Vector2 target:std::vector<Vector2>{{a.ground.width-4.f,a.ground.height-4.f},{a.ground.width*.75f,a.ground.height-4.f},{a.ground.width*.5f,a.ground.height*.65f}}){
+            inputIdle=0;a.selectMode(false);a.state.random.seed(17);const auto edgeDrop=drop(target,true);wander(edgeDrop);
+            for(int i=0;i<5000&&a.state.walking&&a.state.walkRemaining>.02;++i)tick(1);
+            const auto away=a.ground.screen(a.ground.position);std::cout<<"Wander before resume: foot="<<away.x<<","<<away.y<<'\n';
+            pointer({a.ground.width*.6f,taskbar?a.ground.height+20.f:a.ground.height*.8f});inputIdle=0;tick(1);
+            for(int i=0;i<5000&&!a.state.returnArrived;++i)tick(1);
+            const auto actual=a.ground.screen(a.ground.position),expected=a.ground.screen(edgeDrop);
+            std::cout<<"Edge return: taskbar="<<taskbar<<" drop="<<expected.x<<","<<expected.y<<" actual="<<actual.x<<","<<actual.y<<" arrived="<<a.state.returnArrived<<" requested="<<a.state.returnRequested<<" returning="<<a.state.returningHome<<" directed="<<a.directed.active<<" home error="<<distance(a.ground.position,edgeDrop)<<'\n';
+            failures+=!(a.state.returnArrived&&distance(a.ground.position,edgeDrop)<.002);
+            tick(2);check(!a.state.returnRequested&&!a.state.returningHome&&a.journey.home&&distance(*a.journey.home,edgeDrop)<1e-5&&distance(a.ground.position,edgeDrop)<.002,"Completed edge returns settle at the recorded home and release the return state");
+        }
+        inputIdle=0;a.selectMode(false);const auto dockingDrop=drop(middle,true);a.state.random.seed(17);wander(dockingDrop);
+        // Reproduce an in-progress placement correction through the same host
+        // API used after a resting envelope changes, before input resumes.
+        a.behavior->halt();a.behavior->tick(0);check(a.state.current==a.cafeIdle,"Placement correction starts from cafe idle");
+        const auto beforeDock=a.ground.screen(a.ground.position);check(a.beginDirected(a.ground.floorAt({beforeDock.x-10,beforeDock.y-10}),false),"Start the real placement-correction path");
+        pointer({a.ground.width*.6f,a.ground.height+20.f});inputIdle=0;tick(1);for(int i=0;i<5000&&!a.state.returnArrived;++i)tick(1);
+        std::cout<<"Docking return: arrived="<<a.state.returnArrived<<" home error="<<distance(a.ground.position,dockingDrop)<<'\n';failures+=!(a.state.returnArrived&&distance(a.ground.position,dockingDrop)<.002);
+        check(failures==0,"Mouse activity must finish returning to the manual drop, including screen edges and idle docking");
         a.idleInputSeconds=[] {return 0.0;};a.preferences.follow=true;a.preferences.wandering=false;a.preferences.cafeTracking=true;a.applyPreferences();
         std::cout<<"Manual drop, interrupted wandering, replacement drop and input-triggered return passed.\n";
     }
+    if(returnOnly){std::cout<<"Native wandering return lifecycle passed.\n";return 0;}
     // Repeat a central drag into a stationary peer's collision envelope.
     const auto peerFile=profile/L"Peer.glb";std::filesystem::copy_file(a.model,peerFile);const auto peerId=SceneRoster::key(peerFile);
     scene.roster.remember({peerId,utf8(peerFile.wstring()),"Peer","cafe",false});scene.activate(peerId);tick(2);
