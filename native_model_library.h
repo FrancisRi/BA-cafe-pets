@@ -48,7 +48,7 @@ struct NativeModelLibrary {
         std::sort(result.begin(),result.end());return result;
     }
     bool recycle(const Path& file,HWND owner=nullptr) const {
-        if(!owns(file))throw std::runtime_error("只能删除本地模型库中的模型副本，原始文件和程序自带模型保留");
+        if(!owns(file))throw std::runtime_error("只能删除本地模型库中的模型副本，外部原始文件保留");
         if(!std::filesystem::exists(file))return false;
         auto source=std::filesystem::absolute(file).lexically_normal().wstring();source.push_back(L'\0');
         SHFILEOPSTRUCTW operation{};operation.hwnd=owner;operation.wFunc=FO_DELETE;operation.pFrom=source.c_str();

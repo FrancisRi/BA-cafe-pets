@@ -58,6 +58,7 @@ Git 的新增行和提交作者记录用于追溯，不单独证明某行的版�
 - `tests/native_ui_tests.cpp`
 - `tests/tray_background_regressions.py`
 - `tests/tray_integration.py`
+- `tests/storage_startup_regressions.py`
 - `tools/generate_app_icon.py`
 - `native.manifest`
 

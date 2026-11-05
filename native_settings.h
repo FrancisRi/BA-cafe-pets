@@ -179,7 +179,7 @@ struct NativeSettings {
             const int emptyY=y+(rosterHeight-58)/2;listEmpty=control(panel,L"STATIC",L"尚未导入模型\n点击右上角「导入模型」添加角色",SS_CENTER,0,16,emptyY,panelWidth(),58);placeContent(listEmpty,16,emptyY,0,58,true);y+=rosterHeight+16;
             int x=16;for(auto [id,text]:{std::pair{2100,L"显示角色"},{2101,L"设为当前"},{2102,L"删除模型"}}){auto h=control(panel,L"BUTTON",text,BS_OWNERDRAW,id,x,y,132,36);placeContent(h,x,y,132,36);x+=144;}y+=50;
             section(L"显示管理");for(auto [id,text]:{std::pair{2103,L"统一角色大小"},{2104,L"隐藏当前角色"}}){const int pos=id==2103?16:190;auto h=control(panel,L"BUTTON",text,BS_OWNERDRAW,id,pos,y,162,36);placeContent(h,pos,y,162,36);}y+=52;
-            note(L"删除会将本地副本移入回收站并移除记录。自带模型保留；隐藏或删除全部角色后，程序仍在托盘运行。",40);
+            note(L"白子与其他本地模型均可删除，文件移入回收站并移除记录；隐藏或删除全部角色后，程序仍在托盘运行。",40);
         }else{
             note(page==0?L"显示与行为参数由所有角色共享，动作模式只应用于当前角色。":page==1?L"日常陪伴、视线与转向。位置跟随距离可在全局设置中调整。":L"保留按键攻击、换弹、EX、点击指挥与走动的原有规则。");
             for(size_t ordinal=0;ordinal<std::size(fields);++ordinal){
@@ -329,7 +329,7 @@ struct NativeSettings {
         if(row.value("loading",false))return;
         const bool managed=row.value("managed",false);
         auto text=L"“"+wide(row.value("name",std::string{}))+L"”\n\n";
-        text+=managed?L"将本地模型副本移入回收站，并从模型库中移除？原始下载文件保留。":L"从列表中移除该模型？程序自带模型和外部原始文件将保留。";
+        text+=managed?L"将本地模型副本移入回收站，并从模型库中移除？原始下载文件保留。":L"从列表中移除该模型？外部原始文件将保留。";
         if(row.value("active",false)&&last.value("activeCount",0)==1)text+=L"\n\n删除后程序继续在任务栏托盘运行，可重新导入或显示其他模型。";
         if(nativeMessageBox(window,text.c_str(),managed?L"删除模型":L"移除模型记录",MB_YESNO|MB_ICONWARNING|MB_DEFBUTTON2)==IDYES&&receive)receive({{"type","model_delete"},{"id",row.at("id")}});
     }

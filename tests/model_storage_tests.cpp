@@ -88,6 +88,39 @@ int main(int argc,char** argv){
         writeModel(freshSeed,"white");writeModel(freshProgram/L"models/Shiroko.glb","white");
         NativeModelStorage fresh(freshProgram,freshData,false);SceneRoster empty;
         fresh.unify(empty,freshSeed,fresh.current);check(empty.entries.empty(),"An old bundled backup must not make first startup look like an all-hidden user roster");
-        std::cout<<"Model storage checks passed: defaults, configuration, recovery, unified runtime copies, aliases, relocation, state preservation, restart, rollback, collisions and deletion safety.\n";return 0;
+        // A portable user may remove an unused bundled GLB from model/.
+        // Its absence must not make every startup fail for intact user models.
+        const auto missingProgram=root/L"missing-seed-app",missingData=root/L"missing-seed-data",missingSeed=missingProgram/L"models/Shiroko.glb";
+        const auto local=(missingProgram/L"model/User.glb").lexically_normal();writeModel(local,"user model remains");
+        NativeModelStorage withoutSeed(missingProgram,missingData,false);SceneRoster available;
+        available.remember({SceneRoster::key(local),NativeModelStorage::utf8(local.wstring()),"User","formation",true,1.24f});available.selected=SceneRoster::key(local);
+        const auto original=available.json();
+        withoutSeed.unify(available,missingSeed,withoutSeed.current);
+        check(available.json()==original&&fs::is_regular_file(local),"A missing optional bundled resource must not block startup of existing user models");
+        NativeModelStorage missingRestart(missingProgram,missingData,false);missingRestart.unify(available,missingSeed,missingRestart.current);
+        check(available.json()==original,"A missing seed remains harmless across subsequent restarts");
+        // Match an installed portable profile whose bundled identity remains
+        // configured after its physical Shiroko.glb has been removed.
+        const auto removedSeed=missingProgram/L"model/Shiroko.glb";
+        writeModel(removedSeed,"optional seed");missingRestart.unify(available,removedSeed,missingRestart.current);
+        fs::remove(removedSeed);NativeModelStorage removedRestart(missingProgram,missingData,false);
+        removedRestart.unify(available,missingSeed,removedRestart.current);check(available.json()==original,"A configured but deleted seed does not produce a recurring startup failure");
+        const auto migratedFolder=root/L"missing-seed-custom";
+        removedRestart.unify(available,missingSeed,migratedFolder);
+        check(fs::is_regular_file(fs::path(NativeModelStorage::wide(available.find(available.selected)->path)))&&available.find(available.selected)->mode=="formation","User models can move to a custom folder while the optional seed is absent");
+        writeModel(removedSeed,"restored seed");removedRestart.unify(available,removedSeed,migratedFolder);
+        check(fs::is_regular_file(removedRestart.bundledModel),"A restored seed is copied normally on the next unification");
+        fs::remove(removedSeed);removedRestart.unify(available,missingSeed,root/L"seed-fallback-custom");
+        check(fs::is_regular_file(removedRestart.bundledModel),"An existing configured seed supplies migration when the original package copy is missing");
+        const auto removableApp=root/L"removable-app",removableData=root/L"removable-data",immutableSeed=root/L"launcher-cache/model/Shiroko.glb";
+        writeModel(immutableSeed,"launcher white");NativeModelStorage removable(removableApp,removableData,false);SceneRoster kept;
+        removable.unify(kept,immutableSeed,removable.current);const auto deletedSeed=removable.bundledModel;
+        fs::remove(deletedSeed);removable.unify(kept,immutableSeed,removable.current);
+        check(removable.bundledRemoved&&!fs::exists(deletedSeed),"A deleted white model is not recreated from the immutable launcher cache");
+        NativeModelStorage removedWhite(removableApp,removableData,false);removedWhite.unify(kept,immutableSeed,root/L"removed-white-custom");
+        check(removedWhite.bundledRemoved&&!fs::exists(removedWhite.current/L"Shiroko.glb")&&fs::is_regular_file(immutableSeed),"Removal survives restart and changing the model folder without changing cached resources");
+        writeModel(deletedSeed,"explicitly restored white");removedWhite.unify(kept,immutableSeed,removedWhite.current);
+        check(!removedWhite.bundledRemoved&&fs::is_regular_file(removedWhite.bundledModel),"Explicitly restoring the local white model enables normal management again");
+        std::cout<<"Model storage checks passed: defaults, configuration, recovery, unified runtime copies, aliases, relocation, state preservation, restart, rollback, collisions, deletion safety and missing seed.\n";return 0;
     }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

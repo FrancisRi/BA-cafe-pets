@@ -1,4 +1,4 @@
-BA Cafe Pets 1.1.13 · Windows x64
+BA Cafe Pets 1.1.14 · Windows x64
 
 基于 maxiumlee（Max）的 ba-cafe-lite 继续开发。
 原作者：https://github.com/maxiumlee/ba-cafe-lite
@@ -8,7 +8,7 @@ BA Cafe Pets 1.1.13 · Windows x64
 便携版请退出旧程序后解压到原目录，运行 BA-Cafe-Pets.exe；旧 ba_cafe_lite.exe 不自动删除，请勿再启动。
 
 启动
-  单文件版双击 BA-Cafe-Pets-1.1.13-x64.exe；便携版解压后运行 BA-Cafe-Pets.exe。
+  单文件版双击 BA-Cafe-Pets-1.1.14-x64.exe；便携版解压后运行 BA-Cafe-Pets.exe。
   默认角色 Shiroko。
   不需要 Blender、浏览器、WebView2、Python 或开发环境。
   便携 ZIP 请完整解压，保留 model、defaults.ini、behavior 和 licenses。
@@ -87,3 +87,7 @@ BA Cafe Pets 1.1.13 · Windows x64
   源码与构建脚本：https://github.com/FrancisRi/BA-cafe-pets （使用对应发行的完整提交或源码归档）。
   完整来源说明见 CREDITS.md、NOTICE.md 和 licenses\NOTICE.txt。
   角色、模型及贴图权利属于各自权利人。
+
+  缺失未使用的自带白子文件不再使模型目录统一失败；程序优先复用已配置的副本，其余完整模型仍可启动及迁移。
+
+  白子可像其他本地模型一样删除，重启和更改目录不会从缓存自动恢复；删除最后一个模型后仍在托盘运行，可继续添加模型。

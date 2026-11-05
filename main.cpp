@@ -96,7 +96,6 @@ struct App {
         return std::filesystem::is_regular_file(file)?file:directory/L"models/Shiroko.glb";
     }
     std::optional<NativeModelLibrary> managedLibrary(const std::filesystem::path& file) const {
-        if(modelStorageSettings->bundled(file,bundledResource()))return {};
         for(const auto& folder:modelStorageSettings->directories()){NativeModelLibrary library(folder);if(library.owns(file))return library;}return {};
     }
     void openModelsFolder(){
@@ -1023,7 +1022,9 @@ struct App {
         if(leader&&!motionTimer)SetTimer(window,1,10,nullptr);
         std::printf("HOST motion timer: %s; clock=steady\n",motionTimer?"high resolution 125 Hz":"Win32 fallback");std::fflush(stdout);
         if(leader){quitHotkey=RegisterHotKey(window,1,MOD_CONTROL|MOD_ALT|MOD_SHIFT|MOD_NOREPEAT,'Q');lookHotkey=RegisterHotKey(window,2,MOD_CONTROL|MOD_ALT|MOD_SHIFT|MOD_NOREPEAT,'L');}
-        renderer=std::make_unique<nativepet::NativeRenderer>();renderer->diagnostics=diagnostics;requestModel(model);
+        renderer=std::make_unique<nativepet::NativeRenderer>();renderer->diagnostics=diagnostics;
+        if(displayed||std::filesystem::is_regular_file(model))requestModel(model);
+        else {settings->importBusy=false;settings->progressDetail.clear();}
     }
     int run(){
         initialize();

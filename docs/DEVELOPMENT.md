@@ -121,10 +121,10 @@ cmake --build build --target ba_cafe_lite_model_unification_tests
 打包后可用 Windows 桌面验证单文件启动器的旧记录恢复。脚本将 EXE、模型与数据复制到独立测试目录，不改动实际用户资料：
 
 ```powershell
-python tests/launcher_storage_compatibility.py ./dist/BA-Cafe-Pets-1.1.13-x64.exe
-python tests/tray_integration.py ./dist/BA-Cafe-Pets-1.1.13-portable-x64.zip
-python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.13-portable-x64.zip
-python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.13-x64.exe
+python tests/launcher_storage_compatibility.py ./dist/BA-Cafe-Pets-1.1.14-x64.exe
+python tests/tray_integration.py ./dist/BA-Cafe-Pets-1.1.14-portable-x64.zip
+python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.14-portable-x64.zip
+python tests/tray_background_regressions.py ./dist/BA-Cafe-Pets-1.1.14-x64.exe
 ```
 
 界面回归检查使用隔离 Windows 桌面，不把模拟模型写入实际用户数据。测试还比较滚动后的实际窗口像素与完整重绘结果，并核对滑块普通绘制和合成绘制一致；覆盖浅色／深色主题及 100%／150%／200% DPI，同时验证滑块拖动和键盘操作。
@@ -177,3 +177,7 @@ pwsh -File ./package.ps1 -SkipBuild -BinaryDirectory ./build/bin/Release -CoreEx
 观赏模式通过 `NativePreferences::inspectionMode` 保存共享开关，运行时覆盖行为而不改写原选项。`App::updateInspection` 处理进入／退出，清除暂停的移动与手势，退出恢复进入时 yaw；`tickInspection` 复用原模式动画触发，跳过位置、朝向和三击切换逻辑。右键更新 yaw 和独立 pitch，渲染缓存同时跟踪 pitch／pivot；`ModelView` 围绕角色中心翻转，渲染与放置使用同一矩阵，并为完整旋转预留画面。
 
 原生交互测试覆盖各可用主模式的观赏开关、长时间闲置／恢复输入、旋转与动画连续性、点击和 Exs、三击屏蔽、提放和退出复原；GPU 输出覆盖正向、两个侧翻及倒置角度。UI 测试覆盖完整界面和快捷菜单的共享开关、禁用控件与原值恢复，设置测试覆盖旧配置默认关闭和持久化。
+
+模型库统一将自带资源视为可选输入：原资源存在时正常复制，原资源缺失而已配置的白子副本存在时复用该副本，两者均缺失时继续处理完整的用户模型。缺失白子记录保持不可用，真实损坏／写入／保存错误继续按原逻辑失败并回滚。`ba_cafe_lite_model_storage_tests` 覆盖缺失、持久化重启、迁移与资源恢复；`python tests/storage_startup_regressions.py dist/BA-Cafe-Pets-1.1.14-portable-x64.zip` 在隔离便携包移除白子，用真实启动和托盘消息检查菜单状态及重启，`--expect-error` 用于复现旧包，`--core` 可替换测试核心。
+
+白子删除策略：本地库的白子按普通 GLB 回收；统一目录检测已配置副本缺失后保存 bundledRemoved，避免单文件版资源缓存将其自动还原。删除全部模型的后台启动不再加载缺失的默认资源，仍能打开托盘及添加模型。storage_startup_regressions.py 的 --empty 覆盖空库重启与新增模型；tray_integration.py 覆盖实际删除白子和持久空库。

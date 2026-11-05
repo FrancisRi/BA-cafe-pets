@@ -204,6 +204,7 @@ struct Scene {
         frameTimer=CreateWaitableTimerExW(nullptr,nullptr,CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,TIMER_ALL_ACCESS);
         if(!frameTimer)frameTimer=CreateWaitableTimerW(nullptr,FALSE,nullptr);
         frameClock.reset(preciseSeconds());armFrame();
+        if(leader().settingsOnLoad&&!leader().pendingImport){leader().settingsOnLoad=false;leader().showSettings();}
     }
     void activate(const std::string& id){
         auto* e=roster.find(id);if(!e)return;
@@ -278,7 +279,7 @@ struct Scene {
                 ShowWindow(actor->window,SW_HIDE);ShowWindow(actor->inputWindow,SW_HIDE);
             }else mapped.push_back(actor->actorId);
         }
-        error.clear();importNotice="全部模型已统一保存到所选目录（含白子），原文件保留。";refreshModels();save();sync();
+        error.clear();importNotice="现有模型已统一保存到所选目录，原文件保留。";refreshModels();save();sync();
     }
     void message(const Json& j){
         const auto type=j.value("type",std::string{});
