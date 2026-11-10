@@ -21,7 +21,9 @@ class NativeRenderer {
         std::filesystem::path output;std::array<double,23> key{};
     } pending;
     void statistics(double);
-    int factorLocation=-1,alphaLocation=-1,cutoffLocation=-1,hullWidthLocation=-1,texelLocation=-1,radiusLocation=-1,contourSampleLocation=-1;
+    struct SurfaceUniforms {int factor,alphaMode,cutoff;};
+    SurfaceUniforms unlitUniforms{},hullUniforms{};
+    int hullWidthLocation=-1,texelLocation=-1,radiusLocation=-1,contourSampleLocation=-1;
     std::vector<RECT> region;
     void resize(int,int,int);void drawHint(const Json&);
 public:

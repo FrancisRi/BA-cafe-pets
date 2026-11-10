@@ -27,30 +27,64 @@ in vec3 vertexPosition;in vec2 vertexTexCoord;in vec3 vertexNormal;in vec4 verte
 uniform mat4 mvp;out vec2 uv;out vec4 color;
 void main(){uv=vertexTexCoord;color=vertexColor;gl_Position=mvp*vec4(vertexPosition,1.0);}
 )";
-static constexpr const char* fragment=R"(#version 330
+static constexpr const char* surfaceFragment=R"(
 in vec2 uv;in vec4 color;uniform sampler2D texture0;uniform vec4 factor;uniform int alphaMode;uniform float cutoff;out vec4 finalColor;
+#ifdef TINT_OUTLINE
+uniform float colorScale;
+#endif
 vec3 linearize(vec3 v){return mix(v/12.92,pow((v+0.055)/1.055,vec3(2.4)),step(vec3(0.04045),v));}
 vec3 srgb(vec3 v){return mix(v*12.92,1.055*pow(max(v,vec3(0)),vec3(1.0/2.4))-0.055,step(vec3(0.0031308),v));}
 void main(){vec4 t=texture(texture0,uv);float a=t.a*factor.a*color.a;if(alphaMode==1&&a<cutoff)discard;
- finalColor=vec4(srgb(linearize(t.rgb)*factor.rgb*color.rgb),alphaMode==2?a:1.0);}
+ finalColor=vec4(srgb(linearize(t.rgb)*factor.rgb*color.rgb),alphaMode==2?a:1.0);
+#ifdef TINT_OUTLINE
+ finalColor.rgb*=colorScale;
+#endif
+}
 )";
 static constexpr const char* hullVertex=R"(#version 330
-in vec3 vertexPosition;in vec3 vertexNormal;uniform mat4 matModel;uniform mat4 matView;uniform mat4 matProjection;uniform float outlineWidth;
-void main(){vec4 p=matView*matModel*vec4(vertexPosition,1);vec3 n=normalize(mat3(matView*matModel)*vertexNormal);
+in vec3 vertexPosition;in vec3 vertexNormal;in vec2 vertexTexCoord;in vec4 vertexColor;
+uniform mat4 matModel;uniform mat4 matView;uniform mat4 matProjection;uniform float outlineWidth;
+out vec2 uv;out vec4 color;
+void main(){uv=vertexTexCoord;color=vertexColor;vec4 p=matView*matModel*vec4(vertexPosition,1);vec3 n=normalize(mat3(matView*matModel)*vertexNormal);
  p.xyz+=n*outlineWidth*max(-p.z,0.05);gl_Position=matProjection*p;}
 )";
-static constexpr const char* hullFragment=R"(#version 330
-out vec4 finalColor;void main(){finalColor=vec4(0,0,0,1);}
-)";
 static constexpr const char* contourFragment=R"(#version 330
-in vec2 fragTexCoord;in vec4 fragColor;uniform sampler2D texture0;uniform vec2 texel;uniform vec2 sampleStep;uniform float radius;out vec4 finalColor;
-vec4 outlined(vec2 uv){vec4 c=texture(texture0,uv);float a=c.a;for(int i=0;i<16;i++){float angle=float(i)*6.2831853/16.0;vec2 d=vec2(cos(angle),sin(angle))*texel*radius;a=max(a,texture(texture0,uv+d).a);}return vec4(c.rgb,c.a+(1.0-c.a)*a);}
+in vec2 fragTexCoord;uniform sampler2D texture0;uniform vec2 texel;uniform vec2 sampleStep;uniform float radius;uniform float colorScale;out vec4 finalColor;
+vec4 outlined(vec2 uv){
+ vec4 surface=texture(texture0,uv);
+ if(surface.a>=1.0)return surface;
+ float coverage=surface.a;
+ vec4 neighbors=surface*surface.a;
+ for(int i=0;i<16;i++){
+  float angle=float(i)*6.2831853/16.0;
+  vec4 neighbor=texture(texture0,uv+vec2(cos(angle),sin(angle))*texel*radius);
+  coverage=max(coverage,neighbor.a);
+  neighbors+=neighbor*neighbor.a;
+ }
+ if(neighbors.a<=0.0)return surface;
+ float edgeAlpha=(1.0-surface.a)*coverage;
+ // The model buffer stores premultiplied RGB. Normalize the neighbor
+ // color before tinting, then composite the new edge behind the surface.
+ vec3 edgeColor=neighbors.rgb/neighbors.a*colorScale;
+ return surface+vec4(edgeColor*edgeAlpha,edgeAlpha);
+}
 void main(){if(sampleStep.x<=0.0){finalColor=outlined(fragTexCoord);return;}finalColor=(outlined(fragTexCoord+sampleStep*vec2(-1,-1))+outlined(fragTexCoord+sampleStep*vec2(1,-1))+outlined(fragTexCoord+sampleStep*vec2(-1,1))+outlined(fragTexCoord+sampleStep*vec2(1,1)))*0.25;}
 )";
 NativeRenderer::NativeRenderer(){
- unlit=LoadShaderFromMemory(vertex,fragment);hull=LoadShaderFromMemory(hullVertex,hullFragment);contour=LoadShaderFromMemory(nullptr,contourFragment);
+ const auto unlitFragment=std::string("#version 330\n")+surfaceFragment;
+ const auto hullFragment=std::string("#version 330\n#define TINT_OUTLINE\n")+surfaceFragment;
+ unlit=LoadShaderFromMemory(vertex,unlitFragment.c_str());
+ hull=LoadShaderFromMemory(hullVertex,hullFragment.c_str());
+ contour=LoadShaderFromMemory(nullptr,contourFragment);
  if(unlit.id==rlGetShaderIdDefault()||hull.id==rlGetShaderIdDefault()||contour.id==rlGetShaderIdDefault())throw std::runtime_error("Native shader compilation failed");
- factorLocation=GetShaderLocation(unlit,"factor");alphaLocation=GetShaderLocation(unlit,"alphaMode");cutoffLocation=GetShaderLocation(unlit,"cutoff");hullWidthLocation=GetShaderLocation(hull,"outlineWidth");texelLocation=GetShaderLocation(contour,"texel");radiusLocation=GetShaderLocation(contour,"radius");
+ const auto surfaceUniforms=[](Shader shader){
+  return SurfaceUniforms{GetShaderLocation(shader,"factor"),GetShaderLocation(shader,"alphaMode"),GetShaderLocation(shader,"cutoff")};
+ };
+ unlitUniforms=surfaceUniforms(unlit);hullUniforms=surfaceUniforms(hull);
+ constexpr float outlineColor=0.76f;
+ SetShaderValue(hull,GetShaderLocation(hull,"colorScale"),&outlineColor,SHADER_UNIFORM_FLOAT);
+ SetShaderValue(contour,GetShaderLocation(contour,"colorScale"),&outlineColor,SHADER_UNIFORM_FLOAT);
+ hullWidthLocation=GetShaderLocation(hull,"outlineWidth");texelLocation=GetShaderLocation(contour,"texel");radiusLocation=GetShaderLocation(contour,"radius");
  contourSampleLocation=GetShaderLocation(contour,"sampleStep");
  memory=CreateCompatibleDC(nullptr);if(!memory)throw std::runtime_error("Cannot create native surface DC");
  hintFont=CreateFontW(-13,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,ANTIALIASED_QUALITY,0,L"Microsoft YaHei UI");
@@ -127,14 +161,26 @@ void NativeRenderer::render(HWND display,HWND input,bool screenshot,const std::f
  NativeHealth::mark("GPU draw");const int mode=s.value("outlineMode",2);const float line=s.value("outlineWidth",100.0f);BeginTextureMode(target);antialias.begin();ClearBackground(BLANK);BeginMode3D(camera);rlSetMatrixProjection(projection);
  rlSetBlendFactorsSeparate(0x0302,0x0303,1,0x0303,0x8006,0x8006);BeginBlendMode(BLEND_CUSTOM_SEPARATE);
  const float outline=0.002f*std::tan(camera.fovy*DEG2RAD*0.5f)/std::tan(35*DEG2RAD*0.5f)*480/desktop[1].get<float>()*line/100;
+ const auto drawPart=[&](const auto& part,Shader shader,const SurfaceUniforms& uniforms){
+  auto material=part->material;material.shader=shader;
+  const int alpha=part->transparent?2:part->alphaCutoff>=0?1:0;
+  SetShaderValue(shader,uniforms.factor,part->factor.data(),SHADER_UNIFORM_VEC4);
+  SetShaderValue(shader,uniforms.alphaMode,&alpha,SHADER_UNIFORM_INT);
+  SetShaderValue(shader,uniforms.cutoff,&part->alphaCutoff,SHADER_UNIFORM_FLOAT);
+  DrawMesh(part->mesh,material,pose);
+ };
  if(mode==2){SetShaderValue(hull,hullWidthLocation,&outline,SHADER_UNIFORM_FLOAT);rlEnableBackfaceCulling();rlSetCullFace(RL_CULL_FACE_FRONT);
   // A hidden Morph still has its original normals: inflating its collapsed
-  // vertices would resurrect it as a black line, especially with mixed bones.
-  for(const auto& part:model->parts){if(part->poseHidden||part->transparent||part->outlineCollapsed)continue;auto material=part->material;material.shader=hull;DrawMesh(part->mesh,material,pose);}rlSetCullFace(RL_CULL_FACE_BACK);
+  // vertices would resurrect its outline, especially with mixed bones.
+  for(const auto& part:model->parts){
+   if(part->poseHidden||part->transparent||part->outlineCollapsed)continue;
+   drawPart(part,hull,hullUniforms);
+  }
+  rlSetCullFace(RL_CULL_FACE_BACK);
  }
- auto draw=[&](const auto& part){if(part->poseHidden)return;auto material=part->material;material.shader=unlit;const int alpha=part->transparent?2:part->alphaCutoff>=0?1:0;
-  SetShaderValue(unlit,factorLocation,part->factor.data(),SHADER_UNIFORM_VEC4);SetShaderValue(unlit,alphaLocation,&alpha,SHADER_UNIFORM_INT);SetShaderValue(unlit,cutoffLocation,&part->alphaCutoff,SHADER_UNIFORM_FLOAT);
-  if(part->doubleSided)rlDisableBackfaceCulling();else rlEnableBackfaceCulling();DrawMesh(part->mesh,material,pose);
+ auto draw=[&](const auto& part){if(part->poseHidden)return;
+  if(part->doubleSided)rlDisableBackfaceCulling();else rlEnableBackfaceCulling();
+  drawPart(part,unlit,unlitUniforms);
  };
  for(const auto& part:model->parts)if(!part->transparent)draw(part);rlDisableDepthMask();for(const auto& part:model->parts)if(part->transparent)draw(part);rlEnableDepthMask();rlEnableBackfaceCulling();EndBlendMode();EndMode3D();antialias.resolve(target.id);EndTextureMode();
  BeginTextureMode(resolved);ClearBackground(BLANK);rlSetBlendFactors(1,0,0x8006);BeginBlendMode(BLEND_CUSTOM);

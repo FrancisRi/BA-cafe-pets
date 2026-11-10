@@ -1,4 +1,4 @@
-BA Cafe Pets 1.1.14 · Windows x64
+BA Cafe Pets 1.1.15 · Windows x64
 
 基于 maxiumlee（Max）的 ba-cafe-lite 继续开发。
 原作者：https://github.com/maxiumlee/ba-cafe-lite
@@ -8,7 +8,7 @@ BA Cafe Pets 1.1.14 · Windows x64
 便携版请退出旧程序后解压到原目录，运行 BA-Cafe-Pets.exe；旧 ba_cafe_lite.exe 不自动删除，请勿再启动。
 
 启动
-  单文件版双击 BA-Cafe-Pets-1.1.14-x64.exe；便携版解压后运行 BA-Cafe-Pets.exe。
+  单文件版双击 BA-Cafe-Pets-1.1.15-x64.exe；便携版解压后运行 BA-Cafe-Pets.exe。
   默认角色 Shiroko。
   不需要 Blender、浏览器、WebView2、Python 或开发环境。
   便携 ZIP 请完整解压，保留 model、defaults.ini、behavior 和 licenses。
@@ -44,7 +44,7 @@ BA Cafe Pets 1.1.14 · Windows x64
 画面质量
   全局设置 → 画质与抗锯齿：均衡／清晰档增强抗锯齿，省电档保留轻量渲染。
   清晰档结合 2× 超采样与最高 4× MSAA，均衡档尝试 2× MSAA。
-  两种描边模式均平滑边缘，显卡限制或采样缓冲预算不足时自动降低采样。
+  两种描边模式均使用略深的邻色。显卡限制或采样缓冲预算不足时自动降低采样。
   选项下方显示当前角色实际生效的超采样、MSAA 和自动降级状态，切换后随实际绘制更新。
   线条粗细右侧数字可点击输入 10–300%；Enter 或失焦保存，Esc 取消，滑块与数字同步。
 
