@@ -25,16 +25,18 @@ CMake 会下载并校验固定版本的 raylib 6.0 与 BehaviorTree.CPP 4.8.0。
 
 ### Rust 移动逻辑试验
 
-将 x64 MinGW、Ninja 和 Rust 1.85 或更新版加入 PATH，并安装 Rust 的 `x86_64-pc-windows-gnu` 目标。在独立构建目录开启试验后，应用和避让回归测试都会调用 Rust 的避让及重叠分离逻辑，屏幕边界判定由现有 C++ 代码提供。
+将 x64 MinGW、Ninja 和 Rust 1.85 或更新版加入 PATH，并安装 Rust 的 `x86_64-pc-windows-gnu` 目标。在独立构建目录开启试验后，应用使用 Rust 计算角色避让、定向行走、跟随、跳跃和停步，屏幕投影及边界判定由 C++ 提供。
 
 ```powershell
 rustup target add x86_64-pc-windows-gnu
 cmake -S . -B build-rust-movement -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DBA_RUST_CROWD_STEERING=ON -DBA_NATIVE_EXECUTABLE_NAME=BA-Cafe-Pets-RustMovement
-cmake --build build-rust-movement --target ba_cafe_lite_crowd_tests ba_cafe_lite_native
+cmake --build build-rust-movement --target ba_cafe_lite_crowd_tests ba_cafe_lite_movement_tests ba_cafe_lite_follow_tests ba_cafe_lite_native
 ./build-rust-movement/ba_cafe_lite_crowd_tests.exe
+./build-rust-movement/ba_cafe_lite_movement_tests.exe
+./build-rust-movement/ba_cafe_lite_follow_tests.exe (Join-Path $PWD ('artifacts/follow-' + [guid]::NewGuid().ToString('N') + '.ini'))
 ```
 
-默认构建使用 C++ 实现，可用相同的测试目标对照两种实现。`BA_RUSTC` 可指定未加入 PATH 的 Rust 编译器路径。
+默认构建使用 C++ 实现，可用相同的测试目标对照两种实现。`ba_cafe_lite_movement_tests.exe --trace` 可输出每步位置、朝向及移动状态，便于逐步比较。`BA_RUSTC` 可指定未加入 PATH 的 Rust 编译器路径。
 
 ## 代码入口
 
