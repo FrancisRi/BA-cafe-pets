@@ -23,6 +23,19 @@ CMake 会下载并校验固定版本的 raylib 6.0 与 BehaviorTree.CPP 4.8.0。
 
 本分支从 **1.0.0** 开始独立编号，不沿用原作者版本号。`0.2.15` 仅表示源码来源基线。默认源码构建、便携版与单文件版内部程序名统一为 `BA-Cafe-Pets.exe`；CMake 目标标识和持久数据目录保留，以维持构建与数据兼容。对外发行文件使用 `BA-Cafe-Pets-版本号` 命名。
 
+### Rust 移动逻辑试验
+
+将 x64 MinGW、Ninja 和 Rust 1.85 或更新版加入 PATH，并安装 Rust 的 `x86_64-pc-windows-gnu` 目标。在独立构建目录开启试验后，应用和避让回归测试都会调用 Rust 的避让及重叠分离逻辑，屏幕边界判定由现有 C++ 代码提供。
+
+```powershell
+rustup target add x86_64-pc-windows-gnu
+cmake -S . -B build-rust-movement -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DBA_RUST_CROWD_STEERING=ON -DBA_NATIVE_EXECUTABLE_NAME=BA-Cafe-Pets-RustMovement
+cmake --build build-rust-movement --target ba_cafe_lite_crowd_tests ba_cafe_lite_native
+./build-rust-movement/ba_cafe_lite_crowd_tests.exe
+```
+
+默认构建使用 C++ 实现，可用相同的测试目标对照两种实现。`BA_RUSTC` 可指定未加入 PATH 的 Rust 编译器路径。
+
 ## 代码入口
 
 | 文件 | 职责 |

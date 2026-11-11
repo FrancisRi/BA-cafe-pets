@@ -12,6 +12,15 @@ struct CrowdBody {
     bool jumping=false;Vector2 landing{};
     bool movable=false;
 };
+#ifdef BA_RUST_CROWD_STEERING
+struct CrowdSteering;
+extern "C" {
+    using CrowdAllowed = bool(void*, float, double);
+    MovementChoice ba_rust_crowd_step(CrowdSteering*, const CrowdBody*, const CrowdBody*, size_t,
+                                     float, double, double, CrowdAllowed*, void*);
+    Vector2 ba_rust_crowd_separation(const CrowdBody*, const CrowdBody*, size_t, double);
+}
+#endif
 // Fixed-size local steering, not pathfinding. The scene supplies one coherent
 // snapshot; stationary bodies never move because another actor approaches.
 struct CrowdSteering {
@@ -23,6 +32,19 @@ struct CrowdSteering {
     static float dot(Vector2 a,Vector2 b){return a.x*b.x+a.y*b.y;}
     static float norm(Vector2 a){return dot(a,a);}
     static Vector2 subtract(Vector2 a,Vector2 b){return {a.x-b.x,a.y-b.y};}
+#ifdef BA_RUST_CROWD_STEERING
+    static Vector2 separation(const CrowdBody& self,std::span<const CrowdBody> bodies,double dt){
+        return ba_rust_crowd_separation(&self,bodies.data(),bodies.size(),dt);
+    }
+    template<class Allowed>
+    MovementChoice step(const CrowdBody& self,std::span<const CrowdBody> bodies,float preferred,double travel,double dt,Allowed allowed){
+        // The desktop bounds check is synchronous and must not throw across the C ABI.
+        const auto check=[](void* context,float heading,double distance) noexcept {
+            return bool((*static_cast<Allowed*>(context))(heading,distance));
+        };
+        return ba_rust_crowd_step(this,&self,bodies.data(),bodies.size(),preferred,travel,dt,check,&allowed);
+    }
+#else
     static Vector2 separation(const CrowdBody& self,std::span<const CrowdBody> bodies,double dt){
         if(!self.movable||self.jumping||dt<=0)return {};
         Vector2 correction{};
@@ -146,4 +168,8 @@ struct CrowdSteering {
         if(returning&&std::abs(std::remainder(heading-preferred,360.0f))<0.1f&&scale>0.999){reset();return {preferred,1,false};}
         return {heading,scale,true};
     }
+#endif
 };
+#ifdef BA_RUST_CROWD_STEERING
+static_assert(sizeof(Vector2)==8 && sizeof(CrowdBody)==48 && sizeof(MovementChoice)==24 && sizeof(CrowdSteering)==64);
+#endif

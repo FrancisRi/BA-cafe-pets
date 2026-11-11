@@ -12,6 +12,19 @@ static double oldSegmentDistance(Vector3 a,Vector3 b,Vector3 p){const double x=b
     return std::hypot(p.x-a.x-x*t,p.z-a.z-z*t);}
 static constexpr double dt=0.008,speed=2;
 static auto freeSpace=[](float,double){return true;};
+static void noPeers(){
+    CrowdSteering steering;
+    steering.active=true;
+    const CrowdBody body{1,{0,0},{},.45f,false,{},true};
+    const auto denied=steering.step(body,{},90,speed*dt,dt,[](float,double){return false;});
+    check(std::isnan(denied.heading)&&denied.scale==0&&!denied.avoiding&&steering.active,
+          "A denied heading keeps the steering state even with no peers");
+    const auto direct=steering.step(body,{},90,speed*dt,dt,freeSpace);
+    check(direct.heading==90&&direct.scale==1&&!direct.avoiding&&!steering.active,
+          "No peers restores direct movement and resets the lane");
+    check(CrowdSteering::norm(CrowdSteering::separation(body,{},dt))==0,
+          "No peers require no separation");
+}
 static void recoverDesktopEnvelope(){
     PetGround ground;ground.measuredBounds=true;ground.position=ground.floorAt({100,600});
     const auto foot=ground.screen(ground.position);ground.bodyOffsets={-foot.x-1.5f,-100,100,20};
@@ -86,6 +99,7 @@ static void encounter(std::array<CrowdBody,2> bodies,std::array<Vector2,2> goals
     check(maxBrake<=0.055,"Ordinary passing must brake gradually");
 }
 int main(){try{
+    noPeers();
     recoverDesktopEnvelope();
     draggedNearPeer();
     encounter({CrowdBody{1,{0,-3},{0,2},0.45f},CrowdBody{2,{0,3},{0,-2},0.45f}},{Vector2{0,3},Vector2{0,-3}});
