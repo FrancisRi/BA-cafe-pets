@@ -1,9 +1,13 @@
 #pragma once
+#include "native_text.h"
+#include <behaviortree_cpp/contrib/json.hpp>
 #include <deque>
 #include <optional>
+#include <string_view>
 
 // Local text ingress. This window receives text only and never takes focus.
 struct NativeMessages {
+    using Json=nlohmann::json;
     struct Message {std::wstring title,body;};
     static constexpr wchar_t endpointClass[]=L"BaCafeNativeMessages.v1";
     static constexpr ULONG_PTR textMessage=0x42414D31;
@@ -64,13 +68,42 @@ struct NativeMessages {
         }
         return false;
     }
-    static bool codex(const std::wstring& event){
-        const auto json=Json::parse(utf8(event),nullptr,false);
-        if(!json.is_object()||!json.contains("type")||!json["type"].is_string())return false;
-        if(json["type"]!="agent-turn-complete")return true;
+    static bool codex(std::string_view event,const char* typeKey,std::string_view expected,const char* bodyKey){
+        const auto json=Json::parse(event,nullptr,false);
+        const auto type=json.find(typeKey);
+        if(type==json.end()||!type->is_string())return false;
+        if(type->get_ref<const std::string&>()!=expected)return true;
         std::wstring body;
-        if(json.contains("last-assistant-message")&&json["last-assistant-message"].is_string())
-            body=wide(json["last-assistant-message"].get<std::string>());
+        const auto content=json.find(bodyKey);
+        if(content!=json.end()&&content->is_string())body=wide(content->get_ref<const std::string&>());
         return send(L"Codex · 已完成",body);
+    }
+    static std::string hookInput(){
+        const HANDLE input=GetStdHandle(STD_INPUT_HANDLE);
+        const DWORD type=GetFileType(input);
+        if(type!=FILE_TYPE_PIPE&&type!=FILE_TYPE_DISK)return {};
+        constexpr size_t limit=1024*1024;
+        std::string event;
+        char chunk[4096];
+        DWORD count=0;
+        while(ReadFile(input,chunk,sizeof(chunk),&count,nullptr)&&count){
+            if(event.size()+count>limit)return {};
+            event.append(chunk,count);
+        }
+        return event;
+    }
+    static std::optional<int> command(int argc,wchar_t* const* argv){
+        if(argc<2)return {};
+        const std::wstring_view flag=argv[1];
+        if(flag==L"--codex-notify")
+            return argc==3&&codex(utf8(argv[2]),"type","agent-turn-complete","last-assistant-message")?0:1;
+        if(flag!=L"--codex-hook")return {};
+        if(argc!=2)return 1;
+        codex(hookInput(),"hook_event_name","Stop","last_assistant_message");
+        // This handler only displays a message. Stop expects a JSON response.
+        static constexpr char response[]="{}\n";
+        DWORD written=0;
+        WriteFile(GetStdHandle(STD_OUTPUT_HANDLE),response,sizeof(response)-1,&written,nullptr);
+        return 0;
     }
 };

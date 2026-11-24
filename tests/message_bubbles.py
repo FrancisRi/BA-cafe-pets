@@ -1,4 +1,4 @@
-"""Exercise the desktop bubble and both text senders on Windows."""
+"""Exercise the desktop bubble with both Codex event formats."""
 import ctypes
 from ctypes import wintypes
 import json
@@ -54,8 +54,9 @@ def wait_for(condition, limit=12):
     raise AssertionError("Timed out waiting for the message bubble")
 
 
-def run(binary):
+def run(binary, sender):
     binary = Path(binary).resolve(strict=True)
+    sender = Path(sender).resolve(strict=True)
     artifacts = Path(__file__).resolve().parents[1] / "artifacts"
     artifacts.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="ba-message-test-", dir=artifacts) as scratch:
@@ -70,11 +71,16 @@ def run(binary):
         pet = subprocess.Popen([binary, "--data-dir", data, "--diagnostics"], env=env)
         try:
             # A valid send confirms that the scene's endpoint is ready.
-            def send_text():
-                assert pet.poll() is None, "Desktop pet exited during startup"
-                return subprocess.run([binary, "--message", "第一条桌宠消息"], timeout=3).returncode == 0
+            first_event = json.dumps(
+                {"type": "agent-turn-complete", "last-assistant-message": "第一条 Codex 回复"},
+                ensure_ascii=False,
+            )
 
-            wait_for(send_text)
+            def send_completion():
+                assert pet.poll() is None, "Desktop pet exited during startup"
+                return subprocess.run([sender, "--codex-notify", first_event], timeout=3).returncode == 0
+
+            wait_for(send_completion)
             hwnd = wait_for(lambda: window(pet.pid, "BaCafeMessageBubble"))
             style = user.GetWindowLongPtrW(hwnd, -20)
             assert style & 0x08080020 == 0x08080020, "Bubble must be layered, click-through and non-activating"
@@ -85,13 +91,18 @@ def run(binary):
             assert first.right - first.left == expected_width, (first.right - first.left, expected_width)
             event = json.dumps(
                 {
-                    "type": "agent-turn-complete",
-                    "last-assistant-message": "第二条消息\n多行文本验证\n新一行",
+                    "hook_event_name": "Stop",
+                    "last_assistant_message": "第二条消息\n多行文本验证\n新一行",
+                    "transcript_path": "x" * 40_000,
                 },
                 ensure_ascii=False,
             )
-            subprocess.run([binary, "--codex-notify", event], timeout=3, check=True)
-            assert subprocess.run([binary, "--codex-notify", "invalid"], timeout=3).returncode != 0
+            reply = subprocess.run(
+                [sender, "--codex-hook"], input=event.encode("utf-8"),
+                capture_output=True, timeout=3, check=True,
+            )
+            assert json.loads(reply.stdout) == {}, "Codex Stop hook returns an empty decision"
+            assert subprocess.run([sender, "--codex-notify", "invalid"], timeout=3).returncode != 0
 
             def next_message():
                 rect = wintypes.RECT()
@@ -110,8 +121,8 @@ def run(binary):
             if pet.poll() is None:
                 pet.terminate()
                 pet.wait(timeout=5)
-    print("Local text and Codex completion reached the DPI-scaled click-through bubble.")
+    print("Codex notify and Stop hook reached the DPI-scaled click-through bubble.")
 
 
 if __name__ == "__main__":
-    run(sys.argv[1])
+    run(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else sys.argv[1])

@@ -6,7 +6,6 @@ struct Scene {
     std::unique_ptr<NativeTray> tray;
     NativeMessages messages;
     NativeMessageBubble bubble;
-    NativeWindowsNotifications windowsNotifications;
     FrameJobs cpuJobs;
     std::array<CrowdBody,SceneRoster::Maximum> crowdBodies{};size_t crowdCount=0;uint64_t crowdSerial=0;
     HANDLE frameTimer{};FrameDeadline frameClock;
@@ -46,7 +45,6 @@ struct Scene {
         if(const auto* e=roster.find(roster.selected);e&&e->active){const auto* a=find(e->id);if(!a){result["name"]=e->name;result["busy"]=true;result["percent"]=0;result["detail"]="等待加载模型";result["battleAvailable"]=false;result["value"]["mode"]=e->mode;}}
         if(!error.empty())result["error"]=error;
         result["notice"]=importNotice;
-        result["notificationStatus"]=windowsNotifications.status;
         bool capable=false;for(const auto& a:actors)capable|=a->displayed&&a->loaded&&!a->formationMode&&(a->cafeWalk>=0||(a->battle&&a->battle->clips.move>=0));
         result["canFollow"]=capable;return result;
     }
@@ -223,10 +221,7 @@ struct Scene {
             for(auto& a:actors){a->state.settingsOpen=paused;if(!paused){a->placementNeeded=true;a->interactionUntil=a->preferences.follow?0:preciseSeconds()+0.5;}}
         };
         if(!review){tray=std::make_unique<NativeTray>([this]{leader().nativeSettings->show(leader().window,leader().directory);},[this]{leader().nativeSettings->showQuick(leader().window,leader().directory,false);},[this]{message({{"type","exit"}});});tray->update(int(roster.activeCount()));if(!tray->available()&&background)leader().settingsOnLoad=true;}
-        if(!review){
-            messages.open();
-            windowsNotifications.status=windowsNotifications.packaged()?1:0;
-        }
+        if(!review)messages.open();
         // Load sequentially: allocating five GLBs simultaneously would stall the desktop.
         refreshModels();input.pollKeyboard=false;input.enable(roster.activeCount()>0);save();
         frameTimer=CreateWaitableTimerExW(nullptr,nullptr,CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,TIMER_ALL_ACCESS);
@@ -315,15 +310,8 @@ struct Scene {
         if(type!="import"&&type!="refresh_models")importNotice.clear();
         if(type=="exit"){save();stopping=true;PostQuitMessage(0);return;}
         if(type=="preview_bubble"){
-            messages.push(L"BA Cafe Pets",L"收到一条消息。\n可以在全局设置里调节气泡的透明度和模糊。");
+            messages.push(L"Codex · 已完成",L"回复会显示在这里。\n可在全局设置调节气泡的不透明度和背景模糊。");
             updateBubble();return;
-        }
-        if(type=="authorize_notifications"){windowsNotifications.request();sync();return;}
-        if(type=="notification_settings"){
-            const auto owner=leader().nativeSettings->dialogOwner();
-            ShellExecuteW(owner,L"open",windowsNotifications.status==2?
-                L"ms-settings:privacy-notifications":L"ms-settings:notifications",nullptr,nullptr,SW_SHOWNORMAL);
-            return;
         }
         if(type=="refresh_models"){refreshModels();sync();return;}
         if(type=="set_autostart"){
@@ -458,12 +446,7 @@ struct Scene {
             if(!drainNativeMessages([&](MSG& message){NativeHealth::mark("message dispatch");
                 if(host.nativeSettings&&host.nativeSettings->route(message))return;TranslateMessage(&message);DispatchMessageW(&message);
             }))stopping=true;
-            if(!stopping&&!review){
-                const int status=windowsNotifications.status;
-                windowsNotifications.update(messages,host.session.paused()?0:host.preferences.notificationMode);
-                if(status!=windowsNotifications.status)sync();
-                if(host.session.paused())updateBubble();
-            }
+            if(!stopping&&host.session.paused())updateBubble();
             if(!stopping&&!host.session.paused()){
                 if(motion>=0&&(wake==WAIT_OBJECT_0+DWORD(motion)||WaitForSingleObject(host.motionTimer,0)==WAIT_OBJECT_0))tick();
                 if(!stopping&&frame>=0&&(wake==WAIT_OBJECT_0+DWORD(frame)||WaitForSingleObject(frameTimer,0)==WAIT_OBJECT_0))renderScene();

@@ -123,12 +123,12 @@ int main(int argc,char** argv){
   settings.save(ini);NativePreferences inspected;inspected.load(ini);check(inspected.inspectionMode,"Inspection setting persists across restart");
   value=settings.json();value["rightDragRotation"]=false;check(settings.apply(value)&&!settings.rightDragRotation,"Global rotation switch accepts false");
   value["rightDragRotation"]="yes";check(!settings.apply(value)&&!settings.rightDragRotation,"Invalid rotation values are rejected without modifying the preference");
-  value=settings.json();value.update({{"notificationMode",1},{"bubbleOpacity",63},{"bubbleBlur",14}});
-  check(settings.apply(value),"Accept a message source and bubble appearance");
-  value["bubbleBlur"]=25;value["notificationMode"]=2;
-  check(!settings.apply(value)&&settings.bubbleBlur==14&&settings.notificationMode==1,"Invalid blur keeps the saved message preferences");
+  value=settings.json();value.update({{"bubbleOpacity",63},{"bubbleBlur",14}});
+  check(settings.apply(value),"Accept bubble appearance");
+  value["bubbleBlur"]=25;
+  check(!settings.apply(value)&&settings.bubbleBlur==14,"Invalid blur keeps the saved bubble preferences");
   settings.save(ini);NativePreferences loaded;loaded.load(ini);check(loaded.followNear==0&&loaded.wandering&&!loaded.battleWalking&&!loaded.rightDragRotation,"Movement flags and global rotation switch survive restart");
-  check(loaded.notificationMode==1&&loaded.bubbleOpacity==63&&loaded.bubbleBlur==14,"Message preferences survive restart");
+  check(loaded.bubbleOpacity==63&&loaded.bubbleBlur==14,"Bubble preferences survive restart");
   std::cout<<"Cursor orientation, adaptive quiet region, live threshold retargeting, angle wrap, follow bands, independent movement flags and INI migration passed\n";return 0;
  }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

@@ -38,40 +38,28 @@ cmake --build build-rust-movement --target ba_cafe_lite_crowd_tests ba_cafe_lite
 
 默认构建使用 C++ 实现，可用相同的测试目标对照两种实现。`ba_cafe_lite_movement_tests.exe --trace` 可输出每步位置、朝向及移动状态，便于逐步比较。`BA_RUSTC` 可指定未加入 PATH 的 Rust 编译器路径。
 
-### 消息气泡与通知版构建
+### Codex 消息气泡
 
-全局设置的「消息气泡」提供预览、0–100% 的底色不透明度和 0–24 逻辑像素的背景模糊。气泡在有空间时绘制于当前可见角色轮廓上方 8 个逻辑像素，贴近屏幕顶边时会移入工作区。消息按顺序短暂显示，内容保留在内存中。
+全局设置的「Codex 消息气泡」提供预览、0–100% 的底色不透明度和 0–24 逻辑像素的背景模糊。气泡在有空间时显示于当前可见角色轮廓上方 8 个逻辑像素，贴近屏幕顶边时会移入工作区。消息短暂排队显示，内容存放在内存中。
 
-以下命令向正在运行的桌宠发送文字，也可用来验证文本入口。
+启动桌宠后，将下面的 `Stop` Hook 添加到 Codex 的用户配置 `%USERPROFILE%\.codex\config.toml`，并将路径替换为实际使用的桌宠 EXE。桌面版可在「设置 → Hooks」审核并信任此命令。只想在桌宠上看完成提示时，可在 Codex 桌面版的通知设置中关闭回合完成提示。 [Codex Hooks](https://learn.chatgpt.com/docs/hooks)
 
-```powershell
-Start-Process -Wait ./build/bin/BA-Cafe-Pets.exe -ArgumentList '--message "你好，桌宠！"'
-python tests/message_bubbles.py ./build/bin/BA-Cafe-Pets.exe
+```toml
+[[hooks.Stop]]
+[[hooks.Stop.hooks]]
+type = "command"
+command = 'F:/ba-cafe-lite/build-rust-movement/bin/BA-Cafe-Pets-RustMovement.exe --codex-hook'
+timeout = 5
 ```
 
-Windows 通知版使用 x64 MinGW 和 Rust GNU 主机工具链。开启 `BA_WINDOWS_NOTIFICATIONS` 后，先编译带监听器的核心程序，再准备开发用软件包目录：
-
-```powershell
-cmake -S . -B build-notifications -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DBA_WINDOWS_NOTIFICATIONS=ON
-cmake --build build-notifications --target ba_cafe_lite_native
-$manifest = ./tools/stage-notification-package.ps1 -Executable ./build-notifications/bin/BA-Cafe-Pets.exe -Destination ./artifacts/notification-package
-```
-
-在已开启开发人员模式的 Windows 上，可使用 Windows PowerShell 注册这个开发包，再从开始菜单启动 `BA Cafe Pets Notifications`。正式分发时可用 Windows SDK 打包并按组织的证书签名。打包版使用独立的 `%LOCALAPPDATA%/BA-Cafe-Pets-Notifications` 资料目录。
-
-```powershell
-Add-AppxPackage -Register -Path $manifest
-```
-
-在通知版的全局设置中，点击「授权通知读取」并允许 Windows 权限，然后选择「仅 Codex」或「所有应用」。若只想看桌宠提示，在 Windows 通知设置中关闭相应应用的「显示通知横幅」，保留应用通知和通知中心。也可开启 Windows 勿扰，并检查优先通知的例外。Codex 桌面版需继续生成系统通知，桌宠会读取已授权的新 Toast。应用内的对话和审批界面仍在 Codex 中使用。
-
-Codex CLI 可通过顶层 `notify` 调用桌宠 EXE，接收完成事件。先启动桌宠，将路径改为本机核心程序的绝对路径。如果 `notify` 已被其他集成使用，配置前应先确认它的用途。只想关闭 CLI 的内置提示时，可将 `[tui]` 下的 `notifications` 设为 `false`。
+较旧的 Codex CLI 也可以使用顶层 `notify`。同一个 Codex 客户端配置其中一种入口即可。便携版和单文件版都可直接调用对应 EXE。
 
 ```toml
 notify = ['F:\ba-cafe-lite\build\bin\BA-Cafe-Pets.exe', '--codex-notify']
+```
 
-[tui]
-notifications = false
+```powershell
+python tests/message_bubbles.py ./build/bin/BA-Cafe-Pets.exe
 ```
 
 ## 代码入口

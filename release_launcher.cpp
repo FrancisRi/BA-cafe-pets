@@ -19,6 +19,8 @@
 #include <climits>
 #include <algorithm>
 #include <cstdint>
+#include <memory>
+#include "native_messages.h"
 
 namespace fs=std::filesystem;
 struct Footer {char magic[8];uint64_t offset,size,expanded;unsigned char sha[32];};
@@ -116,6 +118,11 @@ static void prepare(Context& ctx){
 int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);HANDLE mutex=nullptr;int result=1;
     try{
+        int argc=0;
+        std::unique_ptr<LPWSTR,decltype(&LocalFree)> args(CommandLineToArgvW(GetCommandLineW(),&argc),LocalFree);
+        if(!args)return 1;
+        auto** argv=args.get();
+        if(const auto code=NativeMessages::command(argc,argv))return *code;
         Context ctx;wchar_t path[32768]{};GetModuleFileNameW(nullptr,path,32768);ctx.self=path;const auto length=fs::file_size(ctx.self);
         require(length>=sizeof(Footer),"Incomplete release EXE");std::ifstream input(ctx.self,std::ios::binary);input.seekg(length-sizeof(Footer));input.read(reinterpret_cast<char*>(&ctx.footer),sizeof(Footer));
         require(bool(input)&&std::memcmp(ctx.footer.magic,"BAPET01",8)==0&&ctx.footer.size<=LONG_MAX&&ctx.footer.offset<length&&ctx.footer.offset+ctx.footer.size==length-sizeof(Footer),"Invalid release archive footer");
@@ -126,9 +133,9 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         const auto data=home/L"data";fs::create_directories(data);SetEnvironmentVariableW(L"BA_NATIVE_DATA_DIR",data.c_str());
         SetEnvironmentVariableW(L"BA_NATIVE_PROGRAM_DIR",ctx.self.parent_path().c_str());
         SetEnvironmentVariableW(L"BA_NATIVE_LAUNCHER_PATH",ctx.self.c_str());
-        int argc=0;auto** argv=CommandLineToArgvW(GetCommandLineW(),&argc);bool prepareOnly=false;
+        bool prepareOnly=false;
         const auto exe=ctx.cache/L"BA-Cafe-Pets.exe";auto command=quote(exe.wstring());
-        for(int i=1;i<argc;++i){if(std::wcscmp(argv[i],L"--prepare-only")==0)prepareOnly=true;else command+=L" "+quote(argv[i]);}LocalFree(argv);
+        for(int i=1;i<argc;++i){if(std::wcscmp(argv[i],L"--prepare-only")==0)prepareOnly=true;else command+=L" "+quote(argv[i]);}
         if(prepareOnly){ReleaseMutex(mutex);CloseHandle(mutex);return 0;}
         SECURITY_ATTRIBUTES security{sizeof(security),nullptr,TRUE};
         // The core owns opt-in diagnostics; normal launches never open log files.

@@ -5,7 +5,6 @@
 #include <windowsx.h>
 #include <commdlg.h>
 #include <shellapi.h>
-#include <shlobj.h>
 #include <commctrl.h>
 #undef CloseWindow
 #undef ShowCursor
@@ -42,16 +41,9 @@
 
 using Json = nlohmann::json;
 #include "scene_state.h"
+#include "native_text.h"
 double preciseSeconds() {
     return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
-}
-std::wstring wide(const std::string& s) {
-    const int n=MultiByteToWideChar(CP_UTF8,0,s.data(),static_cast<int>(s.size()),nullptr,0);
-    std::wstring out(n,L' ');if(n)MultiByteToWideChar(CP_UTF8,0,s.data(),static_cast<int>(s.size()),out.data(),n);return out;
-}
-std::string utf8(const std::wstring& s) {
-    const int n=WideCharToMultiByte(CP_UTF8,0,s.data(),static_cast<int>(s.size()),nullptr,0,nullptr,nullptr);
-    std::string out(n,' ');if(n)WideCharToMultiByte(CP_UTF8,0,s.data(),static_cast<int>(s.size()),out.data(),n,nullptr,nullptr);return out;
 }
 std::string xmlEscape(std::string s) {
     std::string out;for(char c:s){if(c=='&')out+="&amp;";else if(c=='\"')out+="&quot;";else if(c=='<')out+="&lt;";else out+=c;}return out;
@@ -73,7 +65,6 @@ void replaceAll(std::string& text,const std::string& from,const std::string& to)
 #include "native_renderer.h"
 #include "native_tray.h"
 #include "native_message_bubble.h"
-#include "native_windows_notifications.h"
 #include "frame_jobs.h"
 void nativeLog(int level,const char* text,va_list args){
     if(std::strstr(text,"Pixel data retrieved successfully"))return;
@@ -1066,23 +1057,12 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         std::unique_ptr<LPWSTR,decltype(&LocalFree)> args(CommandLineToArgvW(GetCommandLineW(),&argc),LocalFree);
         if(!args)return 1;
         auto** argv=args.get();
-        if(argc>1&&std::wstring_view(argv[1])==L"--message")
-            return argc==3&&NativeMessages::send(L"",argv[2])?0:1;
-        if(argc>1&&std::wstring_view(argv[1])==L"--codex-notify")
-            return argc==3&&NativeMessages::codex(argv[2])?0:1;
+        if(const auto code=NativeMessages::command(argc,argv))return *code;
         auto owned=std::make_unique<App>();auto& app=*owned;wchar_t executable[32768]{};GetModuleFileNameW(nullptr,executable,32768);app.directory=std::filesystem::path(executable).parent_path();
         wchar_t dataRoot[32768]{};if(GetEnvironmentVariableW(L"BA_NATIVE_DATA_DIR",dataRoot,32768)>0)app.dataDirectory=std::filesystem::absolute(dataRoot);
         app.programDirectory=app.directory;
-        const bool packaged=NativeWindowsNotifications::packaged();
-        if(packaged){
-            PWSTR path=nullptr;
-            if(FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData,0,nullptr,&path)))
-                throw std::runtime_error("Cannot locate the packaged profile");
-            std::unique_ptr<wchar_t,decltype(&CoTaskMemFree)> local(path,CoTaskMemFree);
-            app.programDirectory=std::filesystem::path(local.get())/L"BA-Cafe-Pets-Notifications";
-        }
         wchar_t programRoot[32768]{};if(GetEnvironmentVariableW(L"BA_NATIVE_PROGRAM_DIR",programRoot,32768)>0)app.programDirectory=std::filesystem::absolute(programRoot);
-        if(app.dataDirectory.empty())app.dataDirectory=packaged?app.programDirectory/L"data":app.directory/L"data";
+        if(app.dataDirectory.empty())app.dataDirectory=app.directory/L"data";
         app.model=app.bundledResource();
         wchar_t saved[32768]{};GetPrivateProfileStringW(L"Model",L"Path",L"",saved,32768,(app.storage()/L"active-model.ini").c_str());
         if(*saved&&std::filesystem::is_regular_file(saved))app.model=saved;
