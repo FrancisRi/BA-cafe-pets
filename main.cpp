@@ -5,6 +5,7 @@
 #include <windowsx.h>
 #include <commdlg.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <commctrl.h>
 #undef CloseWindow
 #undef ShowCursor
@@ -71,6 +72,8 @@ void replaceAll(std::string& text,const std::string& from,const std::string& to)
 #include "native_settings.h"
 #include "native_renderer.h"
 #include "native_tray.h"
+#include "native_message_bubble.h"
+#include "native_windows_notifications.h"
 #include "frame_jobs.h"
 void nativeLog(int level,const char* text,va_list args){
     if(std::strstr(text,"Pixel data retrieved successfully"))return;
@@ -1059,14 +1062,30 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     
     int result=1;
     try{
+        int argc=0;
+        std::unique_ptr<LPWSTR,decltype(&LocalFree)> args(CommandLineToArgvW(GetCommandLineW(),&argc),LocalFree);
+        if(!args)return 1;
+        auto** argv=args.get();
+        if(argc>1&&std::wstring_view(argv[1])==L"--message")
+            return argc==3&&NativeMessages::send(L"",argv[2])?0:1;
+        if(argc>1&&std::wstring_view(argv[1])==L"--codex-notify")
+            return argc==3&&NativeMessages::codex(argv[2])?0:1;
         auto owned=std::make_unique<App>();auto& app=*owned;wchar_t executable[32768]{};GetModuleFileNameW(nullptr,executable,32768);app.directory=std::filesystem::path(executable).parent_path();
         wchar_t dataRoot[32768]{};if(GetEnvironmentVariableW(L"BA_NATIVE_DATA_DIR",dataRoot,32768)>0)app.dataDirectory=std::filesystem::absolute(dataRoot);
-        if(app.dataDirectory.empty())app.dataDirectory=app.directory/L"data";
-        wchar_t programRoot[32768]{};if(GetEnvironmentVariableW(L"BA_NATIVE_PROGRAM_DIR",programRoot,32768)>0)app.programDirectory=std::filesystem::absolute(programRoot);else app.programDirectory=app.directory;
+        app.programDirectory=app.directory;
+        const bool packaged=NativeWindowsNotifications::packaged();
+        if(packaged){
+            PWSTR path=nullptr;
+            if(FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData,0,nullptr,&path)))
+                throw std::runtime_error("Cannot locate the packaged profile");
+            std::unique_ptr<wchar_t,decltype(&CoTaskMemFree)> local(path,CoTaskMemFree);
+            app.programDirectory=std::filesystem::path(local.get())/L"BA-Cafe-Pets-Notifications";
+        }
+        wchar_t programRoot[32768]{};if(GetEnvironmentVariableW(L"BA_NATIVE_PROGRAM_DIR",programRoot,32768)>0)app.programDirectory=std::filesystem::absolute(programRoot);
+        if(app.dataDirectory.empty())app.dataDirectory=packaged?app.programDirectory/L"data":app.directory/L"data";
         app.model=app.bundledResource();
         wchar_t saved[32768]{};GetPrivateProfileStringW(L"Model",L"Path",L"",saved,32768,(app.storage()/L"active-model.ini").c_str());
         if(*saved&&std::filesystem::is_regular_file(saved))app.model=saved;
-        int argc=0;auto** argv=CommandLineToArgvW(GetCommandLineW(),&argc);
         for(int i=1;i<argc;i++){
             const std::wstring flag=argv[i];
             if(flag==L"--data-dir"&&i+1<argc){app.dataDirectory=std::filesystem::absolute(argv[++i]);app.dataDirectorySpecified=true;}
@@ -1082,7 +1101,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
             else if(flag==L"--snapshot"&&i+1<argc){app.snapshot=std::filesystem::absolute(argv[++i]);app.review=true;}
             else if(flag==L"--duration"&&i+1<argc){app.runSeconds=std::clamp(std::wcstod(argv[++i],nullptr),1.0,20.0);app.review=true;}
             else if(flag==L"--exit-after"&&i+1<argc){app.runSeconds=std::clamp(std::wcstod(argv[++i],nullptr),1.0,20.0);}
-        }LocalFree(argv);
+        }
         if(!app.initialMode.empty()&&app.initialMode!="cafe"&&app.initialMode!="battle"&&app.initialMode!="formation")throw std::runtime_error("Mode must be cafe, battle or formation");
         app.fixedPose=app.review&&(app.initialMode.empty()||!app.reviewClip.empty()||app.sampleSpecified);
         app.modelStorageSettings=std::make_shared<NativeModelStorage>(app.programDirectory,app.storage(),!app.dataDirectorySpecified);

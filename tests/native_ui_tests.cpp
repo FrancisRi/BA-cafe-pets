@@ -193,11 +193,19 @@ int main(int argc,char** argv){
         SendMessageW(menu.window,WM_CHANGEUISTATE,MAKEWPARAM(UIS_CLEAR,UISF_HIDEFOCUS),0);const auto navigation=GetDlgItem(menu.window,1000);check(drawButton(menu,navigation,0)!=drawButton(menu,navigation,ODS_FOCUS),"Keyboard navigation retains a visible Fluent focus cue");
         menu.quickCommand(3013);check(sent.back().at("type")=="open_models_folder","Quick menu opens the persistent model folder");
         size_t fieldCount=0;for(int p=0;p<3;++p){menu.page=p;menu.build();fieldCount+=menu.controls.size();for(const auto& c:menu.controls)check(IsWindow(c.input),"Every existing setting has a real input control");}
-        check(fieldCount==23,"All existing settings and inspection have native controls");
+        check(fieldCount==26,"Existing settings and the three message settings have native controls");
         menu.page=0;menu.build();const auto inspectionOptions=state["value"];menu.command(122,BN_CLICKED);
         check(state["value"]["inspectionMode"]==true&&IsWindowEnabled(GetDlgItem(menu.panel,122)),"Full interface enables inspection through its real save path");
         for(const auto& c:menu.controls)if(NativeSettings::inspectionBlocks(c.field->key))check(!IsWindowEnabled(c.input)&&!c.checked,"Full interface blocks overridden behavior without erasing its saved value");
         menu.save();menu.command(122,BN_CLICKED);check(state["value"]==inspectionOptions,"Full interface restores original values after inspection and an intervening save");
+        SendMessageW(GetDlgItem(menu.panel,123),CB_SETCURSEL,1,0);
+        SendMessageW(GetDlgItem(menu.panel,124),TBM_SETPOS,TRUE,63);
+        SendMessageW(GetDlgItem(menu.panel,125),TBM_SETPOS,TRUE,14);
+        menu.save();
+        check(state["value"]["notificationMode"]==1&&state["value"]["bubbleOpacity"]==63&&state["value"]["bubbleBlur"]==14,
+            "Message source, tint and blur move through the global settings save path");
+        menu.command(2214,BN_CLICKED);
+        check(sent.back().at("type")=="preview_bubble","The preview button requests a real bubble");
         menu.page=0;menu.build();checkRepainting(menu);SetWindowTextW(GetDlgItem(menu.panel,108),L"not a number");const auto invalidCount=sent.size();menu.save();check(sent.size()==invalidCount,"Invalid numeric input is not submitted");
         const auto quality=GetDlgItem(menu.panel,101);wchar_t qualityLabel[80]{};SendMessageW(quality,CB_GETLBTEXT,2,reinterpret_cast<LPARAM>(qualityLabel));check(std::wstring(qualityLabel).find(L"4× MSAA")!=std::wstring::npos,"Quality choice explicitly identifies MSAA");
         const auto samplingLabel=GetDlgItem(menu.panel,2111);check(samplingLabel,"Global settings expose actual sampling status");

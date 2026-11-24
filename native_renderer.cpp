@@ -195,6 +195,18 @@ void NativeRenderer::present(){
  const auto& s=state;
  NativeHealth::mark("GPU readback");const double readStart=diagnostics?clock():0;Image image=LoadImageFromTexture(resolved.texture);if(diagnostics)readMs+=(clock()-readStart)*1000;if(!image.data)throw std::runtime_error("Cannot read native frame");const double presentStart=diagnostics?clock():0;if(pending.screenshot){ImageFlipVertical(&image);const auto path=pending.output.u8string();ExportImage(image,reinterpret_cast<const char*>(path.c_str()));ImageFlipVertical(&image);}
  const auto* pixels=static_cast<const unsigned char*>(image.data);nativePixels(pixels,dib,width,height,region);
+ modelPixels.reset();
+ for(const auto& rect:region){
+    if(!modelPixels)modelPixels=rect;
+    else UnionRect(&*modelPixels,&*modelPixels,&rect);
+ }
+ if(modelPixels){
+    const auto& bounds=*modelPixels;
+    const auto* first=dib+size_t(bounds.top)*width*4;
+    bool occupied=false;
+    for(LONG x=bounds.left;x<bounds.right&&!occupied;++x)occupied=first[4*x+3]>=12;
+    if(!occupied)++modelPixels->top;
+ }
  NativeHealth::mark("Win32 input region");UnloadImage(image);const double maskStart=diagnostics?clock():0;if(input){const bool same=regionWindow==input&&regionWidth==width&&regionHeight==height&&inputRegion.size()==region.size()&&(region.empty()||std::memcmp(inputRegion.data(),region.data(),region.size()*sizeof(RECT))==0);
   if(same)++reusedMasks;else{const size_t size=sizeof(RGNDATAHEADER)+region.size()*sizeof(RECT);regionBytes.resize(size);auto* data=reinterpret_cast<RGNDATA*>(regionBytes.data());data->rdh={sizeof(RGNDATAHEADER),RDH_RECTANGLES,DWORD(region.size()),DWORD(region.size()*sizeof(RECT)),{0,0,width,height}};if(!region.empty())std::memcpy(data->Buffer,region.data(),region.size()*sizeof(RECT));auto r=region.empty()?CreateRectRgn(0,0,0,0):ExtCreateRegion(nullptr,DWORD(size),data);if(r){if(SetWindowRgn(input,r,FALSE)){inputRegion=region;regionWindow=input;regionWidth=width;regionHeight=height;}else DeleteObject(r);}}
  }

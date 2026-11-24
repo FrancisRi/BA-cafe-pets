@@ -4,6 +4,9 @@
 struct Scene {
     std::vector<std::unique_ptr<App>> actors;
     std::unique_ptr<NativeTray> tray;
+    NativeMessages messages;
+    NativeMessageBubble bubble;
+    NativeWindowsNotifications windowsNotifications;
     FrameJobs cpuJobs;
     std::array<CrowdBody,SceneRoster::Maximum> crowdBodies{};size_t crowdCount=0;uint64_t crowdSerial=0;
     HANDLE frameTimer{};FrameDeadline frameClock;
@@ -43,6 +46,7 @@ struct Scene {
         if(const auto* e=roster.find(roster.selected);e&&e->active){const auto* a=find(e->id);if(!a){result["name"]=e->name;result["busy"]=true;result["percent"]=0;result["detail"]="等待加载模型";result["battleAvailable"]=false;result["value"]["mode"]=e->mode;}}
         if(!error.empty())result["error"]=error;
         result["notice"]=importNotice;
+        result["notificationStatus"]=windowsNotifications.status;
         bool capable=false;for(const auto& a:actors)capable|=a->displayed&&a->loaded&&!a->formationMode&&(a->cafeWalk>=0||(a->battle&&a->battle->clips.move>=0));
         result["canFollow"]=capable;return result;
     }
@@ -60,6 +64,25 @@ struct Scene {
         save();broadcasting=false;sync();
     }
     static float radius(const App& a){return characterCollisionRadius(a.geometry.bodyWidth,a.geometry.maximum.y-a.geometry.minimum.y,a.zoom);}
+    void updateBubble(){
+        if(review)return;
+        const auto& preferences=leader().preferences;
+        HWND window=nullptr;
+        std::optional<RECT> bounds;
+        const auto anchor=[&](const App& actor){
+            if(!actor.displayed||!actor.loaded||!actor.renderer||!actor.renderer->modelPixels||
+                !actor.window||!IsWindowVisible(actor.window))return false;
+            RECT surface{};
+            if(!GetWindowRect(actor.window,&surface))return false;
+            bounds=actor.renderer->modelPixels;
+            OffsetRect(&*bounds,surface.left,surface.top);
+            window=actor.window;
+            return true;
+        };
+        if((bubble.current||!messages.pending.empty())&&!anchor(selected()))
+            for(const auto& a:actors)if(anchor(*a))break;
+        bubble.update(messages,window,bounds,leader().session.paused(),preferences.bubbleOpacity,preferences.bubbleBlur);
+    }
     void orderDepth(){
         // App intent is authoritative: a shell-hidden window still needs to
         // be restored, but a character disabled by the user must stay hidden.
@@ -76,6 +99,7 @@ struct Scene {
         const auto* menu=leader().nativeSettings.get();
         if(menu&&menu->quickWindow&&IsWindowVisible(menu->quickWindow))desired.insert(desired.begin(),menu->quickWindow);
         if(menu&&menu->modelMenu&&IsWindowVisible(menu->modelMenu))desired.insert(desired.begin(),menu->modelMenu);
+        if(auto hwnd=bubble.visible())desired.push_back(hwnd);
         for(const auto* a:visible){desired.push_back(a->inputWindow);desired.push_back(a->window);}
         // Front-to-back chain: feet lower on the desktop are in front. Native
         // window motion preserves this order, instead of promoting the last mover.
@@ -199,6 +223,10 @@ struct Scene {
             for(auto& a:actors){a->state.settingsOpen=paused;if(!paused){a->placementNeeded=true;a->interactionUntil=a->preferences.follow?0:preciseSeconds()+0.5;}}
         };
         if(!review){tray=std::make_unique<NativeTray>([this]{leader().nativeSettings->show(leader().window,leader().directory);},[this]{leader().nativeSettings->showQuick(leader().window,leader().directory,false);},[this]{message({{"type","exit"}});});tray->update(int(roster.activeCount()));if(!tray->available()&&background)leader().settingsOnLoad=true;}
+        if(!review){
+            messages.open();
+            windowsNotifications.status=windowsNotifications.packaged()?1:0;
+        }
         // Load sequentially: allocating five GLBs simultaneously would stall the desktop.
         refreshModels();input.pollKeyboard=false;input.enable(roster.activeCount()>0);save();
         frameTimer=CreateWaitableTimerExW(nullptr,nullptr,CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,TIMER_ALL_ACCESS);
@@ -226,6 +254,7 @@ struct Scene {
             a->post({{"type","suspend"}});ShowWindow(a->window,SW_HIDE);ShowWindow(a->inputWindow,SW_HIDE);}
         for(const auto& e:roster.entries)if(e.active){roster.selected=e.id;break;}
         if(!roster.activeCount())input.enable(false);
+        updateBubble();
         save();sync();
     }
     NativeImportBatch::Outcome importModel(const std::filesystem::path& source){
@@ -285,6 +314,17 @@ struct Scene {
         const auto type=j.value("type",std::string{});
         if(type!="import"&&type!="refresh_models")importNotice.clear();
         if(type=="exit"){save();stopping=true;PostQuitMessage(0);return;}
+        if(type=="preview_bubble"){
+            messages.push(L"BA Cafe Pets",L"收到一条消息。\n可以在全局设置里调节气泡的透明度和模糊。");
+            updateBubble();return;
+        }
+        if(type=="authorize_notifications"){windowsNotifications.request();sync();return;}
+        if(type=="notification_settings"){
+            const auto owner=leader().nativeSettings->dialogOwner();
+            ShellExecuteW(owner,L"open",windowsNotifications.status==2?
+                L"ms-settings:privacy-notifications":L"ms-settings:notifications",nullptr,nullptr,SW_SHOWNORMAL);
+            return;
+        }
         if(type=="refresh_models"){refreshModels();sync();return;}
         if(type=="set_autostart"){
             try{
@@ -388,6 +428,7 @@ struct Scene {
         // actor retains its own FBO, so no extra frame buffers or frame latency.
         for(auto* a:renderActors)a->finishRender(true);
         bool drew=false;for(auto* a:renderActors){const auto before=a->renderedFrames;a->commitRender();drew|=a->renderedFrames!=before;}
+        updateBubble();
         NativeHealth::mark("depth order");orderDepth();if(drew)rlDrawRenderBatchActive();
         const double finished=preciseSeconds();
         if(leader().diagnostics&&!renderActors.empty()){
@@ -417,6 +458,12 @@ struct Scene {
             if(!drainNativeMessages([&](MSG& message){NativeHealth::mark("message dispatch");
                 if(host.nativeSettings&&host.nativeSettings->route(message))return;TranslateMessage(&message);DispatchMessageW(&message);
             }))stopping=true;
+            if(!stopping&&!review){
+                const int status=windowsNotifications.status;
+                windowsNotifications.update(messages,host.session.paused()?0:host.preferences.notificationMode);
+                if(status!=windowsNotifications.status)sync();
+                if(host.session.paused())updateBubble();
+            }
             if(!stopping&&!host.session.paused()){
                 if(motion>=0&&(wake==WAIT_OBJECT_0+DWORD(motion)||WaitForSingleObject(host.motionTimer,0)==WAIT_OBJECT_0))tick();
                 if(!stopping&&frame>=0&&(wake==WAIT_OBJECT_0+DWORD(frame)||WaitForSingleObject(frameTimer,0)==WAIT_OBJECT_0))renderScene();

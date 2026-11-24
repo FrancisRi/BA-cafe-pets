@@ -68,7 +68,10 @@ struct NativeSettings {
         {"clickProbability",L"点击指挥概率",L"点击时触发指挥动作的概率 · %",1,L"\xE8B0"},
         {"keyboardIdle",L"无键盘输入收枪",L"停止键盘输入后的等待时间 · 秒",1,L"\xE823"},
         {"rightDragRotation",L"右键拖动旋转",L"所有模式与 Exs 中均可手动调整朝向",0,L"\xE7AD"},
-        {"inspectionMode",L"观赏模式",L"暂停移动与追踪；右键拖动可水平旋转和上下翻转",0,L"\xE890"}
+        {"inspectionMode",L"观赏模式",L"暂停移动与追踪；右键拖动可水平旋转和上下翻转",0,L"\xE890"},
+        {"notificationMode",L"Windows 通知来源",L"选择通过桌宠显示的系统通知",2,L"\xE7E7"},
+        {"bubbleOpacity",L"气泡不透明度",L"气泡底色强度",4,L"\xE7F4"},
+        {"bubbleBlur",L"气泡背景模糊",L"背景模糊半径",4,L"\xE81E"}
     };
     ~NativeSettings(){closing=true;editingOutline=false;if(modelMenu)DestroyWindow(modelMenu);if(quickWindow)DestroyWindow(quickWindow);if(window)DestroyWindow(window);}
     int u(int value) const {return ui.px(value);}
@@ -184,16 +187,22 @@ struct NativeSettings {
             note(page==0?L"显示与行为参数由所有角色共享，动作模式只应用于当前角色。":page==1?L"日常陪伴、视线与转向。位置跟随距离可在全局设置中调整。":L"保留按键攻击、换弹、EX、点击指挥与走动的原有规则。");
             for(size_t ordinal=0;ordinal<std::size(fields);++ordinal){
                 // Keep stable control IDs while placing manual rotation near appearance.
-                const size_t i=ordinal<4?ordinal:ordinal==4?22:ordinal==5?21:ordinal-2;
-                if((page==0&&i>=14&&i!=21&&i!=22)||(page==1&&(i<14||i>=16))||(page==2&&(i<16||i>=21)))continue;const auto& f=fields[i];
+                const size_t i=ordinal<4||ordinal>=23?ordinal:ordinal==4?22:ordinal==5?21:ordinal-2;
+                if((page==0&&i>=14&&i<21)||(page==1&&(i<14||i>=16))||(page==2&&(i<16||i>=21)))continue;const auto& f=fields[i];
                 if(i==0)section(L"角色与显示");if(i==4)section(L"移动与跟随");if(i==8)section(L"时间与随机变化");if(i==14)section(L"视线追踪");if(i==16)section(L"战斗动作");
+                if(i==23)section(L"消息气泡");
                 HWND input{},label{},hint{};
                 if(f.kind==0)input=control(panel,L"BUTTON",f.title,BS_OWNERDRAW,100+int(i),16,y,panelWidth(),68);
                 else{
                     label=control(panel,L"STATIC",f.title,SS_ENDELLIPSIS,0,64,y+12,270,22);hint=control(panel,L"STATIC",f.detail,SS_ENDELLIPSIS,0,64,y+36,270,20);
                     SendMessageW(hint,WM_SETFONT,reinterpret_cast<WPARAM>(ui.small),FALSE);SetPropW(hint,L"FluentMuted",reinterpret_cast<HANDLE>(1));content.push_back(label);content.push_back(hint);
-                    input=control(panel,f.kind==3?TRACKBAR_CLASSW:f.kind==1?L"EDIT":L"COMBOBOX",L"",f.kind==3?TBS_HORZ|TBS_NOTICKS|TBS_FIXEDLENGTH:f.kind==1?WS_BORDER|ES_AUTOHSCROLL:CBS_DROPDOWNLIST|CBS_OWNERDRAWFIXED|CBS_HASSTRINGS|WS_VSCROLL,100+int(i),326,y+17,156,f.kind==2?260:34);
+                    const bool slider=f.kind==3||f.kind==4;
+                    input=control(panel,slider?TRACKBAR_CLASSW:f.kind==1?L"EDIT":L"COMBOBOX",L"",slider?TBS_HORZ|TBS_NOTICKS|TBS_FIXEDLENGTH:f.kind==1?WS_BORDER|ES_AUTOHSCROLL:CBS_DROPDOWNLIST|CBS_OWNERDRAWFIXED|CBS_HASSTRINGS|WS_VSCROLL,100+int(i),326,y+17,156,f.kind==2?260:34);
                     if(f.kind==1)SendMessageW(input,EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(u(8),u(8)));
+                    if(f.kind==4){
+                        SendMessageW(input,TBM_SETRANGE,TRUE,MAKELPARAM(0,i==24?100:24));
+                        SendMessageW(input,TBM_SETTHUMBLENGTH,u(24),0);
+                    }
                     if(f.kind==3){
                         SendMessageW(input,TBM_SETRANGE,TRUE,MAKELPARAM(10,300));SendMessageW(input,TBM_SETTHUMBLENGTH,u(24),0);
                         outlineHost=CreateWindowExW(WS_EX_CONTROLPARENT,L"BaCafeNativeSettings",L"描边宽度",WS_CHILD|WS_VISIBLE|WS_CLIPCHILDREN,0,u(y+17),u(68),u(34),panel,reinterpret_cast<HMENU>(INT_PTR(2113)),GetModuleHandleW(nullptr),this);
@@ -203,7 +212,9 @@ struct NativeSettings {
                     if(f.kind==2){SendMessageW(input,CB_SETITEMHEIGHT,WPARAM(-1),u(30));SendMessageW(input,CB_SETITEMHEIGHT,0,u(32));const auto add=[&](const wchar_t* text){SendMessageW(input,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(text));};
                         if(std::string(f.key)=="mode"){for(const auto& mode:modeChoices())add(modeTitle(mode).c_str());}
                         else if(std::string(f.key)=="renderQuality"){add(L"省电 · 无 MSAA");add(L"均衡 · 2× MSAA");add(L"清晰 · 4× MSAA");}
-                        else if(std::string(f.key)=="outlineMode"){add(L"无");add(L"轮廓");add(L"逐网格线条");}else{add(L"平滑追踪");add(L"30° 后转向");}}
+                        else if(std::string(f.key)=="outlineMode"){add(L"无");add(L"轮廓");add(L"逐网格线条");}
+                        else if(i==23){add(L"关闭");add(L"仅 Codex");add(L"所有应用");}
+                        else{add(L"平滑追踪");add(L"30° 后转向");}}
                 }
                 controls.push_back({&f,input,label,hint,y});content.push_back(input);y+=76;
                 if(std::string(f.key)=="renderQuality"){
@@ -212,6 +223,15 @@ struct NativeSettings {
                 }
             }
             if(page==0){
+                auto status=control(panel,L"STATIC",L"",0,2211,16,y,panelWidth(),42);
+                SendMessageW(status,WM_SETFONT,reinterpret_cast<WPARAM>(ui.small),FALSE);
+                SetPropW(status,L"FluentMuted",reinterpret_cast<HANDLE>(1));placeContent(status,16,y,0,42,true);y+=48;
+                int x=16;
+                for(auto [id,label]:{std::pair{2212,L"授权通知读取"},{2213,L"Windows 通知设置"},{2214,L"预览气泡"}}){
+                    auto button=control(panel,L"BUTTON",label,BS_OWNERDRAW,id,x,y,142,36);
+                    placeContent(button,x,y,142,36);x+=148;
+                }
+                y+=48;
                 y+=8;auto h=control(panel,L"BUTTON",L"恢复默认设置",BS_OWNERDRAW,2201,16,y,160,36);placeContent(h,16,y,160,36);y+=52;
                 section(L"应用");auto startup=control(panel,L"BUTTON",L"开机自启",BS_OWNERDRAW,2210,16,y,panelWidth(),68);placeContent(startup,16,y,0,68,true);y+=84;
             }
@@ -274,9 +294,13 @@ struct NativeSettings {
             for(auto& c:controls){const std::string key=c.field->key;if(!value.contains(key))continue;const auto& v=value[key];
                 if(c.field->kind==0)c.checked=(!formationSelected()||key=="rightDragRotation"||key=="inspectionMode")&&(!inspectionSelected()||!inspectionBlocks(key))&&v.get<bool>();else if(c.field->kind==3){SendMessageW(c.input,TBM_SETPOS,TRUE,v.get<int>());SetWindowTextW(c.hint,L"描边宽度 · 点击右侧数字输入");if(outlineValue&&!editingOutline)SetWindowTextW(outlineValue,(std::to_wstring(v.get<int>())+L"%").c_str());}
                 else if(c.field->kind==2){const int index=key=="mode"?modeIndex(v.get<std::string>()):key=="cafeLookMode"?(v=="threshold"):v.get<int>();SendMessageW(c.input,CB_SETCURSEL,index,0);}
-                else if(GetFocus()!=c.input){auto text=v.dump();if(text.ends_with(".0"))text.resize(text.size()-2);SetWindowTextW(c.input,wide(text).c_str());}
+                else if(c.field->kind==1&&GetFocus()!=c.input){auto text=v.dump();if(text.ends_with(".0"))text.resize(text.size()-2);SetWindowTextW(c.input,wide(text).c_str());}
                 bool enabled=!last.value("busy",false)&&(page!=2||last.value("battleAvailable",false));if(key=="follow")enabled&=last.value("canFollow",false);if(key=="followNear"||key=="followFar")enabled&=last.value("canFollow",false)&&value.value("follow",false);if(key=="cafeLookMode")enabled&=value.value("cafeTracking",true);if(key=="outlineWidth")enabled&=value.value("outlineMode",2)!=0;
-                if(formationSelected()&&key!="mode"&&key!="renderQuality"&&key!="outlineMode"&&key!="outlineWidth"&&key!="rightDragRotation"&&key!="inspectionMode")enabled=false;
+                if(c.field->kind==4){
+                    SendMessageW(c.input,TBM_SETPOS,TRUE,v.get<int>());
+                    SetWindowTextW(c.hint,(std::to_wstring(v.get<int>())+(key=="bubbleBlur"?L" 逻辑像素":L"%")).c_str());
+                }
+                if(formationSelected()&&key!="mode"&&key!="renderQuality"&&key!="outlineMode"&&key!="outlineWidth"&&key!="rightDragRotation"&&key!="inspectionMode"&&key!="notificationMode"&&c.field->kind!=4)enabled=false;
                 if(inspectionSelected()&&(inspectionBlocks(key)||key=="followNear"||key=="followFar"||key=="cafeLookMode"))enabled=false;
                 EnableWindow(c.input,enabled);if(c.label)EnableWindow(c.label,enabled);if(c.hint)EnableWindow(c.hint,enabled);InvalidateRect(c.input,nullptr,FALSE);
                 if(c.field->kind==3&&outlineValue){if(!enabled&&editingOutline)cancelOutline();EnableWindow(outlineHost,enabled);EnableWindow(outlineValue,enabled);RedrawWindow(outlineHost,nullptr,nullptr,RDW_INVALIDATE|RDW_ALLCHILDREN);}
@@ -286,6 +310,19 @@ struct NativeSettings {
             if(auto status=GetDlgItem(panel,2111))SetWindowTextW(status,samplingText().c_str());
             EnableWindow(GetDlgItem(panel,2107),!last.value("busy",false));EnableWindow(GetDlgItem(panel,2108),!last.value("busy",false)&&!last.value("modelsDirectoryDefault",false));
             if(auto startup=GetDlgItem(panel,2210)){const auto state=last.value("startup",Json::object());SetWindowTextW(startup,state.value("enabled",false)?L"开机自启：已开启":L"开机自启：已关闭");EnableWindow(startup,state.value("available",false));InvalidateRect(startup,nullptr,FALSE);}
+            if(auto status=GetDlgItem(panel,2211)){
+                const auto notification=last.value("notificationStatus",0);
+                constexpr const wchar_t* labels[]={
+                    L"Windows 通知需要带软件包身份的版本。可先预览气泡或使用 Codex 命令行接入。",
+                    L"尚未授权，请点击「授权通知读取」。",
+                    L"读取权限已拒绝。请在 Windows 隐私设置的「通知」中允许桌宠读取。",
+                    L"正在等待 Windows 授权。",
+                    L"已授权读取。可在 Windows 通知设置中关闭横幅或开启勿扰。",
+                    L"Windows 通知监听暂不可用。请检查软件包身份和隐私设置。"
+                };
+                SetWindowTextW(status,labels[std::clamp(notification,0,5)]);
+                EnableWindow(GetDlgItem(panel,2212),notification!=0&&notification!=3&&notification!=4);
+            }
             if(list){fillRoster(list,false);const int n=int(SendMessageW(list,LB_GETCURSEL,0,0));const auto rows=last.value("characters",Json::array());ShowWindow(listEmpty,rows.empty()?SW_SHOW:SW_HIDE);const auto row=n>=0&&n<int(rows.size())?rows[n]:Json::object();const bool active=row.value("active",false);
                 SetWindowTextW(GetDlgItem(panel,2100),active?L"隐藏角色":L"显示角色");EnableWindow(GetDlgItem(panel,2100),n>=0&&(active||(row.value("available",false)&&last.value("activeCount",0)<5)));EnableWindow(GetDlgItem(panel,2101),n>=0&&active&&row.value("ready",false)&&highlighted!=last.value("selectedId",std::string{}));SetWindowTextW(GetDlgItem(panel,2102),row.value("managed",false)?L"删除模型":L"移除记录");EnableWindow(GetDlgItem(panel,2102),n>=0&&!row.value("loading",false));EnableWindow(GetDlgItem(panel,2103),last.value("activeCount",0)>0);EnableWindow(GetDlgItem(panel,2104),last.value("activeCount",0)>0);}
             for(int i=0;i<4;++i)InvalidateRect(GetDlgItem(window,1000+i),nullptr,FALSE);
@@ -315,7 +352,7 @@ struct NativeSettings {
         if(syncing||last.empty())return;auto value=last.at("value");
         for(const auto& c:controls){const auto key=c.field->key;
             if(!IsWindowEnabled(c.input))continue;
-            if(c.field->kind==0)value[key]=c.checked;else if(c.field->kind==3)value[key]=int(SendMessageW(c.input,TBM_GETPOS,0,0));
+            if(c.field->kind==0)value[key]=c.checked;else if(c.field->kind==3||c.field->kind==4)value[key]=int(SendMessageW(c.input,TBM_GETPOS,0,0));
             else if(c.field->kind==2){const int n=int(SendMessageW(c.input,CB_GETCURSEL,0,0));if(n<0)continue;if(std::string(key)=="mode"){const auto modes=modeChoices();if(n<int(modes.size()))value[key]=modes[n];}else if(std::string(key)=="cafeLookMode")value[key]=n?"threshold":"smooth";else value[key]=n;}
             else{wchar_t text[80]{};GetWindowTextW(c.input,text,80);wchar_t* end{};const double n=std::wcstod(text,&end);if(end==text||*end||!std::isfinite(n)){SetWindowTextW(GetDlgItem(window,2300),L"请输入有效数字；该更改尚未保存。");return;}value[key]=n;}
         }sendValue(std::move(value));
@@ -394,6 +431,10 @@ struct NativeSettings {
             return;
         }
         if(id==2210&&code==BN_CLICKED){const auto startup=last.value("startup",Json::object());if(startup.value("available",false)&&receive)receive({{"type","set_autostart"},{"enabled",!startup.value("enabled",false)}});sync();return;}
+        if(id>=2212&&id<=2214&&code==BN_CLICKED){
+            if(receive)receive({{"type",id==2212?"authorize_notifications":id==2213?"notification_settings":"preview_bubble"}});
+            return;
+        }
         if(id==3){nativeMessageBox(window,L"右键：快捷菜单。开启全局旋转开关后，右键拖动或中键拖动可在所有模式及 Exs 中旋转。\n左键拖拽：移动。滚轮：缩放。\n\n勾选模型显示或隐藏角色；方向键选择，空格勾选，Esc 关闭。\n\n咖啡厅：点击反应；关闭位置跟随和散步后，视线持续追踪鼠标。\n战斗：按键攻击；句号、回车、分号、问号请求换弹；持续输入可短走或 EX。\n所有模式双击：沿当前朝向播放 Exs；技能中可手动旋转。\n三连击：第三次中断 Exs；咖啡厅 → 战斗 → 列队 → 咖啡厅循环，跳过不支持的模式。\n列队：关闭旋转开关时固定面向屏幕，可提放、滚轮缩放、双击 Exs、三连击切换；Exs 结束恢复原来的 Formation_Idle。\n缺少对应动画时相应模式或动作不可用。拖拽优先打断。",L"使用说明",MB_OK);return;}
         if(id>=1000&&id<1004){hideModelMenu();page=id-1000;if(page==3&&receive)receive({{"type","refresh_models"}});build();return;}
         if(id>=100&&id<100+int(std::size(fields))&&(code==BN_CLICKED||code==CBN_SELCHANGE||code==EN_KILLFOCUS)){if(code==BN_CLICKED)for(auto& c:controls)if(c.input==GetDlgItem(panel,id)&&c.field->kind==0)c.checked=!c.checked;save();return;}

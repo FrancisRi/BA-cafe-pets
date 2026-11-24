@@ -4,12 +4,13 @@ struct NativePreferences {
     bool automaticWalk(bool battle,bool inputActive) const {return inputActive?battle&&battleWalking:wandering;}
     std::string cafeLookMode="smooth";
     int outlineMode=2,renderQuality=2;
+    int notificationMode=0,bubbleOpacity=88,bubbleBlur=8;
     double followNear=3,followFar=5,moveInterval=8,moveBodies=3,clickProbability=10,skillProbability=5,keyboardIdle=10,inputGrace=3,outlineWidth=100,walkTimeJitter=10,walkDistanceJitter=15;
     static constexpr const wchar_t* keys[]={L"FollowNear",L"FollowFar",L"MoveInterval",L"MoveBodies",L"ClickProbability",L"SkillProbability",L"KeyboardIdle",L"InputGrace",L"OutlineWidth",L"WalkTimeJitter",L"WalkDistanceJitter"};
     static constexpr const char* names[]={"followNear","followFar","moveInterval","moveBodies","clickProbability","skillProbability","keyboardIdle","inputGrace","outlineWidth","walkTimeJitter","walkDistanceJitter"};
     static constexpr double minimum[]={0,0.5,1,0.5,0,0,1,0.1,10,0,0},maximum[]={20,20,600,20,100,100,3600,10,300,50,50};
     std::vector<double*> values(){return {&followNear,&followFar,&moveInterval,&moveBodies,&clickProbability,&skillProbability,&keyboardIdle,&inputGrace,&outlineWidth,&walkTimeJitter,&walkDistanceJitter};}
-    Json json() const {return {{"inspectionMode",inspectionMode},{"rightDragRotation",rightDragRotation},{"wandering",wandering},{"battleWalking",battleWalking},{"cafeTracking",cafeTracking},{"cafeLookMode",cafeLookMode},{"follow",follow},{"outlineMode",outlineMode},{"renderQuality",renderQuality},{"followNear",followNear},{"followFar",followFar},{"moveInterval",moveInterval},{"moveBodies",moveBodies},{"clickProbability",clickProbability},{"skillProbability",skillProbability},{"keyboardIdle",keyboardIdle},{"inputGrace",inputGrace},{"outlineWidth",outlineWidth},{"walkTimeJitter",walkTimeJitter},{"walkDistanceJitter",walkDistanceJitter}};}
+    Json json() const {return {{"notificationMode",notificationMode},{"bubbleOpacity",bubbleOpacity},{"bubbleBlur",bubbleBlur},{"inspectionMode",inspectionMode},{"rightDragRotation",rightDragRotation},{"wandering",wandering},{"battleWalking",battleWalking},{"cafeTracking",cafeTracking},{"cafeLookMode",cafeLookMode},{"follow",follow},{"outlineMode",outlineMode},{"renderQuality",renderQuality},{"followNear",followNear},{"followFar",followFar},{"moveInterval",moveInterval},{"moveBodies",moveBodies},{"clickProbability",clickProbability},{"skillProbability",skillProbability},{"keyboardIdle",keyboardIdle},{"inputGrace",inputGrace},{"outlineWidth",outlineWidth},{"walkTimeJitter",walkTimeJitter},{"walkDistanceJitter",walkDistanceJitter}};}
     bool apply(const Json& j){
         auto v=values();for(size_t i=0;i<v.size();++i){if(i==7)continue;if(!j.contains(names[i])||!j[names[i]].is_number())return false;const double n=j[names[i]];if(!std::isfinite(n)||n<minimum[i]||n>maximum[i])return false;}
         const auto lookMode=j.value("cafeLookMode",cafeLookMode);if(lookMode!="smooth"&&lookMode!="threshold")return false;
@@ -21,6 +22,13 @@ struct NativePreferences {
         if(!j.contains("outlineMode")||!j["outlineMode"].is_number_integer()||j["outlineMode"].get<int>()<0||j["outlineMode"].get<int>()>2)return false;
         if(j.contains("renderQuality")&&(!j["renderQuality"].is_number_integer()||j["renderQuality"].get<int>()<0||j["renderQuality"].get<int>()>2))return false;
         if(j["followNear"].get<double>()>j["followFar"].get<double>())return false;
+        const auto validInt=[&](const char* name,int largest){
+            const auto it=j.find(name);
+            return it==j.end()||(it->is_number_integer()&&it->get<double>()>=0&&it->get<double>()<=largest);
+        };
+        if(!validInt("notificationMode",2)||!validInt("bubbleOpacity",100)||!validInt("bubbleBlur",24))return false;
+        notificationMode=j.value("notificationMode",notificationMode);
+        bubbleOpacity=j.value("bubbleOpacity",bubbleOpacity);bubbleBlur=j.value("bubbleBlur",bubbleBlur);
         for(size_t i=0;i<v.size();++i)if(i!=7)*v[i]=j[names[i]];inputGrace=3;inspectionMode=j.value("inspectionMode",inspectionMode);wandering=j["wandering"];battleWalking=j["battleWalking"];cafeTracking=j.value("cafeTracking",cafeTracking);rightDragRotation=j.value("rightDragRotation",rightDragRotation);cafeLookMode=lookMode;follow=j["follow"];outlineMode=j["outlineMode"];renderQuality=j.value("renderQuality",renderQuality);return true;
     }
     void load(const std::wstring& ini){
@@ -34,6 +42,12 @@ struct NativePreferences {
         rightDragRotation=GetPrivateProfileIntW(L"Three",L"RightDragRotation",1,ini.c_str())!=0;
         outlineMode=GetPrivateProfileIntW(L"Three",L"OutlineMode",GetPrivateProfileIntW(L"Behavior",L"Outline",1,ini.c_str())?2:0,ini.c_str());if(outlineMode<0||outlineMode>2)outlineMode=2;
         renderQuality=GetPrivateProfileIntW(L"Three",L"RenderQuality",2,ini.c_str());if(renderQuality<0||renderQuality>2)renderQuality=2;
+        const auto messageInt=[&](const wchar_t* key,int fallback,int maximum){
+            const auto value=GetPrivateProfileIntW(L"Messages",key,fallback,ini.c_str());
+            return value<=UINT(maximum)?int(value):fallback;
+        };
+        notificationMode=messageInt(L"WindowsSource",0,2);
+        bubbleOpacity=messageInt(L"Opacity",88,100);bubbleBlur=messageInt(L"Blur",8,24);
         // Migrate the previous target setting without changing other options.
         wchar_t legacy[64]{};GetPrivateProfileStringW(L"Three",L"FollowBodies",L"4",legacy,64,ini.c_str());
         const double middle=std::wcstod(legacy,nullptr);if(std::isfinite(middle)&&middle>=3&&middle<=5){followNear=std::max(0.5,middle-1);followFar=middle+1;}
@@ -52,6 +66,9 @@ struct NativePreferences {
         WritePrivateProfileStringW(L"Three",L"Follow",follow?L"1":L"0",ini.c_str());auto v=values();
         WritePrivateProfileStringW(L"Three",L"RenderQuality",std::to_wstring(renderQuality).c_str(),ini.c_str());
         WritePrivateProfileStringW(L"Three",L"OutlineMode",std::to_wstring(outlineMode).c_str(),ini.c_str());
+        WritePrivateProfileStringW(L"Messages",L"WindowsSource",std::to_wstring(notificationMode).c_str(),ini.c_str());
+        WritePrivateProfileStringW(L"Messages",L"Opacity",std::to_wstring(bubbleOpacity).c_str(),ini.c_str());
+        WritePrivateProfileStringW(L"Messages",L"Blur",std::to_wstring(bubbleBlur).c_str(),ini.c_str());
         for(size_t i=0;i<v.size();++i)WritePrivateProfileStringW(L"Three",keys[i],std::to_wstring(*v[i]).c_str(),ini.c_str());
     }
 };

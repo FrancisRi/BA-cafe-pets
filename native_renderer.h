@@ -1,6 +1,7 @@
 #pragma once
 #include "gltf_model.h"
 #include "native_antialias.h"
+#include <optional>
 // Win32 is included by main.cpp; this header keeps the model layer platform-free.
 namespace nativepet {
 class NativeRenderer {
@@ -31,6 +32,7 @@ public:
     Sampling sampling() const {return {samplingQuality,scale,antialias.samples()};}
     // Presentation crop only. Never fed into ground position, camera or drag bounds.
     POINT surfaceOffset{};int surfaceWidth=0,surfaceHeight=0;
+    std::optional<RECT> modelPixels;
     bool didDraw=false,diagnostics=false;
     std::unique_ptr<GltfModel> model;Json state;
     NativeRenderer();~NativeRenderer();
