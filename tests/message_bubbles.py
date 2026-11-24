@@ -83,7 +83,8 @@ def run(binary, sender):
             encoding="ascii",
         )
         codex_dir = Path(scratch) / "codex"
-        transcript = codex_dir / "sessions" / "rollout-test.jsonl"
+        session_id = "01a1c82b-1234-7456-87ab-3388f356b467"
+        transcript = codex_dir / "sessions" / "2026" / "11" / "11" / f"rollout-2026-11-11T09-13-59-{session_id}.jsonl"
         transcript.parent.mkdir(parents=True)
         env = dict(os.environ, BA_NATIVE_PROGRAM_DIR=scratch, CODEX_HOME=str(codex_dir))
         pet = subprocess.Popen([binary, "--data-dir", data, "--diagnostics"], env=env)
@@ -92,7 +93,8 @@ def run(binary, sender):
             turn = "test-turn"
 
             def hook(kind, **fields):
-                event = {"hook_event_name": kind, "turn_id": turn, "transcript_path": str(transcript), **fields}
+                event = {"hook_event_name": kind, "turn_id": turn, "session_id": session_id,
+                         "transcript_path": str(transcript), **fields}
                 reply = subprocess.run(
                     [sender, "--codex-hook"], input=json.dumps(event, ensure_ascii=False).encode("utf-8"),
                     capture_output=True, timeout=3, check=True,
@@ -107,17 +109,19 @@ def run(binary, sender):
                 user.GetWindowTextW(hwnd, value, len(value))
                 return hwnd if value.value.split("\n", 1)[-1] == expected else False
 
-            def append_record(text, owner=turn, phase="commentary"):
-                entry = {"type": "response_item", "payload": {
-                    "type": "message", "role": "assistant", "phase": phase,
-                    "internal_chat_message_metadata_passthrough": {"turn_id": owner},
-                    "content": [{"type": "output_text", "text": text}],
-                }}
+            def append_record(*texts, owner=None, phase="commentary"):
+                entries = [
+                    {"type": "response_item", "payload": {
+                        "type": "message", "role": "assistant", "phase": phase,
+                        "internal_chat_message_metadata_passthrough": {"turn_id": owner or turn},
+                        "content": [{"type": "output_text", "text": text}],
+                    }}
+                    for text in texts
+                ]
                 with transcript.open("a", encoding="utf-8") as target:
-                    target.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                    target.write("".join(json.dumps(entry, ensure_ascii=False) + "\n" for entry in entries))
 
-            append_record("历史任务的进度", owner="other-turn")
-            hook("UserPromptSubmit", prompt="内部提示词")
+            hook("UserPromptSubmit", prompt="内部提示词", transcript_path=None)
             wait_for(lambda: message_is("任务开始了哦..."))
             hwnd = wait_for(lambda: window(pet.pid, "BaCafeMessageBubble"))
             style = user.GetWindowLongPtrW(hwnd, -20)
@@ -127,9 +131,9 @@ def run(binary, sender):
             actor = wait_for(lambda: window(pet.pid, "BaCafeNativePet"))
             expected_width = round(352 * user.GetDpiForWindow(actor) / 96)
             assert first.right - first.left == expected_width, (first.right - first.left, expected_width)
-            append_record("正在检查现有代码。")
-            wait_for(lambda: message_is("正在检查现有代码。"), limit=4)
-            append_record("正在运行测试。")
+            append_record("历史任务的进度", owner="other-turn")
+            append_record("正在检查现有代码。", "正在运行测试。")
+            wait_for(lambda: message_is("正在检查现有代码。"), limit=5)
             append_record("其他任务的输出", owner="other-turn")
             append_record("由 Stop 提供的回复", phase="final_answer")
             wait_for(lambda: message_is("正在运行测试。"), limit=4)
@@ -137,6 +141,13 @@ def run(binary, sender):
             wait_for(lambda: message_is("已完成验证。\n测试均通过。"), limit=4)
             append_record("任务结束后的输出")
             assert message_is("已完成验证。\n测试均通过。")
+            wait_for(lambda: not window(pet.pid, "BaCafeMessageBubble"))
+            turn = "completion-only-turn"
+            append_record("补发第一条进度。", "补发第二条进度。")
+            hook("Stop", last_assistant_message="补发后的最终回复。")
+            wait_for(lambda: message_is("补发第一条进度。"), limit=4)
+            wait_for(lambda: message_is("补发第二条进度。"), limit=4)
+            wait_for(lambda: message_is("补发后的最终回复。"), limit=4)
             assert subprocess.run([sender, "--codex-notify", "invalid"], timeout=3).returncode != 0
             turn = "interrupted-turn"
             hook("UserPromptSubmit", prompt="准备中断")

@@ -4,26 +4,25 @@
 #include <filesystem>
 #include <fstream>
 #include <string_view>
+#include <vector>
 
 // Follow only visible commentary records for the turn named by the hook.
 struct NativeCodexTranscript {
     using Json=nlohmann::json;
     static constexpr size_t blockSize=64*1024;
-    std::string turn;
+    std::string turn,session;
     std::filesystem::path path;
     std::streamoff offset=0;
-    ULONGLONG lastRead=0;
-    bool discard=false,inTurn=false;
+    ULONGLONG lastRead=0,nextResolve=0;
+    bool discard=false,inTurn=false,finished=false;
     std::string partial;
 
     static std::string_view field(const Json& value,const char* key){
         const auto item=value.find(key);
         return item!=value.end()&&item->is_string()?std::string_view(item->get_ref<const std::string&>()):std::string_view{};
     }
-    static std::filesystem::path sessionPath(const std::string& raw){
+    static std::filesystem::path sessionsDirectory(){
         namespace fs=std::filesystem;
-        const fs::path path=wide(raw);
-        if(!path.is_absolute()||path.extension()!=L".jsonl"||!path.filename().wstring().starts_with(L"rollout-"))return {};
         std::wstring home(32768,L'\0');
         DWORD n=GetEnvironmentVariableW(L"CODEX_HOME",home.data(),DWORD(home.size()));
         if(n>=home.size())return {};
@@ -34,7 +33,15 @@ struct NativeCodexTranscript {
         }else home.resize(n);
         std::error_code error;
         const auto root=fs::weakly_canonical(fs::path(home)/L"sessions",error);
-        if(error||!root.is_absolute())return {};
+        return error||!root.is_absolute()?fs::path{}:root;
+    }
+    static std::filesystem::path sessionPath(const std::string& raw){
+        namespace fs=std::filesystem;
+        const fs::path path=wide(raw);
+        if(!path.is_absolute()||path.extension()!=L".jsonl"||!path.filename().wstring().starts_with(L"rollout-"))return {};
+        const auto root=sessionsDirectory();
+        if(root.empty())return {};
+        std::error_code error;
         const auto canonical=fs::weakly_canonical(path,error);
         if(error)return {};
         auto actual=canonical.begin();
@@ -44,12 +51,41 @@ struct NativeCodexTranscript {
         }
         return canonical;
     }
-    NativeCodexTranscript(std::string id,std::filesystem::path source):turn(std::move(id)),path(std::move(source)),lastRead(GetTickCount64()){
+    static bool validSession(std::string_view id){
+        if(id.size()!=36)return false;
+        for(size_t i=0;i<id.size();++i){
+            const char c=id[i];
+            const bool separator=i==8||i==13||i==18||i==23;
+            if(separator?c!='-':!((c>='0'&&c<='9')||(c>='a'&&c<='f')||(c>='A'&&c<='F')))return false;
+        }
+        return true;
+    }
+    static std::filesystem::path findSession(const std::string& session){
+        namespace fs=std::filesystem;
+        const auto root=sessionsDirectory();
+        if(root.empty())return {};
+        const auto suffix=L"-"+wide(session)+L".jsonl";
+        std::error_code error;
+        for(fs::recursive_directory_iterator it(root,fs::directory_options::skip_permission_denied,error),end;
+            !error&&it!=end;it.increment(error)){
+            const auto name=it->path().filename().wstring();
+            if(name.starts_with(L"rollout-")&&name.size()>suffix.size()&&
+                CompareStringOrdinal(name.c_str()+name.size()-suffix.size(),int(suffix.size()),
+                    suffix.c_str(),int(suffix.size()),TRUE)==CSTR_EQUAL&&it->is_regular_file(error))
+                return sessionPath(utf8(it->path().wstring()));
+        }
+        return {};
+    }
+    NativeCodexTranscript(std::string id,std::filesystem::path source,std::string sessionId):
+        turn(std::move(id)),session(std::move(sessionId)),lastRead(GetTickCount64()){setPath(std::move(source));}
+    void setPath(std::filesystem::path source){
+        if(source.empty()||!path.empty())return;
+        path=std::move(source);
         std::error_code error;
         const auto length=std::filesystem::file_size(path,error);
         if(!error&&length>blockSize){offset=std::streamoff(length-blockSize);discard=true;}
     }
-    struct Result {std::string commentary;bool ended=false;};
+    struct Result {std::vector<std::string> commentary;bool ended=false;};
     void record(std::string_view line,Result& result){
         const auto value=Json::parse(line,nullptr,false);
         const auto payload=value.find("payload");
@@ -74,10 +110,19 @@ struct NativeCodexTranscript {
             if(!text.empty())text+='\n';
             text+=part;
         }
-        if(!text.empty())result.commentary=std::move(text);
+        if(!text.empty())result.commentary.push_back(std::move(text));
     }
-    Result poll(){
+    Result poll(bool final=false){
         Result result;
+        if(finished)return result;
+        if(path.empty()&&!session.empty()){
+            const auto now=GetTickCount64();
+            if(final||now>=nextResolve){
+                nextResolve=now+1500;
+                setPath(findSession(session));
+            }
+        }
+        if(path.empty())return result;
         std::ifstream file(path,std::ios::binary);
         if(!file.seekg(offset))return result;
         char buffer[blockSize];

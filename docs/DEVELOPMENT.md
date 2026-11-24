@@ -66,7 +66,7 @@ command = 'F:/ba-cafe-lite/build-rust-movement/bin/BA-Cafe-Pets-RustMovement.exe
 timeout = 3
 ```
 
-发送提示词时显示「任务开始了哦...」。桌宠只跟随 Hook 提供的当前回合本地会话文件，显示已完整写入的 `commentary` 文本，并合并同一回合尚未显示的多条进度。缺少本地记录或记录格式发生变化时，开始、完成和中断仍通过各自的 Hook 显示。旧版 Codex CLI 可用顶层 `notify` 接收完成提示。便携版和单文件版都支持 Hook。
+发送提示词时显示「任务开始了哦...」。桌宠按 Hook 提供的路径读取当前回合的本地记录，路径缺省时按会话 ID 在 Codex 的 `sessions` 目录定位文件。已写入的 `commentary` 消息按顺序显示。完成或中断时，桌宠会读取当前回合尚未显示的进度，再显示最终提示。旧版 Codex CLI 可用顶层 `notify` 接收完成提示。便携版和单文件版都支持 Hook。
 
 ```toml
 notify = ['F:\ba-cafe-lite\build\bin\BA-Cafe-Pets.exe', '--codex-notify']

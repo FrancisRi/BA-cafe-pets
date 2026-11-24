@@ -37,19 +37,14 @@ struct NativeMessages {
         title=clean(std::move(title),180);
         body=clean(std::move(body),1000);
         if(title.empty()&&body.empty())return false;
-        if(phase==Phase::Progress&&!turn.empty()){
-            for(auto& message:pending)if(message.turn==turn&&message.phase==Phase::Progress){
-                message.body=std::move(body);return true;
-            }
-        }
         if(pending.size()==16)pending.pop_front();
         pending.push_back({std::move(title),std::move(body),std::move(turn),phase});
         return true;
     }
-    void progress(NativeCodexTranscript& source){
-        const auto result=source.poll();
-        if(!result.commentary.empty())push(L"Codex · 进行中",wide(result.commentary),source.turn,Phase::Progress);
-        if(result.ended)source.lastRead=0;
+    void progress(NativeCodexTranscript& source,bool final=false){
+        const auto result=source.poll(final);
+        for(const auto& text:result.commentary)push(L"Codex · 进行中",wide(text),source.turn,Phase::Progress);
+        if(result.ended||final)source.finished=true;
     }
     void pollCodex(){
         const auto now=GetTickCount64();
@@ -57,33 +52,40 @@ struct NativeMessages {
         nextPoll=now+400;
         for(auto it=transcripts.begin();it!=transcripts.end();){
             progress(*it);
-            if(!it->lastRead||now>it->lastRead+3600000)it=transcripts.erase(it);
+            if(now>it->lastRead+3600000)it=transcripts.erase(it);
             else ++it;
         }
+    }
+    NativeCodexTranscript* track(std::string_view turn,const Json& value){
+        if(turn.empty())return nullptr;
+        const auto found=std::find_if(transcripts.begin(),transcripts.end(),[&](const auto& t){return t.turn==turn;});
+        if(found!=transcripts.end()&&(!found->path.empty()||found->finished))return &*found;
+        auto path=NativeCodexTranscript::sessionPath(std::string(NativeCodexTranscript::field(value,"transcript")));
+        auto session=std::string(NativeCodexTranscript::field(value,"session"));
+        if(!NativeCodexTranscript::validSession(session))session.clear();
+        if(found!=transcripts.end()){
+            found->setPath(std::move(path));
+            if(found->session.empty())found->session=std::move(session);
+            return &*found;
+        }
+        if(path.empty()&&session.empty())return nullptr;
+        if(transcripts.size()==8){
+            const auto done=std::find_if(transcripts.begin(),transcripts.end(),[](const auto& t){return t.finished;});
+            if(done!=transcripts.end())transcripts.erase(done);
+            else transcripts.pop_front();
+        }
+        return &transcripts.emplace_back(std::string(turn),std::move(path),std::move(session));
     }
     bool accept(const Json& value){
         const auto title=NativeCodexTranscript::field(value,"title"),body=NativeCodexTranscript::field(value,"body");
         const auto turn=NativeCodexTranscript::field(value,"turn");
         const auto event=NativeCodexTranscript::field(value,"phase");
         if(event=="start"){
-            if(!turn.empty()){
-                const auto found=std::find_if(transcripts.begin(),transcripts.end(),[&](const auto& t){return t.turn==turn;});
-                if(found==transcripts.end()){
-                    const auto path=NativeCodexTranscript::sessionPath(std::string(NativeCodexTranscript::field(value,"transcript")));
-                    if(!path.empty()){
-                        if(transcripts.size()==8)transcripts.pop_front();
-                        transcripts.emplace_back(std::string(turn),path);
-                    }
-                }
-            }
+            track(turn,value);
             return push(L"Codex",L"任务开始了哦...",std::string(turn),Phase::Start);
         }
         if(event=="end"||event=="interrupt"){
-            if(!turn.empty()){
-                for(auto it=transcripts.begin();it!=transcripts.end();++it)if(it->turn==turn){
-                    progress(*it);transcripts.erase(it);break;
-                }
-            }
+            if(auto* source=track(turn,value))progress(*source,true);
             if(event=="interrupt")return push(L"Codex · 已中断",L"任务已中断。",std::string(turn),Phase::End);
             return push(L"Codex · 已完成",wide(std::string(body)),std::string(turn),Phase::End);
         }
@@ -127,14 +129,20 @@ struct NativeMessages {
         const auto type=NativeCodexTranscript::field(json,hook?"hook_event_name":"type");
         const auto turn=NativeCodexTranscript::field(json,hook?"turn_id":"turn-id");
         if(type.empty())return false;
-        if(hook&&type=="UserPromptSubmit"){
-            return send({{"phase","start"},{"turn",turn},{"transcript",NativeCodexTranscript::field(json,"transcript_path")}});
+        Json message={{"turn",turn}};
+        if(hook){
+            message["transcript"]=NativeCodexTranscript::field(json,"transcript_path");
+            message["session"]=NativeCodexTranscript::field(json,"session_id");
+            if(type=="UserPromptSubmit"||type=="Interrupt"){
+                message["phase"]=type=="UserPromptSubmit"?"start":"interrupt";
+                return send(std::move(message));
+            }
         }
-        if(hook&&type=="Interrupt")return send({{"phase","interrupt"},{"turn",turn}});
         if(type!=(hook?"Stop":"agent-turn-complete"))return true;
         const auto body=NativeCodexTranscript::field(json,hook?"last_assistant_message":"last-assistant-message");
-        return send({{"phase","end"},{"turn",turn},{"title",utf8(L"Codex · 已完成")},
-            {"body",utf8(clean(wide(std::string(body)),1000))}});
+        message["phase"]="end";
+        message["body"]=utf8(clean(wide(std::string(body)),1000));
+        return send(std::move(message));
     }
     static std::string hookInput(){
         const HANDLE input=GetStdHandle(STD_INPUT_HANDLE);
