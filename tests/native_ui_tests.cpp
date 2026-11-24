@@ -13,11 +13,42 @@
 #include <vector>
 #include <set>
 using Json=nlohmann::json;
-std::wstring wide(const std::string& text){const int count=MultiByteToWideChar(CP_UTF8,0,text.data(),int(text.size()),nullptr,0);std::wstring out(count,L' ');MultiByteToWideChar(CP_UTF8,0,text.data(),int(text.size()),out.data(),count);return out;}
+#include "native_text.h"
 #include "native_preferences.h"
 #include "native_health.h"
 #include "native_settings.h"
+#include "native_message_bubble.h"
 static void check(bool value,const char* message){if(!value)throw std::runtime_error(message);}
+static void checkBubbleRendering(){
+    NativeMessageBubble bubble;
+    bubble.cleanBounds={4,0,8,2};
+    bubble.cleanBackdrop.assign(4*2*4,std::byte{60});
+    std::array<std::byte,6*2*4> captured;
+    captured.fill(std::byte{230});
+    bubble.restoreBackdrop(captured.data(),{3,0,9,2},{4,0,9,1},247);
+    check(captured[0]==std::byte{230}&&captured[4]==std::byte{60}&&captured[20]==std::byte{247}&&
+          captured[28]==std::byte{230},"Backdrop refresh replaces the bubble's pixels before filtering and keeps clean screen pixels");
+
+    using Phase=NativeMessages::Phase;
+    bubble.current=NativeMessages::Message{L"Codex",L"任务开始了哦...",{},Phase::Start};
+    const RECT model{250,400,440,600},work{0,0,900,700};
+    check(bubble.paint(model,work,96,0,0),"Draw clear bubble text");
+    const auto count=size_t(bubble.textLayer->width)*bubble.textLayer->height*4;
+    const std::vector<std::byte> clear(bubble.textLayer->bits,bubble.textLayer->bits+count);
+    check(bubble.paint(model,work,96,85,14),"Draw blurred bubble text");
+    size_t opaque=0;
+    for(size_t i=0;i<count;i+=4){
+        const auto* text=bubble.textLayer->bits+i;
+        const auto* output=bubble.surface->bits+i;
+        check(clear[i+3]==text[3],"Opacity and blur do not alter the glyph coverage mask");
+        if(text[3]!=std::byte{255})continue;
+        ++opaque;
+        check(text[0]==text[1]&&text[1]==text[2],"Opaque glyphs use neutral ink");
+        check(std::equal(text,text+4,output),"Background filters leave opaque glyph pixels intact");
+    }
+    check(opaque>20&&NativeMessageBubble::inkFor(20)>NativeMessageBubble::inkFor(230),
+        "Rendered text retains solid pixels and uses contrasting ink on light and dark backgrounds");
+}
 struct TestDesktop {
     HDESK previous=GetThreadDesktop(GetCurrentThreadId()),isolated{};
     TestDesktop(){const auto name=L"BaCafeUiTests-"+std::to_wstring(GetCurrentProcessId());isolated=CreateDesktopW(name.c_str(),nullptr,nullptr,0,GENERIC_ALL,nullptr);check(isolated&&SetThreadDesktop(isolated),"Create isolated UI test desktop");}
@@ -127,6 +158,7 @@ int main(int argc,char** argv){
     try{
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         TestDesktop desktop; // Test fixtures never appear on the user's desktop.
+        checkBubbleRendering();
         NativePreferences preferences;Json state={{"name","Shiroko"},{"selectedId","a"},{"activeCount",1},{"battleAvailable",true},{"canFollow",true},{"busy",false},{"error",""},{"percent",0},{"value",preferences.json()}};
         state["modelsDirectory"]="data/models";
         state["startup"]={{"enabled",false},{"available",true}};
@@ -199,16 +231,20 @@ int main(int argc,char** argv){
         for(const auto& c:menu.controls)if(NativeSettings::inspectionBlocks(c.field->key))check(!IsWindowEnabled(c.input)&&!c.checked,"Full interface blocks overridden behavior without erasing its saved value");
         menu.save();menu.command(122,BN_CLICKED);check(state["value"]==inspectionOptions,"Full interface restores original values after inspection and an intervening save");
         menu.page=1;menu.build();
-        const auto opacitySlider=GetDlgItem(menu.messagePanel,2215);
-        const auto blurSlider=GetDlgItem(menu.messagePanel,2216);
-        check(IsWindowVisible(opacitySlider)&&IsWindowVisible(blurSlider),"The right column stays available on the cafe page");
+        check(!GetDlgItem(menu.panel,2215)&&!GetDlgItem(menu.panel,2216),"Cafe settings exclude bubble controls");
+        const auto messageTab=GetDlgItem(menu.window,1000+NativeSettings::messagesPage);
+        SendMessageW(messageTab,BM_CLICK,0,0);
+        const auto opacitySlider=GetDlgItem(menu.panel,2215);
+        const auto blurSlider=GetDlgItem(menu.panel,2216);
+        check(menu.page==NativeSettings::messagesPage&&IsWindowVisible(opacitySlider)&&IsWindowVisible(blurSlider),
+            "The left navigation opens the Codex message page in the main panel");
         SendMessageW(opacitySlider,TBM_SETPOS,TRUE,63);
         SendMessageW(blurSlider,TBM_SETPOS,TRUE,14);
-        SendMessageW(menu.messagePanel,WM_HSCROLL,TB_THUMBPOSITION,reinterpret_cast<LPARAM>(blurSlider));
+        SendMessageW(menu.panel,WM_HSCROLL,TB_THUMBPOSITION,reinterpret_cast<LPARAM>(blurSlider));
         check(state["value"]["bubbleOpacity"]==63&&state["value"]["bubbleBlur"]==14,
-            "The right column saves both bubble preferences");
-        check(sent.back().at("type")=="bubble_settings","The sidebar saves independently of the main page");
-        SendMessageW(GetDlgItem(menu.messagePanel,2214),BM_CLICK,0,0);
+            "The message page saves both bubble preferences");
+        check(sent.back().at("type")=="bubble_settings","The message page saves independently of global settings");
+        SendMessageW(GetDlgItem(menu.panel,2214),BM_CLICK,0,0);
         check(sent.back().at("type")=="preview_bubble","The preview button requests a real bubble");
         menu.page=0;menu.build();checkRepainting(menu);SetWindowTextW(GetDlgItem(menu.panel,108),L"not a number");const auto invalidCount=sent.size();menu.save();check(sent.size()==invalidCount,"Invalid numeric input is not submitted");
         const auto quality=GetDlgItem(menu.panel,101);wchar_t qualityLabel[80]{};SendMessageW(quality,CB_GETLBTEXT,2,reinterpret_cast<LPARAM>(qualityLabel));check(std::wstring(qualityLabel).find(L"4× MSAA")!=std::wstring::npos,"Quality choice explicitly identifies MSAA");
@@ -220,7 +256,7 @@ int main(int argc,char** argv){
         state["renderSampling"]["visible"]=false;menu.sync();check(samplingText().find(L"已隐藏")!=std::wstring::npos,"Hidden models do not claim to be rendering");
         state["renderSampling"]={{"visible",true},{"ready",true},{"scale",2},{"msaa",4}};menu.sync();
         for(UINT dpi:{96u,144u,192u}){
-            menu.reloadTheme(menu.window,dpi);SetWindowPos(menu.window,nullptr,0,0,menu.u(920),menu.u(680),SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);pump(menu);
+            menu.reloadTheme(menu.window,dpi);SetWindowPos(menu.window,nullptr,0,0,menu.u(800),menu.u(680),SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);pump(menu);
             auto combo=GetDlgItem(menu.panel,101);RECT bounds{};GetClientRect(combo,&bounds);auto dc=GetDC(combo);auto previous=SelectObject(dc,menu.ui.font);SIZE extent{};GetTextExtentPoint32W(dc,qualityLabel,int(std::wcslen(qualityLabel)),&extent);SelectObject(dc,previous);ReleaseDC(combo,dc);check(extent.cx+menu.u(32)<bounds.right,"MSAA option fits without clipping at every DPI");
         }
         menu.reloadTheme(menu.window,96);
@@ -262,15 +298,17 @@ int main(int argc,char** argv){
             menu.reloadTheme(menu.window,dpi);SetWindowPos(menu.window,nullptr,0,0,menu.u(920),menu.u(680),SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);pump(menu);
             RECT panel{};GetClientRect(menu.panel,&panel);
             for(auto h:menu.content){RECT r{};GetWindowRect(h,&r);MapWindowPoints(nullptr,menu.panel,reinterpret_cast<POINT*>(&r),2);if(r.left<0||r.right>panel.right+2)std::cerr<<"Layout: dpi="<<dpi<<" id="<<GetDlgCtrlID(h)<<" left="<<r.left<<" right="<<r.right<<" panel="<<panel.right<<'\n';check(r.left>=0&&r.right<=panel.right+2,"Full UI fits at 100/150/200 percent DPI");}
-            RECT middle{},side{},window{};
-            GetWindowRect(menu.panel,&middle);GetWindowRect(menu.messagePanel,&side);GetClientRect(menu.window,&window);
-            MapWindowPoints(menu.window,nullptr,reinterpret_cast<POINT*>(&window),2);
-            check(side.left>=middle.right&&side.right<=window.right,"The Codex column fits to the right of settings");
-            for(auto h:{opacitySlider,blurSlider,GetDlgItem(menu.messagePanel,2214)}){
+            SendMessageW(messageTab,BM_CLICK,0,0);
+            RECT content{},navigation{};
+            GetWindowRect(menu.panel,&content);GetWindowRect(messageTab,&navigation);
+            check(navigation.right<=content.left,"The Codex tab is to the left of the main panel");
+            for(int id:{2215,2216,2214}){
+                const auto h=GetDlgItem(menu.panel,id);
                 RECT bounds{};GetWindowRect(h,&bounds);
-                check(bounds.left>=side.left&&bounds.right<=side.right&&bounds.bottom<=side.bottom,
-                    "The Codex sliders and preview fit inside the side column");
+                check(IsWindowVisible(h)&&bounds.left>=content.left&&bounds.right<=content.right&&bounds.bottom<=content.bottom,
+                    "The Codex sliders and preview fit inside the message page");
             }
+            menu.command(1003,BN_CLICKED);pump(menu);
         }
         menu.showQuick(nullptr,std::filesystem::current_path());pump(menu);
         check(menu.pausesPets()&&pauses.back(),"Quick menu can pause pets while full settings remain open");
@@ -289,6 +327,7 @@ int main(int argc,char** argv){
             SetFocus(menu.outlineValue);pump(menu);capture(menu.window,output/L"settings-number-edit.bmp");menu.cancelOutline();SetFocus(menu.window);
             for(int p=1;p<4;++p){menu.page=p;menu.build();pump(menu);capture(menu.window,output/(std::wstring(L"settings-")+std::to_wstring(p)+L".bmp"));}
             if(SendMessageW(menu.list,LB_GETCOUNT,0,0)>0){size_t chosen=0;for(size_t i=0;i<state["characters"].size();++i)if(state["characters"][i].value("managed",false)){chosen=i;break;}SendMessageW(menu.list,LB_SETCURSEL,chosen,0);menu.showModelMenu(menu.list,MAKELPARAM(-1,-1));pump(menu);capture(menu.modelMenu,output/L"model-context.bmp");menu.hideModelMenu();}
+            SendMessageW(messageTab,BM_CLICK,0,0);pump(menu);capture(menu.window,output/L"settings-codex.bmp");
             menu.hide();menu.showQuick(nullptr,std::filesystem::current_path());pump(menu);capture(menu.quickWindow,output/L"quick-menu.bmp");menu.hide();
             menu.page=0;menu.show(nullptr,std::filesystem::current_path());menu.reloadTheme(menu.window,GetDpiForSystem(),0);pump(menu);capture(menu.window,output/L"settings-light.bmp");
             menu.scrollTo(menu.u(menu.contentHeight));pump(menu);capture(menu.window,output/L"settings-app-light.bmp");menu.hide();

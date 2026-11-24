@@ -1,6 +1,7 @@
 #pragma once
 #include "native_messages.h"
 #include <cstddef>
+#include <cstring>
 #include <numeric>
 
 struct NativeMessageBubble {
@@ -30,8 +31,9 @@ struct NativeMessageBubble {
         }
     };
     HWND window{};
-    std::optional<Surface> surface,capture;
-    std::vector<std::byte> horizontal,blurred;
+    std::optional<Surface> surface,capture,textLayer;
+    std::vector<std::byte> cleanBackdrop,horizontal,blurred;
+    RECT cleanBounds{};
     NativeFluent theme;
     ULONG_PTR gdiplus{};
     std::optional<NativeMessages::Message> current;
@@ -83,24 +85,47 @@ struct NativeMessageBubble {
             }
         }
     }
-    bool backdrop(POINT at,int width,int height,int radius,RECT work){
-        const int x=std::max<LONG>(work.left,at.x-radius),y=std::max<LONG>(work.top,at.y-radius);
-        const int w=std::min<LONG>(work.right,at.x+width+radius)-x;
-        const int h=std::min<LONG>(work.bottom,at.y+height+radius)-y;
+    // Keep the pre-composition pixels where the old bubble covers the capture.
+    // Desktop capture can include layered pixels on some DWM paths.
+    void restoreBackdrop(std::byte* pixels,RECT bounds,RECT occluded,BYTE neutral) const {
+        RECT covered{};
+        if(!IntersectRect(&covered,&bounds,&occluded))return;
+        const size_t stride=size_t(bounds.right-bounds.left)*4;
+        for(LONG row=covered.top;row<covered.bottom;++row){
+            auto* dest=pixels+size_t(row-bounds.top)*stride+size_t(covered.left-bounds.left)*4;
+            std::fill_n(dest,size_t(covered.right-covered.left)*4,std::byte{neutral});
+        }
+        RECT available{};
+        if(cleanBackdrop.empty()||!IntersectRect(&available,&covered,&cleanBounds))return;
+        const size_t oldStride=size_t(cleanBounds.right-cleanBounds.left)*4;
+        for(LONG row=available.top;row<available.bottom;++row){
+            auto* dest=pixels+size_t(row-bounds.top)*stride+size_t(available.left-bounds.left)*4;
+            const auto* source=cleanBackdrop.data()+size_t(row-cleanBounds.top)*oldStride+size_t(available.left-cleanBounds.left)*4;
+            std::memcpy(dest,source,size_t(available.right-available.left)*4);
+        }
+    }
+    bool backdrop(POINT at,int width,int height,int radius,int margin,RECT work,BYTE neutral){
+        const RECT bounds{std::max<LONG>(work.left,at.x-margin),std::max<LONG>(work.top,at.y-margin),
+            std::min<LONG>(work.right,at.x+width+margin),std::min<LONG>(work.bottom,at.y+height+margin)};
+        const int w=bounds.right-bounds.left,h=bounds.bottom-bounds.top;
         if(!capture)capture.emplace();
         if(!capture->resize(w,h))return false;
         HDC desktop=GetDC(nullptr);
         if(!desktop)return false;
-        // SRCCOPY omits layered windows, including the bubble itself.
-        const bool copied=BitBlt(capture->dc,0,0,w,h,desktop,x,y,SRCCOPY)!=0;
+        const bool copied=BitBlt(capture->dc,0,0,w,h,desktop,bounds.left,bounds.top,SRCCOPY)!=0;
         ReleaseDC(nullptr,desktop);
         if(!copied)return false;
         GdiFlush();
+        RECT occluded{};
+        if(visible()&&GetWindowRect(window,&occluded))restoreBackdrop(capture->bits,bounds,occluded,neutral);
+        cleanBackdrop.assign(capture->bits,capture->bits+size_t(w)*h*4);
+        cleanBounds=bounds;
+        if(!radius)return true;
         horizontal.resize(size_t(w)*h*4);blurred.resize(size_t(width)*height*4);
         box(capture->bits,horizontal.data(),w,h,4,w*4,radius);
         box(horizontal.data(),capture->bits,h,w,w*4,4,radius);
         for(int row=0;row<height;++row){
-            const auto* source=capture->bits+(size_t(row+at.y-y)*w+at.x-x)*4;
+            const auto* source=capture->bits+(size_t(row+at.y-bounds.top)*w+at.x-bounds.left)*4;
             auto* dest=blurred.data()+size_t(row)*width*4;
             for(int col=0;col<width;++col){
                 dest[col*4]=source[col*4];dest[col*4+1]=source[col*4+1];
@@ -109,13 +134,25 @@ struct NativeMessageBubble {
         }
         return true;
     }
+    static void blendText(std::byte* pixels,const std::byte* text,size_t count){
+        for(size_t i=0;i<count;i+=4){
+            const int remaining=255-std::to_integer<int>(text[i+3]);
+            if(remaining==255)continue;
+            for(size_t channel=0;channel<4;++channel)
+                pixels[i+channel]=std::byte(std::to_integer<int>(text[i+channel])+
+                    (std::to_integer<int>(pixels[i+channel])*remaining+127)/255);
+        }
+    }
     static Gdiplus::Color color(COLORREF rgb,BYTE alpha=255){
         return {alpha,GetRValue(rgb),GetGValue(rgb),GetBValue(rgb)};
+    }
+    static BYTE inkFor(int background){
+        return background>=118?19:248;
     }
     bool paint(RECT model,RECT work,UINT dpi,int tint,int radius){
         using namespace Gdiplus;
         if(!open())return false;
-        if(!surface)surface.emplace();
+        if(!surface){surface.emplace();textLayer.emplace();}
         if(dpi!=theme.dpi||!theme.font||paintedRevision!=revision)theme.load(dpi);
         const auto px=[&](int value){return theme.px(value);};
         const int width=std::max(1,std::min<int>(px(328),work.right-work.left));
@@ -137,36 +174,62 @@ struct NativeMessageBubble {
         const int separation=titleHeight&&bodyHeight?px(3):0;
         const int height=std::min<int>(titleHeight+bodyHeight+2*padding+separation,work.bottom-work.top);
         POINT at=position(model,work,{width,height},px(8));
-        if(height<=0||!surface->resize(width,height))return false;
-        const bool frosted=radius>0&&tint<100&&!theme.highContrast&&backdrop(at,width,height,px(radius),work);
-        Bitmap output(width,height,width*4,PixelFormat32bppPARGB,reinterpret_cast<BYTE*>(surface->bits));
+        if(height<=0||!surface->resize(width,height)||!textLayer->resize(width,height))return false;
+        const BYTE neutral=theme.dark?30:247;
+        const COLORREF panel=theme.highContrast?theme.surface:RGB(neutral,neutral,neutral);
+        const bool useBlur=radius>0&&tint<100&&!theme.highContrast;
+        const bool captured=!theme.highContrast&&backdrop(at,width,height,useBlur?px(radius):0,px(24),work,neutral);
         {
+            Bitmap output(width,height,width*4,PixelFormat32bppPARGB,reinterpret_cast<BYTE*>(surface->bits));
             Graphics g(&output);
             g.Clear(Gdiplus::Color(0,0,0,0));
             g.SetSmoothingMode(SmoothingModeAntiAlias);
-            g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
             GraphicsPath shape;
             const REAL d=REAL(std::min({px(22),width-2,height-2}));
             if(d<=0)return false;
             shape.AddArc(0.5f,0.5f,d,d,180,90);shape.AddArc(width-d-0.5f,0.5f,d,d,270,90);
             shape.AddArc(width-d-0.5f,height-d-0.5f,d,d,0,90);shape.AddArc(0.5f,height-d-0.5f,d,d,90,90);
             shape.CloseFigure();
-            const COLORREF panel=theme.highContrast?theme.surface:theme.dark?RGB(31,47,59):RGB(244,251,255);
-            if(frosted){
+            if(useBlur&&captured){
                 Bitmap image(width,height,width*4,PixelFormat32bppPARGB,reinterpret_cast<BYTE*>(blurred.data()));
                 TextureBrush texture(&image,WrapModeClamp);
                 g.FillPath(&texture,&shape);
             }
             SolidBrush background(color(panel,theme.highContrast?255:BYTE(MulDiv(tint,255,100))));
             g.FillPath(&background,&shape);
-            Pen border(color(theme.accent,theme.highContrast?255:108),1.0f);
+            const BYTE outline=theme.dark?198:86;
+            Pen border(color(theme.highContrast?theme.text:RGB(outline,outline,outline),theme.highContrast?255:75),1.0f);
             g.DrawPath(&border,&shape);
-            SolidBrush titleInk(color(theme.accent)),bodyInk(color(theme.text));
+        }
+        {
+            Bitmap text(width,height,width*4,PixelFormat32bppPARGB,reinterpret_cast<BYTE*>(textLayer->bits));
+            Graphics g(&text);
+            g.Clear(Gdiplus::Color(0,0,0,0));
+            g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
+            const auto textColor=[&](int top,int lines){
+                if(theme.highContrast)return color(theme.text);
+                const int stride=useBlur?width:cleanBounds.right-cleanBounds.left;
+                const auto* pixels=useBlur?blurred.data():cleanBackdrop.data();
+                const int x=useBlur?0:at.x-cleanBounds.left,y=useBlur?0:at.y-cleanBounds.top;
+                int samples=0,luminance=0;
+                if(captured)for(int row=top;row<std::min(top+lines,height);row+=6)
+                    for(int col=padding;col<width-padding;col+=8){
+                        const auto* p=pixels+(size_t(y+row)*stride+x+col)*4;
+                        luminance+=(19*std::to_integer<int>(p[0])+183*std::to_integer<int>(p[1])+54*std::to_integer<int>(p[2]))/256;
+                        ++samples;
+                    }
+                const int desktop=samples?luminance/samples:neutral;
+                const BYTE ink=inkFor((neutral*tint+desktop*(100-tint))/100);
+                return color(RGB(ink,ink,ink));
+            };
+            const int bodyTop=padding+titleHeight+separation;
+            SolidBrush titleInk(textColor(padding,titleHeight)),bodyInk(textColor(bodyTop,bodyHeight));
             if(titleHeight)g.DrawString(current->title.c_str(),int(current->title.size()),&heading,
                 RectF(REAL(padding),REAL(padding),REAL(textWidth),REAL(titleHeight)),&format,&titleInk);
             if(bodyHeight)g.DrawString(current->body.c_str(),int(current->body.size()),&body,
-                RectF(REAL(padding),REAL(padding+titleHeight+separation),REAL(textWidth),REAL(bodyHeight)),&format,&bodyInk);
+                RectF(REAL(padding),REAL(bodyTop),REAL(textWidth),REAL(bodyHeight)),&format,&bodyInk);
         }
+        blendText(surface->bits,textLayer->bits,size_t(width)*height*4);
         SIZE size{width,height};POINT source{};
         BLENDFUNCTION blend{AC_SRC_OVER,0,255,AC_SRC_ALPHA};
         if(!UpdateLayeredWindow(window,nullptr,&at,&size,surface->dc,&source,0,&blend,ULW_ALPHA))return false;

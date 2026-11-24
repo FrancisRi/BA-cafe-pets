@@ -40,7 +40,7 @@ cmake --build build-rust-movement --target ba_cafe_lite_crowd_tests ba_cafe_lite
 
 ### Codex 消息气泡
 
-设置窗口右侧的「Codex 消息」栏提供预览、0–100% 的底色不透明度和 0–24 逻辑像素的背景模糊。气泡在有空间时显示于当前可见角色轮廓上方 8 个逻辑像素，贴近屏幕顶边时会移入工作区。
+设置窗口左侧导航的「Codex 消息」页提供预览、0–100% 的底色不透明度和 0–24 逻辑像素的背景模糊。底色采用中性灰阶，文字独立合成并按背景亮度选择深色或浅色字。气泡在有空间时显示于当前可见角色轮廓上方 8 个逻辑像素，贴近屏幕顶边时会移入工作区。
 
 启动桌宠后，将下列 Hook 添加到 Codex 的用户配置 `%USERPROFILE%\.codex\config.toml`，并将路径替换为实际使用的桌宠 EXE。已配置 `Stop` 的用户只需保留一条现有的桌宠 `Stop` 命令，再添加 `UserPromptSubmit` 和 `Interrupt`。桌面版可在「设置 → Hooks」审核并信任命令。 [Codex Hooks](https://learn.chatgpt.com/docs/hooks)
 
