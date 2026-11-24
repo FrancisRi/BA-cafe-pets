@@ -3,6 +3,8 @@
 #include <array>
 #include <cwchar>
 #include <tuple>
+#include "native_autostart.h"
+#include "native_codex_hooks.h"
 #include "native_outline_input.h"
 
 // Both interfaces use the existing host messages; the host remains responsible
@@ -26,6 +28,7 @@ struct NativeSettings {
     int page=0,scroll=0,contentHeight=0,quickRows=0;
     bool syncing=false,closing=false,notifiedVisible=false,notifiedPaused=false;
     bool editingOutline=false,endingOutline=false;
+    bool codexHooksConfigured=false;
     std::string highlighted,contextId;
     static std::wstring modeTitle(const std::string& mode){return mode=="formation"?L"列队":mode=="battle"?L"战斗":L"咖啡厅";}
     std::vector<std::string> modeChoices() const {std::vector<std::string> modes{"cafe"};if(last.value("battleAvailable",false))modes.push_back("battle");if(last.value("formationAvailable",false))modes.push_back("formation");return modes;}
@@ -169,6 +172,13 @@ struct NativeSettings {
         const auto note=[&](const wchar_t* text,int height=34){auto h=control(panel,L"STATIC",text,0,0,16,y,panelWidth(),height);SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(ui.small),FALSE);placeContent(h,16,y,0,height,true);y+=height+12;};
         const auto section=[&](const wchar_t* text){auto h=control(panel,L"STATIC",text,0,0,16,y,panelWidth(),24);SetPropW(h,L"FluentSection",reinterpret_cast<HANDLE>(1));SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(ui.heading),FALSE);placeContent(h,16,y,0,24,true);y+=34;};
         if(page==messagesPage){
+            auto connect=control(panel,L"BUTTON",L"连接 Codex",BS_OWNERDRAW,2217,16,y,142,36);
+            placeContent(connect,16,y,142,36);y+=44;
+            auto status=control(panel,L"STATIC",codexHooksConfigured?
+                L"已写入配置。请在 Codex「设置 → Hooks」中审核并信任桌宠命令。":
+                L"连接后，在 Codex 的 Hooks 设置中确认信任。",0,2218,16,y,panelWidth(),38);
+            SendMessageW(status,WM_SETFONT,reinterpret_cast<WPARAM>(ui.small),FALSE);
+            placeContent(status,16,y,0,38,true);y+=46;
             for(auto [labelId,sliderId,maximum,label]:{
                     std::tuple{2212,2215,100,L"不透明度"},std::tuple{2213,2216,24,L"背景模糊"}}){
                 auto heading=control(panel,L"STATIC",label,0,labelId,16,y,panelWidth(),22);
@@ -426,6 +436,17 @@ struct NativeSettings {
             return;
         }
         if(id==2210&&code==BN_CLICKED){const auto startup=last.value("startup",Json::object());if(startup.value("available",false)&&receive)receive({{"type","set_autostart"},{"enabled",!startup.value("enabled",false)}});sync();return;}
+        if(id==2217&&code==BN_CLICKED&&page==messagesPage){
+            try{
+                NativeCodexHooks::connect(NativeCodexHooks::home(),NativeAutostart::launchExecutable());
+                codexHooksConfigured=true;
+                SetWindowTextW(GetDlgItem(panel,2218),L"已写入配置。请在 Codex「设置 → Hooks」中审核并信任桌宠命令。");
+            }catch(const std::exception& e){
+                const auto detail=wide(e.what());
+                nativeMessageBox(window,detail.c_str(),L"无法连接 Codex",MB_OK|MB_ICONWARNING);
+            }
+            return;
+        }
         if(id==2214&&code==BN_CLICKED){
             if(receive)receive({{"type","preview_bubble"}});
             return;
@@ -481,7 +502,7 @@ struct NativeSettings {
         }else if(id>=100&&id<100+int(std::size(fields))){
             const auto it=std::find_if(controls.begin(),controls.end(),[&](const auto& c){return c.input==d.hwndItem;});if(it==controls.end())return;NativeFluent::round(dc,r,pressed?theme.pressed:hover?theme.hover:theme.surface,theme.line,theme.px(8));RECT icon{r.left+theme.px(14),r.top,r.left+theme.px(40),r.bottom};theme.glyph(dc,it->field->icon,icon,color);RECT text{r.left+theme.px(48),r.top+theme.px(12),r.right-theme.px(76),r.top+theme.px(34)};theme.label(dc,title,text,theme.font,color);text.top+=theme.px(24);text.bottom+=theme.px(24);theme.label(dc,it->field->detail,text,theme.small,disabled?theme.disabled:theme.muted);RECT track{r.right-theme.px(58),r.top+theme.px(24),r.right-theme.px(20),r.top+theme.px(44)};theme.toggle(dc,track,it->checked,!disabled);
         }else{
-            const bool nav=id==2||id==3,primary=id==2200;const auto fill=primary?(pressed?theme.muted:theme.accent):pressed?theme.pressed:hover?theme.hover:nav?theme.canvas:theme.surface;NativeFluent::round(dc,r,fill,nav?fill:primary?fill:theme.line,theme.px(6));if(primary)color=disabled?theme.disabled:theme.accentText;else if(id==2||id==2102||id==2104)color=disabled?theme.disabled:theme.danger;
+            const bool nav=id==2||id==3,primary=id==2200||id==2217;const auto fill=primary?(pressed?theme.muted:theme.accent):pressed?theme.pressed:hover?theme.hover:nav?theme.canvas:theme.surface;NativeFluent::round(dc,r,fill,nav?fill:primary?fill:theme.line,theme.px(6));if(primary)color=disabled?theme.disabled:theme.accentText;else if(id==2||id==2102||id==2104)color=disabled?theme.disabled:theme.danger;
             if(nav){RECT icon{r.left+theme.px(10),r.top,r.left+theme.px(36),r.bottom};theme.glyph(dc,id==2?L"\xE7E8":L"\xE897",icon,color);r.left+=theme.px(48);theme.label(dc,title,r,theme.font,color);}else theme.label(dc,title,r,theme.font,color,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS);
         }
         theme.focus(dc,r,d.hwndItem,focused&&!(d.itemState&ODS_NOFOCUSRECT));

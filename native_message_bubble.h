@@ -1,10 +1,14 @@
 #pragma once
 #include "native_messages.h"
+#include <d2d1.h>
+#include <dwrite.h>
+#include <wrl/client.h>
 #include <cstddef>
 #include <cstring>
 #include <numeric>
 
 struct NativeMessageBubble {
+    template<class T> using ComPtr=Microsoft::WRL::ComPtr<T>;
     struct Surface {
         HDC dc=CreateCompatibleDC(nullptr);
         HBITMAP bitmap{};
@@ -36,6 +40,9 @@ struct NativeMessageBubble {
     RECT cleanBounds{};
     NativeFluent theme;
     ULONG_PTR gdiplus{};
+    ComPtr<IDWriteFactory> textFactory;
+    ComPtr<ID2D1Factory> drawingFactory;
+    ComPtr<ID2D1DCRenderTarget> textTarget;
     std::optional<NativeMessages::Message> current;
     ULONGLONG expires=0,earliestAdvance=0,nextPaint=0;
     int opacity=-1,blur=-1;
@@ -147,31 +154,73 @@ struct NativeMessageBubble {
         return {alpha,GetRValue(rgb),GetGValue(rgb),GetBValue(rgb)};
     }
     static BYTE inkFor(int background){
-        return background>=118?19:248;
+        return background>=118?0:255;
+    }
+    bool openTextTarget(){
+        if(!textFactory&&FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,__uuidof(IDWriteFactory),
+            reinterpret_cast<IUnknown**>(textFactory.GetAddressOf()))))return false;
+        if(!drawingFactory&&FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED,drawingFactory.GetAddressOf())))return false;
+        if(!textTarget){
+            const auto properties=D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT,
+                D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,D2D1_ALPHA_MODE_PREMULTIPLIED),96,96,
+                D2D1_RENDER_TARGET_USAGE_GDI_COMPATIBLE);
+            if(FAILED(drawingFactory->CreateDCRenderTarget(&properties,textTarget.GetAddressOf())))return false;
+            textTarget->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+        }
+        return true;
+    }
+    bool layoutText(const std::wstring& value,int size,DWRITE_FONT_WEIGHT weight,int width,int limit,
+        ComPtr<IDWriteTextLayout>& layout,DWRITE_TEXT_METRICS& metrics){
+        if(value.empty())return true;
+        ComPtr<IDWriteTextFormat> format;
+        if(FAILED(textFactory->CreateTextFormat(L"Segoe UI",nullptr,weight,DWRITE_FONT_STYLE_NORMAL,
+            DWRITE_FONT_STRETCH_NORMAL,float(size),L"zh-CN",format.GetAddressOf())))return false;
+        if(FAILED(textFactory->CreateTextLayout(value.c_str(),UINT32(value.size()),format.Get(),float(width),
+            float(limit),layout.GetAddressOf())))return false;
+        const DWRITE_TRIMMING trimming{DWRITE_TRIMMING_GRANULARITY_CHARACTER,0,0};
+        ComPtr<IDWriteInlineObject> ellipsis;
+        if(SUCCEEDED(textFactory->CreateEllipsisTrimmingSign(format.Get(),ellipsis.GetAddressOf())))
+            layout->SetTrimming(&trimming,ellipsis.Get());
+        return SUCCEEDED(layout->GetMetrics(&metrics));
+    }
+    bool drawTextMask(int padding,int bodyTop,IDWriteTextLayout* title,IDWriteTextLayout* body){
+        const RECT bounds{0,0,textLayer->width,textLayer->height};
+        if(FAILED(textTarget->BindDC(textLayer->dc,&bounds)))return false;
+        ComPtr<ID2D1SolidColorBrush> white;
+        if(FAILED(textTarget->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::White),white.GetAddressOf())))return false;
+        textTarget->BeginDraw();
+        textTarget->Clear(D2D1::ColorF(0.f,0.f,0.f,0.f));
+        if(title)textTarget->DrawTextLayout(D2D1::Point2F(float(padding),float(padding)),title,white.Get(),D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        if(body)textTarget->DrawTextLayout(D2D1::Point2F(float(padding),float(bodyTop)),body,white.Get(),D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        const auto result=textTarget->EndDraw();
+        if(result==D2DERR_RECREATE_TARGET)textTarget.Reset();
+        GdiFlush();
+        return SUCCEEDED(result);
+    }
+    static void colorText(std::byte* from,std::byte* to,COLORREF ink){
+        const std::array channels{GetBValue(ink),GetGValue(ink),GetRValue(ink)};
+        for(auto* pixel=from;pixel<to;pixel+=4){
+            const int coverage=std::to_integer<int>(pixel[3]);
+            for(size_t ch=0;ch<channels.size();++ch)pixel[ch]=std::byte((channels[ch]*coverage+127)/255);
+        }
     }
     bool paint(RECT model,RECT work,UINT dpi,int tint,int radius){
         using namespace Gdiplus;
-        if(!open())return false;
+        if(!open()||!openTextTarget())return false;
         if(!surface){surface.emplace();textLayer.emplace();}
         if(dpi!=theme.dpi||!theme.font||paintedRevision!=revision)theme.load(dpi);
         const auto px=[&](int value){return theme.px(value);};
-        const int width=std::max(1,std::min<int>(px(328),work.right-work.left));
+        const int width=std::max(1,std::min<int>(px(352),work.right-work.left));
         const int padding=std::min(px(14),width/4),textWidth=width-2*padding;
-        Gdiplus::Font heading(L"Segoe UI",REAL(px(14)),FontStyleBold,UnitPixel);
-        Gdiplus::Font body(L"Segoe UI",REAL(px(14)),FontStyleRegular,UnitPixel);
-        StringFormat format;
-        format.SetTrimming(StringTrimmingEllipsisCharacter);
-        format.SetFormatFlags(StringFormatFlagsLineLimit);
-        const auto heightFor=[&](const std::wstring& text,Gdiplus::Font& font,int maxHeight){
-            if(text.empty())return 0;
-            Graphics measure(surface->dc);
-            RectF layout(0,0,REAL(textWidth),REAL(maxHeight)),bounds;
-            if(measure.MeasureString(text.c_str(),int(text.size()),&font,layout,&format,&bounds)!=Ok)return maxHeight;
-            return std::clamp(int(std::ceil(bounds.Height)),px(19),maxHeight);
-        };
-        const int titleHeight=heightFor(current->title,heading,px(22));
-        const int bodyHeight=heightFor(current->body,body,px(100));
+        const int titleLimit=px(28),bodyLimit=px(120);
+        ComPtr<IDWriteTextLayout> title,body;
+        DWRITE_TEXT_METRICS titleMetrics{},bodyMetrics{};
+        if(!layoutText(current->title,px(16),DWRITE_FONT_WEIGHT_SEMI_BOLD,textWidth,titleLimit,title,titleMetrics)||
+            !layoutText(current->body,px(16),DWRITE_FONT_WEIGHT_MEDIUM,textWidth,bodyLimit,body,bodyMetrics))return false;
+        const int titleHeight=std::min(int(std::ceil(titleMetrics.height)),titleLimit);
+        const int bodyHeight=std::min(int(std::ceil(bodyMetrics.height)),bodyLimit);
         const int separation=titleHeight&&bodyHeight?px(3):0;
+        const int bodyTop=padding+titleHeight+separation;
         const int height=std::min<int>(titleHeight+bodyHeight+2*padding+separation,work.bottom-work.top);
         POINT at=position(model,work,{width,height},px(8));
         if(height<=0||!surface->resize(width,height)||!textLayer->resize(width,height))return false;
@@ -201,34 +250,26 @@ struct NativeMessageBubble {
             Pen border(color(theme.highContrast?theme.text:RGB(outline,outline,outline),theme.highContrast?255:75),1.0f);
             g.DrawPath(&border,&shape);
         }
-        {
-            Bitmap text(width,height,width*4,PixelFormat32bppPARGB,reinterpret_cast<BYTE*>(textLayer->bits));
-            Graphics g(&text);
-            g.Clear(Gdiplus::Color(0,0,0,0));
-            g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
-            const auto textColor=[&](int top,int lines){
-                if(theme.highContrast)return color(theme.text);
-                const int stride=useBlur?width:cleanBounds.right-cleanBounds.left;
-                const auto* pixels=useBlur?blurred.data():cleanBackdrop.data();
-                const int x=useBlur?0:at.x-cleanBounds.left,y=useBlur?0:at.y-cleanBounds.top;
-                int samples=0,luminance=0;
-                if(captured)for(int row=top;row<std::min(top+lines,height);row+=6)
-                    for(int col=padding;col<width-padding;col+=8){
-                        const auto* p=pixels+(size_t(y+row)*stride+x+col)*4;
-                        luminance+=(19*std::to_integer<int>(p[0])+183*std::to_integer<int>(p[1])+54*std::to_integer<int>(p[2]))/256;
-                        ++samples;
-                    }
-                const int desktop=samples?luminance/samples:neutral;
-                const BYTE ink=inkFor((neutral*tint+desktop*(100-tint))/100);
-                return color(RGB(ink,ink,ink));
-            };
-            const int bodyTop=padding+titleHeight+separation;
-            SolidBrush titleInk(textColor(padding,titleHeight)),bodyInk(textColor(bodyTop,bodyHeight));
-            if(titleHeight)g.DrawString(current->title.c_str(),int(current->title.size()),&heading,
-                RectF(REAL(padding),REAL(padding),REAL(textWidth),REAL(titleHeight)),&format,&titleInk);
-            if(bodyHeight)g.DrawString(current->body.c_str(),int(current->body.size()),&body,
-                RectF(REAL(padding),REAL(bodyTop),REAL(textWidth),REAL(bodyHeight)),&format,&bodyInk);
-        }
+        if(!drawTextMask(padding,bodyTop,title.Get(),body.Get()))return false;
+        const auto textColor=[&](int top,int lines,int columns){
+            if(theme.highContrast)return theme.text;
+            const int stride=useBlur?width:cleanBounds.right-cleanBounds.left;
+            const auto* pixels=useBlur?blurred.data():cleanBackdrop.data();
+            const int x=useBlur?0:at.x-cleanBounds.left,y=useBlur?0:at.y-cleanBounds.top;
+            int samples=0,luminance=0;
+            if(captured)for(int row=top;row<std::min(top+lines,height);row+=4)
+                for(int col=padding;col<std::min(padding+columns,width-padding);col+=4){
+                    const auto* p=pixels+(size_t(y+row)*stride+x+col)*4;
+                    luminance+=(19*std::to_integer<int>(p[0])+183*std::to_integer<int>(p[1])+54*std::to_integer<int>(p[2]))/256;
+                    ++samples;
+                }
+            const int desktop=samples?luminance/samples:neutral;
+            const BYTE ink=inkFor((neutral*tint+desktop*(100-tint))/100);
+            return RGB(ink,ink,ink);
+        };
+        auto* const bodyPixels=textLayer->bits+size_t(std::min(bodyTop,height))*width*4;
+        colorText(textLayer->bits,bodyPixels,textColor(padding,titleHeight,int(std::ceil(titleMetrics.width))));
+        colorText(bodyPixels,textLayer->bits+size_t(width)*height*4,textColor(bodyTop,bodyHeight,int(std::ceil(bodyMetrics.width))));
         blendText(surface->bits,textLayer->bits,size_t(width)*height*4);
         SIZE size{width,height};POINT source{};
         BLENDFUNCTION blend{AC_SRC_OVER,0,255,AC_SRC_ALPHA};

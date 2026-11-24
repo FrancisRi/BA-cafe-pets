@@ -22,7 +22,7 @@ struct NativeAutostart {
         wchar_t launcher[32768]{};
         const auto size=GetEnvironmentVariableW(L"BA_NATIVE_LAUNCHER_PATH",launcher,32768);
         if(size){
-            if(size>=32768||!std::filesystem::is_regular_file(launcher))throw std::runtime_error("无法定位启动程序，请从完整发行包重新启动后设置开机自启。");
+            if(size>=32768||!std::filesystem::is_regular_file(launcher))throw std::runtime_error("无法定位启动程序，请从完整发行包重新启动。");
             return std::filesystem::absolute(launcher);
         }
         wchar_t module[32768]{};const auto count=GetModuleFileNameW(nullptr,module,32768);

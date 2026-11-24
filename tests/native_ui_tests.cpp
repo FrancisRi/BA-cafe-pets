@@ -48,6 +48,93 @@ static void checkBubbleRendering(){
     }
     check(opaque>20&&NativeMessageBubble::inkFor(20)>NativeMessageBubble::inkFor(230),
         "Rendered text retains solid pixels and uses contrasting ink on light and dark backgrounds");
+    bubble.current->body=L"复杂汉字清晰度与换行测试。Mixed English and 中文 12345。";
+    size_t lowerCount=0;
+    for(UINT dpi:{96u,144u,192u}){
+        check(bubble.paint(model,work,dpi,0,0),"DirectWrite draws mixed Chinese and Latin text at monitor DPI");
+        check(bubble.textLayer->width==MulDiv(352,dpi,96),"Text surface uses the monitor's full physical width");
+        size_t solid=0,edges=0;
+        const auto* pixels=bubble.textLayer->bits;
+        for(int row=MulDiv(45,dpi,96);row<bubble.textLayer->height;++row)
+            for(int col=0;col<bubble.textLayer->width;++col){
+                const auto coverage=pixels[(size_t(row)*bubble.textLayer->width+col)*4+3];
+                solid+=coverage==std::byte{255};
+                edges+=coverage!=std::byte{}&&coverage!=std::byte{255};
+            }
+        check(solid>lowerCount&&edges>20,"Higher DPI adds samples to solid glyph strokes and preserves anti-aliased edges");
+        lowerCount=solid;
+    }
+}
+static std::string contents(const std::filesystem::path& path){
+    std::ifstream input(path,std::ios::binary);
+    check(bool(input),"Open desktop integration fixture");
+    return std::string(std::istreambuf_iterator<char>(input),{});
+}
+static void checkCodexConnection(NativeSettings& menu){
+    namespace fs=std::filesystem;
+    const auto root=fs::current_path()/L"artifacts"/(L"ba-codex-connect-"+std::to_wstring(GetCurrentProcessId()));
+    const auto launcher=root/L"BA Cafe 中文"/L"BA-Cafe-Pets-1.2.0-x64.exe";
+    const auto home=root/L"custom-codex-home",legacy=root/L"inline";
+    fs::create_directories(launcher.parent_path());fs::create_directories(home);fs::create_directories(legacy);
+    std::ofstream(launcher).put('\n');
+    const auto file=home/L"hooks.json";
+    const auto command=std::string("\"")+utf8(launcher.wstring())+"\" --codex-hook";
+    const Json thirdParty={{"type","command"},{"command","other-hook.exe"},{"timeout",10}};
+    const Json stop={{"matcher","*"},{"hooks",Json::array({thirdParty,
+        {{"type","command"},{"command","C:/Old/BA-Cafe-Pets.exe --codex-hook"}},
+        {{"type","command"},{"command","C:/Old/BA-Cafe-Pets-1.1.0-x64.exe --codex-hook"}}})}};
+    std::ofstream(file)<<Json{{"description","keep me"},{"hooks",{{"Stop",Json::array({stop})},
+        {"PreToolUse",Json::array({{{"hooks",Json::array({thirdParty})}}})}}}}.dump();
+    check(SetEnvironmentVariableW(L"CODEX_HOME",home.c_str())&&
+        SetEnvironmentVariableW(L"BA_NATIVE_LAUNCHER_PATH",launcher.c_str()),"Configure isolated single-file Codex integration fixture");
+    SendMessageW(GetDlgItem(menu.panel,2217),BM_CLICK,0,0);
+    const auto edited=contents(file);
+    const auto document=Json::parse(edited);
+    const auto& hooks=document.at("hooks");
+    check(document.at("description")=="keep me"&&hooks.at("PreToolUse")[0]["hooks"][0]==thirdParty,
+        "Connecting preserves unrelated hook events and metadata");
+    const auto& handlers=hooks.at("Stop")[0]["hooks"];
+    check(handlers.size()==2&&handlers[0]==thirdParty&&handlers[1]["command"]==command,
+        "Connecting replaces duplicate desktop pet commands and resolves the outer executable");
+    check(hooks.at("UserPromptSubmit")[0]["hooks"][0]["command"]==command&&
+        hooks.at("Interrupt")[0]["hooks"][0]["command"]==command,"Connect installs all three events");
+    wchar_t status[128]{};
+    GetWindowTextW(GetDlgItem(menu.panel,2218),status,int(std::size(status)));
+    check(std::wstring_view(status).find(L"审核并信任")!=std::wstring_view::npos,"Connect explains Codex trust review");
+    SendMessageW(GetDlgItem(menu.panel,2217),BM_CLICK,0,0);
+    check(contents(file)==edited,"Connecting twice leaves an identical configuration");
+    SetEnvironmentVariableW(L"CODEX_HOME",nullptr);
+    SetEnvironmentVariableW(L"BA_NATIVE_LAUNCHER_PATH",nullptr);
+
+    const auto config=legacy/L"config.toml";
+    const std::string original="notify = ['other.exe'] # 保留原通知\r\n"
+        "[[hooks.Stop]]\r\n"
+        "[[hooks.Stop.hooks]]\r\n"
+        "type = 'command'\r\n"
+        "command = 'C:/Old/BA-Cafe-Pets.exe --codex-hook' # 保留行内注释\r\n"
+        "[hooks.state]\r\n";
+    std::ofstream(config,std::ios::binary)<<original;
+    NativeCodexHooks::connect(legacy,launcher);
+    const auto migrated=contents(config);
+    check(migrated.starts_with("notify = ['other.exe'] # 保留原通知\r\n")&&
+        migrated.find("# 保留行内注释\r\n")!=std::string::npos&&
+        migrated.find("C:/Old/BA-Cafe-Pets.exe")==std::string::npos&&
+        migrated.find("[[hooks.UserPromptSubmit.hooks]]")!=std::string::npos&&
+        migrated.find("[[hooks.Interrupt.hooks]]")!=std::string::npos&&
+        !fs::exists(legacy/L"hooks.json"),"Connect updates legacy inline hooks without rewriting surrounding TOML");
+    NativeCodexHooks::connect(legacy,launcher);
+    check(contents(config)==migrated,"Connecting again leaves migrated inline hooks unchanged");
+
+    const auto fresh=root/L"new-install";
+    NativeCodexHooks::connect(fresh,launcher);
+    const auto freshHooks=Json::parse(contents(fresh/L"hooks.json")).at("hooks");
+    check(freshHooks.size()==3&&freshHooks.at("UserPromptSubmit")[0]["hooks"][0]["command"]==command&&
+        !fs::exists(fresh/L"config.toml"),"First-time connection creates a standalone three-event hook file");
+
+    std::ofstream(file,std::ios::binary|std::ios::trunc)<<"{invalid";
+    bool rejected=false;
+    try{NativeCodexHooks::connect(home,launcher);}catch(const std::exception&){rejected=true;}
+    check(rejected&&contents(file)=="{invalid","Malformed user config remains intact");
 }
 struct TestDesktop {
     HDESK previous=GetThreadDesktop(GetCurrentThreadId()),isolated{};
@@ -238,6 +325,7 @@ int main(int argc,char** argv){
         const auto blurSlider=GetDlgItem(menu.panel,2216);
         check(menu.page==NativeSettings::messagesPage&&IsWindowVisible(opacitySlider)&&IsWindowVisible(blurSlider),
             "The left navigation opens the Codex message page in the main panel");
+        checkCodexConnection(menu);
         SendMessageW(opacitySlider,TBM_SETPOS,TRUE,63);
         SendMessageW(blurSlider,TBM_SETPOS,TRUE,14);
         SendMessageW(menu.panel,WM_HSCROLL,TB_THUMBPOSITION,reinterpret_cast<LPARAM>(blurSlider));

@@ -18,6 +18,7 @@ raylib 6.0 (zlib): https://github.com/raysan5/raylib
 cgltf (MIT): https://github.com/jkuhlmann/cgltf
 GLFW (zlib): https://www.glfw.org/
 BehaviorTree.CPP 4.8.0 (MIT): https://github.com/BehaviorTree/BehaviorTree.CPP
+toml++ 3.4.0 (MIT): https://github.com/marzer/tomlplusplus
 BehaviorTree.CPP helper libraries: tinyxml2, minitrace, minicoro, lexy.
 Their license texts are included alongside this notice.
 GCC libstdc++/libgcc: GPLv3 with GCC Runtime Library Exception.

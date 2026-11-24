@@ -125,7 +125,7 @@ def run(binary, sender):
             first = wintypes.RECT()
             assert user.GetWindowRect(hwnd, ctypes.byref(first))
             actor = wait_for(lambda: window(pet.pid, "BaCafeNativePet"))
-            expected_width = round(328 * user.GetDpiForWindow(actor) / 96)
+            expected_width = round(352 * user.GetDpiForWindow(actor) / 96)
             assert first.right - first.left == expected_width, (first.right - first.left, expected_width)
             append_record("正在检查现有代码。")
             wait_for(lambda: message_is("正在检查现有代码。"), limit=4)

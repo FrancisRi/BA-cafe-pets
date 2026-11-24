@@ -41,15 +41,19 @@ else()
         URL_HASH SHA256=af0d212cf3c7fe70a484b92edf263d8d21b70df41909cc83d251f5800bad2205)
     FetchContent_MakeAvailable(behaviortree_cpp)
 endif()
+FetchContent_Declare(tomlplusplus
+    URL https://codeload.github.com/marzer/tomlplusplus/tar.gz/refs/tags/v3.4.0
+    URL_HASH SHA256=8517f65938a4faae9ccf8ebb36631a38c1cadfb5efa85d9a72e15b9e97d25155)
+FetchContent_MakeAvailable(tomlplusplus)
 set(BA_BINARY_FILENAME "BA-Cafe-Pets.exe")
 set(BA_FILE_DESCRIPTION "BA Cafe Pets native desktop companion")
 configure_file(version.rc.in "${CMAKE_CURRENT_BINARY_DIR}/native_version.rc" @ONLY)
-add_executable(ba_cafe_lite_native WIN32 main.cpp gltf_model.cpp native_renderer.cpp "${CMAKE_CURRENT_BINARY_DIR}/native_version.rc")
+add_executable(ba_cafe_lite_native WIN32 main.cpp gltf_model.cpp native_renderer.cpp native_codex_hooks.cpp "${CMAKE_CURRENT_BINARY_DIR}/native_version.rc")
 set(BA_NATIVE_EXECUTABLE_NAME "BA-Cafe-Pets" CACHE STRING "Executable filename (allows building alongside a running version)")
 set_target_properties(ba_cafe_lite_native PROPERTIES OUTPUT_NAME "${BA_NATIVE_EXECUTABLE_NAME}" RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 target_include_directories(ba_cafe_lite_native PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${BA_ROOT}/shared")
 target_compile_definitions(ba_cafe_lite_native PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00)
-target_link_libraries(ba_cafe_lite_native PRIVATE raylib behaviortree_cpp user32 gdi32 gdiplus comdlg32 shell32 dwmapi comctl32 wtsapi32 uxtheme advapi32 bcrypt ole32 uuid)
+target_link_libraries(ba_cafe_lite_native PRIVATE raylib behaviortree_cpp tomlplusplus::tomlplusplus user32 gdi32 gdiplus d2d1 dwrite comdlg32 shell32 dwmapi comctl32 wtsapi32 uxtheme advapi32 bcrypt ole32 uuid)
 if(MSVC)
     target_compile_options(ba_cafe_lite_native PRIVATE /utf-8)
     # native_version.rc already embeds the application's manifest.
@@ -67,6 +71,7 @@ add_custom_command(TARGET ba_cafe_lite_native POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${raylib_SOURCE_DIR}/LICENSE" "$<TARGET_FILE_DIR:ba_cafe_lite_native>/licenses/raylib.txt"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${raylib_SOURCE_DIR}/src/external/glfw/LICENSE.md" "$<TARGET_FILE_DIR:ba_cafe_lite_native>/licenses/GLFW.txt"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/licenses" "$<TARGET_FILE_DIR:ba_cafe_lite_native>/licenses"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${tomlplusplus_SOURCE_DIR}/LICENSE" "$<TARGET_FILE_DIR:ba_cafe_lite_native>/licenses/tomlplusplus.txt"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${behaviortree_cpp_SOURCE_DIR}/LICENSE" "$<TARGET_FILE_DIR:ba_cafe_lite_native>/licenses/BehaviorTree.CPP.txt"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/README.md" "$<TARGET_FILE_DIR:ba_cafe_lite_native>/README.md"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/CREDITS.md" "${CMAKE_CURRENT_SOURCE_DIR}/NOTICE.md" "$<TARGET_FILE_DIR:ba_cafe_lite_native>"
@@ -81,7 +86,7 @@ foreach(part IN ITEMS tinyxml2 minitrace minicoro lexy)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${notice_file}" "$<TARGET_FILE_DIR:ba_cafe_lite_native>/licenses/${part}.txt")
 endforeach()
 
-add_executable(ba_cafe_lite_ui_tests EXCLUDE_FROM_ALL tests/native_ui_tests.cpp "${CMAKE_CURRENT_BINARY_DIR}/native_version.rc")
+add_executable(ba_cafe_lite_ui_tests EXCLUDE_FROM_ALL tests/native_ui_tests.cpp native_codex_hooks.cpp "${CMAKE_CURRENT_BINARY_DIR}/native_version.rc")
 add_executable(ba_cafe_lite_model_library_tests EXCLUDE_FROM_ALL tests/model_library_tests.cpp)
 add_executable(ba_cafe_lite_model_import_tests EXCLUDE_FROM_ALL tests/model_import_tests.cpp)
 add_executable(ba_cafe_lite_model_storage_tests EXCLUDE_FROM_ALL tests/model_storage_tests.cpp)
@@ -120,7 +125,7 @@ else()
 endif()
 target_include_directories(ba_cafe_lite_ui_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${behaviortree_cpp_SOURCE_DIR}/include")
 target_compile_definitions(ba_cafe_lite_ui_tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00)
-target_link_libraries(ba_cafe_lite_ui_tests PRIVATE user32 gdi32 gdiplus dwmapi comctl32 uxtheme advapi32)
+target_link_libraries(ba_cafe_lite_ui_tests PRIVATE tomlplusplus::tomlplusplus user32 gdi32 gdiplus d2d1 dwrite dwmapi comctl32 uxtheme advapi32 shell32)
 if(MSVC)
     target_compile_options(ba_cafe_lite_ui_tests PRIVATE /utf-8)
     target_link_options(ba_cafe_lite_ui_tests PRIVATE /MANIFEST:NO)
