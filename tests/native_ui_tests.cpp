@@ -135,7 +135,7 @@ int main(int argc,char** argv){
         std::vector<Json> sent;std::vector<bool> visibility,pauses;
         NativeSettings menu;menu.snapshot=[&]{return state;};menu.visibility=[&](bool value){visibility.push_back(value);};
         menu.pauseChanged=[&](bool value){pauses.push_back(value);};
-        menu.receive=[&](const Json& message){sent.push_back(message);const auto type=message.at("type");if(type=="set_autostart")state["startup"]["enabled"]=message["enabled"];if(type=="save")state["value"]=message.at("value");if(type=="roster_toggle")for(auto& row:state["characters"])if(row["id"]==message["id"]){row["active"]=message["active"];state["activeCount"]=state["activeCount"].get<int>()+(message["active"].get<bool>()?1:-1);}if(type=="roster_select")state["selectedId"]=message.at("id");};
+        menu.receive=[&](const Json& message){sent.push_back(message);const auto type=message.at("type");if(type=="set_autostart")state["startup"]["enabled"]=message["enabled"];if(type=="save")state["value"]=message.at("value");if(type=="bubble_settings")for(const auto* key:{"bubbleOpacity","bubbleBlur"})state["value"][key]=message.at(key);if(type=="roster_toggle")for(auto& row:state["characters"])if(row["id"]==message["id"]){row["active"]=message["active"];state["activeCount"]=state["activeCount"].get<int>()+(message["active"].get<bool>()?1:-1);}if(type=="roster_select")state["selectedId"]=message.at("id");};
         menu.sync();check(!menu.visible(),"Initial sync creates no windows");
         menu.showQuick(nullptr,std::filesystem::current_path());pump(menu);
         checkFlyoutFrame(menu.quickWindow,menu.quickUi);
@@ -193,17 +193,22 @@ int main(int argc,char** argv){
         SendMessageW(menu.window,WM_CHANGEUISTATE,MAKEWPARAM(UIS_CLEAR,UISF_HIDEFOCUS),0);const auto navigation=GetDlgItem(menu.window,1000);check(drawButton(menu,navigation,0)!=drawButton(menu,navigation,ODS_FOCUS),"Keyboard navigation retains a visible Fluent focus cue");
         menu.quickCommand(3013);check(sent.back().at("type")=="open_models_folder","Quick menu opens the persistent model folder");
         size_t fieldCount=0;for(int p=0;p<3;++p){menu.page=p;menu.build();fieldCount+=menu.controls.size();for(const auto& c:menu.controls)check(IsWindow(c.input),"Every existing setting has a real input control");}
-        check(fieldCount==25,"Existing settings and both bubble sliders have native controls");
+        check(fieldCount==23,"Bubble controls are outside the main settings pages");
         menu.page=0;menu.build();const auto inspectionOptions=state["value"];menu.command(122,BN_CLICKED);
         check(state["value"]["inspectionMode"]==true&&IsWindowEnabled(GetDlgItem(menu.panel,122)),"Full interface enables inspection through its real save path");
         for(const auto& c:menu.controls)if(NativeSettings::inspectionBlocks(c.field->key))check(!IsWindowEnabled(c.input)&&!c.checked,"Full interface blocks overridden behavior without erasing its saved value");
         menu.save();menu.command(122,BN_CLICKED);check(state["value"]==inspectionOptions,"Full interface restores original values after inspection and an intervening save");
-        SendMessageW(GetDlgItem(menu.panel,123),TBM_SETPOS,TRUE,63);
-        SendMessageW(GetDlgItem(menu.panel,124),TBM_SETPOS,TRUE,14);
-        menu.save();
+        menu.page=1;menu.build();
+        const auto opacitySlider=GetDlgItem(menu.messagePanel,2215);
+        const auto blurSlider=GetDlgItem(menu.messagePanel,2216);
+        check(IsWindowVisible(opacitySlider)&&IsWindowVisible(blurSlider),"The right column stays available on the cafe page");
+        SendMessageW(opacitySlider,TBM_SETPOS,TRUE,63);
+        SendMessageW(blurSlider,TBM_SETPOS,TRUE,14);
+        SendMessageW(menu.messagePanel,WM_HSCROLL,TB_THUMBPOSITION,reinterpret_cast<LPARAM>(blurSlider));
         check(state["value"]["bubbleOpacity"]==63&&state["value"]["bubbleBlur"]==14,
-            "Bubble tint and blur move through the global settings save path");
-        menu.command(2214,BN_CLICKED);
+            "The right column saves both bubble preferences");
+        check(sent.back().at("type")=="bubble_settings","The sidebar saves independently of the main page");
+        SendMessageW(GetDlgItem(menu.messagePanel,2214),BM_CLICK,0,0);
         check(sent.back().at("type")=="preview_bubble","The preview button requests a real bubble");
         menu.page=0;menu.build();checkRepainting(menu);SetWindowTextW(GetDlgItem(menu.panel,108),L"not a number");const auto invalidCount=sent.size();menu.save();check(sent.size()==invalidCount,"Invalid numeric input is not submitted");
         const auto quality=GetDlgItem(menu.panel,101);wchar_t qualityLabel[80]{};SendMessageW(quality,CB_GETLBTEXT,2,reinterpret_cast<LPARAM>(qualityLabel));check(std::wstring(qualityLabel).find(L"4× MSAA")!=std::wstring::npos,"Quality choice explicitly identifies MSAA");
@@ -253,7 +258,20 @@ int main(int argc,char** argv){
         menu.highlighted="1";state["selectedId"]="1";state["characters"][1]["active"]=true;state["activeCount"]=2;menu.sync();
         state["selectedId"]="a";state["characters"][1]["active"]=false;state["activeCount"]=1;menu.sync();
         check(menu.highlighted=="1"&&SendMessageW(menu.list,LB_GETCURSEL,0,0)==1,"Hiding the current model preserves its list selection for showing it again");
-        for(UINT dpi:{96u,144u,192u}){menu.reloadTheme(menu.window,dpi);SetWindowPos(menu.window,nullptr,0,0,menu.u(920),menu.u(680),SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);pump(menu);RECT panel{};GetClientRect(menu.panel,&panel);for(auto h:menu.content){RECT r{};GetWindowRect(h,&r);MapWindowPoints(nullptr,menu.panel,reinterpret_cast<POINT*>(&r),2);if(r.left<0||r.right>panel.right+2)std::cerr<<"Layout: dpi="<<dpi<<" id="<<GetDlgCtrlID(h)<<" left="<<r.left<<" right="<<r.right<<" panel="<<panel.right<<'\n';check(r.left>=0&&r.right<=panel.right+2,"Full UI fits at 100/150/200 percent DPI");}}
+        for(UINT dpi:{96u,144u,192u}){
+            menu.reloadTheme(menu.window,dpi);SetWindowPos(menu.window,nullptr,0,0,menu.u(920),menu.u(680),SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);pump(menu);
+            RECT panel{};GetClientRect(menu.panel,&panel);
+            for(auto h:menu.content){RECT r{};GetWindowRect(h,&r);MapWindowPoints(nullptr,menu.panel,reinterpret_cast<POINT*>(&r),2);if(r.left<0||r.right>panel.right+2)std::cerr<<"Layout: dpi="<<dpi<<" id="<<GetDlgCtrlID(h)<<" left="<<r.left<<" right="<<r.right<<" panel="<<panel.right<<'\n';check(r.left>=0&&r.right<=panel.right+2,"Full UI fits at 100/150/200 percent DPI");}
+            RECT middle{},side{},window{};
+            GetWindowRect(menu.panel,&middle);GetWindowRect(menu.messagePanel,&side);GetClientRect(menu.window,&window);
+            MapWindowPoints(menu.window,nullptr,reinterpret_cast<POINT*>(&window),2);
+            check(side.left>=middle.right&&side.right<=window.right,"The Codex column fits to the right of settings");
+            for(auto h:{opacitySlider,blurSlider,GetDlgItem(menu.messagePanel,2214)}){
+                RECT bounds{};GetWindowRect(h,&bounds);
+                check(bounds.left>=side.left&&bounds.right<=side.right&&bounds.bottom<=side.bottom,
+                    "The Codex sliders and preview fit inside the side column");
+            }
+        }
         menu.showQuick(nullptr,std::filesystem::current_path());pump(menu);
         check(menu.pausesPets()&&pauses.back(),"Quick menu can pause pets while full settings remain open");
         menu.hideQuick();pump(menu);

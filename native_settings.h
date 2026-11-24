@@ -7,7 +7,7 @@
 // Both interfaces use the existing host messages; the host remains responsible
 // for validation, loading, behavior and persistence.
 struct NativeSettings {
-    HWND window{},panel{},list{},listEmpty{},progress{},quickWindow{},quickList{},modelMenu{},outlineValue{},outlineHost{};
+    HWND window{},panel{},messagePanel{},list{},listEmpty{},progress{},quickWindow{},quickList{},modelMenu{},outlineValue{},outlineHost{};
     NativeFluent ui,quickUi,modelUi;
     std::function<Json()> snapshot;
     std::function<void(const Json&)> receive;
@@ -68,9 +68,7 @@ struct NativeSettings {
         {"clickProbability",L"点击指挥概率",L"点击时触发指挥动作的概率 · %",1,L"\xE8B0"},
         {"keyboardIdle",L"无键盘输入收枪",L"停止键盘输入后的等待时间 · 秒",1,L"\xE823"},
         {"rightDragRotation",L"右键拖动旋转",L"所有模式与 Exs 中均可手动调整朝向",0,L"\xE7AD"},
-        {"inspectionMode",L"观赏模式",L"暂停移动与追踪；右键拖动可水平旋转和上下翻转",0,L"\xE890"},
-        {"bubbleOpacity",L"气泡不透明度",L"气泡底色强度",4,L"\xE7F4"},
-        {"bubbleBlur",L"气泡背景模糊",L"背景模糊半径",4,L"\xE81E"}
+        {"inspectionMode",L"观赏模式",L"暂停移动与追踪；右键拖动可水平旋转和上下翻转",0,L"\xE890"}
     };
     ~NativeSettings(){closing=true;editingOutline=false;if(modelMenu)DestroyWindow(modelMenu);if(quickWindow)DestroyWindow(quickWindow);if(window)DestroyWindow(window);}
     int u(int value) const {return ui.px(value);}
@@ -156,11 +154,25 @@ struct NativeSettings {
     }
     void layout(){
         if(!window||!panel)return;RECT r{};GetClientRect(window,&r);const int w=ui.dip(r.right),h=ui.dip(r.bottom);
-        const auto place=[&](int id,int x,int y,int width,int height){SetWindowPos(GetDlgItem(window,id),nullptr,u(x),u(y),u(std::max(1,width)),u(height),SWP_NOZORDER|SWP_NOACTIVATE);};
-        place(12,24,24,176,28);place(13,24,54,180,20);for(int i=0;i<4;++i)place(1000+i,12,106+i*48,200,40);
-        place(3,12,h-108,200,40);place(2,12,h-60,200,40);place(10,256,24,w-490,40);place(11,258,70,w-300,22);place(2200,w-186,28,146,36);
-        SetWindowPos(panel,nullptr,u(240),u(112),u(std::max(360,w-264)),u(std::max(120,h-174)),SWP_NOZORDER|SWP_NOACTIVATE);
-        place(2300,258,h-48,w-300,34);place(2301,258,h-9,w-300,3);scrollTo(scroll);InvalidateRect(window,nullptr,FALSE);
+        const int left=w<1040?176:232,side=w<1040?188:222,right=w-side-16;
+        const auto move=[&](HWND hwnd,int x,int y,int width,int height){
+            SetWindowPos(hwnd,nullptr,u(x),u(y),u(std::max(1,width)),u(std::max(1,height)),SWP_NOZORDER|SWP_NOACTIVATE);
+        };
+        const auto place=[&](int id,int x,int y,int width,int height){move(GetDlgItem(window,id),x,y,width,height);};
+        place(12,24,24,left-40,28);place(13,24,54,left-40,20);
+        for(int i=0;i<4;++i)place(1000+i,12,106+i*48,left-24,40);
+        place(3,12,h-108,left-24,40);place(2,12,h-60,left-24,40);
+        place(10,left+24,24,right-left-194,40);place(11,left+26,70,right-left-48,22);place(2200,right-160,28,146,36);
+        move(panel,left+8,112,right-left-20,std::max(120,h-174));
+        if(messagePanel){
+            move(messagePanel,right,112,side,std::max(1,h-128));
+            const auto item=[&](int id,int y,int height){move(GetDlgItem(messagePanel,id),14,y,side-28,height);};
+            item(2211,12,28);item(2212,57,22);item(2215,82,34);
+            item(2213,132,22);item(2216,157,34);item(2214,214,36);
+            for(int id:{2215,2216})SendMessageW(GetDlgItem(messagePanel,id),TBM_SETTHUMBLENGTH,u(24),0);
+        }
+        place(2300,left+26,h-48,right-left-48,34);place(2301,left+26,h-9,right-left-48,3);
+        scrollTo(scroll);InvalidateRect(window,nullptr,FALSE);
     }
     void build(){
         if(!panel)return;syncing=true;editingOutline=false;outlineValue=outlineHost=nullptr;for(auto hwnd:content)DestroyWindow(hwnd);content.clear();placements.clear();controls.clear();list=listEmpty=nullptr;scroll=0;int y=8;
@@ -186,22 +198,17 @@ struct NativeSettings {
             note(page==0?L"显示与行为参数由所有角色共享，动作模式只应用于当前角色。":page==1?L"日常陪伴、视线与转向。位置跟随距离可在全局设置中调整。":L"保留按键攻击、换弹、EX、点击指挥与走动的原有规则。");
             for(size_t ordinal=0;ordinal<std::size(fields);++ordinal){
                 // Keep stable control IDs while placing manual rotation near appearance.
-                const size_t i=ordinal<4||ordinal>=23?ordinal:ordinal==4?22:ordinal==5?21:ordinal-2;
+                const size_t i=ordinal<4?ordinal:ordinal==4?22:ordinal==5?21:ordinal-2;
                 if((page==0&&i>=14&&i<21)||(page==1&&(i<14||i>=16))||(page==2&&(i<16||i>=21)))continue;const auto& f=fields[i];
                 if(i==0)section(L"角色与显示");if(i==4)section(L"移动与跟随");if(i==8)section(L"时间与随机变化");if(i==14)section(L"视线追踪");if(i==16)section(L"战斗动作");
-                if(i==23)section(L"Codex 消息气泡");
                 HWND input{},label{},hint{};
                 if(f.kind==0)input=control(panel,L"BUTTON",f.title,BS_OWNERDRAW,100+int(i),16,y,panelWidth(),68);
                 else{
                     label=control(panel,L"STATIC",f.title,SS_ENDELLIPSIS,0,64,y+12,270,22);hint=control(panel,L"STATIC",f.detail,SS_ENDELLIPSIS,0,64,y+36,270,20);
                     SendMessageW(hint,WM_SETFONT,reinterpret_cast<WPARAM>(ui.small),FALSE);SetPropW(hint,L"FluentMuted",reinterpret_cast<HANDLE>(1));content.push_back(label);content.push_back(hint);
-                    const bool slider=f.kind==3||f.kind==4;
+                    const bool slider=f.kind==3;
                     input=control(panel,slider?TRACKBAR_CLASSW:f.kind==1?L"EDIT":L"COMBOBOX",L"",slider?TBS_HORZ|TBS_NOTICKS|TBS_FIXEDLENGTH:f.kind==1?WS_BORDER|ES_AUTOHSCROLL:CBS_DROPDOWNLIST|CBS_OWNERDRAWFIXED|CBS_HASSTRINGS|WS_VSCROLL,100+int(i),326,y+17,156,f.kind==2?260:34);
                     if(f.kind==1)SendMessageW(input,EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(u(8),u(8)));
-                    if(f.kind==4){
-                        SendMessageW(input,TBM_SETRANGE,TRUE,MAKELPARAM(0,i==23?100:24));
-                        SendMessageW(input,TBM_SETTHUMBLENGTH,u(24),0);
-                    }
                     if(f.kind==3){
                         SendMessageW(input,TBM_SETRANGE,TRUE,MAKELPARAM(10,300));SendMessageW(input,TBM_SETTHUMBLENGTH,u(24),0);
                         outlineHost=CreateWindowExW(WS_EX_CONTROLPARENT,L"BaCafeNativeSettings",L"描边宽度",WS_CHILD|WS_VISIBLE|WS_CLIPCHILDREN,0,u(y+17),u(68),u(34),panel,reinterpret_cast<HMENU>(INT_PTR(2113)),GetModuleHandleW(nullptr),this);
@@ -221,9 +228,6 @@ struct NativeSettings {
                 }
             }
             if(page==0){
-                auto preview=control(panel,L"BUTTON",L"预览气泡",BS_OWNERDRAW,2214,16,y,142,36);
-                placeContent(preview,16,y,142,36);
-                y+=48;
                 y+=8;auto h=control(panel,L"BUTTON",L"恢复默认设置",BS_OWNERDRAW,2201,16,y,160,36);placeContent(h,16,y,160,36);y+=52;
                 section(L"应用");auto startup=control(panel,L"BUTTON",L"开机自启",BS_OWNERDRAW,2210,16,y,panelWidth(),68);placeContent(startup,16,y,0,68,true);y+=84;
             }
@@ -288,11 +292,7 @@ struct NativeSettings {
                 else if(c.field->kind==2){const int index=key=="mode"?modeIndex(v.get<std::string>()):key=="cafeLookMode"?(v=="threshold"):v.get<int>();SendMessageW(c.input,CB_SETCURSEL,index,0);}
                 else if(c.field->kind==1&&GetFocus()!=c.input){auto text=v.dump();if(text.ends_with(".0"))text.resize(text.size()-2);SetWindowTextW(c.input,wide(text).c_str());}
                 bool enabled=!last.value("busy",false)&&(page!=2||last.value("battleAvailable",false));if(key=="follow")enabled&=last.value("canFollow",false);if(key=="followNear"||key=="followFar")enabled&=last.value("canFollow",false)&&value.value("follow",false);if(key=="cafeLookMode")enabled&=value.value("cafeTracking",true);if(key=="outlineWidth")enabled&=value.value("outlineMode",2)!=0;
-                if(c.field->kind==4){
-                    SendMessageW(c.input,TBM_SETPOS,TRUE,v.get<int>());
-                    SetWindowTextW(c.hint,(std::to_wstring(v.get<int>())+(key=="bubbleBlur"?L" 逻辑像素":L"%")).c_str());
-                }
-                if(formationSelected()&&key!="mode"&&key!="renderQuality"&&key!="outlineMode"&&key!="outlineWidth"&&key!="rightDragRotation"&&key!="inspectionMode"&&c.field->kind!=4)enabled=false;
+                if(formationSelected()&&key!="mode"&&key!="renderQuality"&&key!="outlineMode"&&key!="outlineWidth"&&key!="rightDragRotation"&&key!="inspectionMode")enabled=false;
                 if(inspectionSelected()&&(inspectionBlocks(key)||key=="followNear"||key=="followFar"||key=="cafeLookMode"))enabled=false;
                 EnableWindow(c.input,enabled);if(c.label)EnableWindow(c.label,enabled);if(c.hint)EnableWindow(c.hint,enabled);InvalidateRect(c.input,nullptr,FALSE);
                 if(c.field->kind==3&&outlineValue){if(!enabled&&editingOutline)cancelOutline();EnableWindow(outlineHost,enabled);EnableWindow(outlineValue,enabled);RedrawWindow(outlineHost,nullptr,nullptr,RDW_INVALIDATE|RDW_ALLCHILDREN);}
@@ -302,6 +302,13 @@ struct NativeSettings {
             if(auto status=GetDlgItem(panel,2111))SetWindowTextW(status,samplingText().c_str());
             EnableWindow(GetDlgItem(panel,2107),!last.value("busy",false));EnableWindow(GetDlgItem(panel,2108),!last.value("busy",false)&&!last.value("modelsDirectoryDefault",false));
             if(auto startup=GetDlgItem(panel,2210)){const auto state=last.value("startup",Json::object());SetWindowTextW(startup,state.value("enabled",false)?L"开机自启：已开启":L"开机自启：已关闭");EnableWindow(startup,state.value("available",false));InvalidateRect(startup,nullptr,FALSE);}
+            if(messagePanel){
+                const int opacity=value.value("bubbleOpacity",88),blur=value.value("bubbleBlur",8);
+                SendMessageW(GetDlgItem(messagePanel,2215),TBM_SETPOS,TRUE,opacity);
+                SendMessageW(GetDlgItem(messagePanel,2216),TBM_SETPOS,TRUE,blur);
+                SetWindowTextW(GetDlgItem(messagePanel,2212),(L"不透明度　"+std::to_wstring(opacity)+L"%").c_str());
+                SetWindowTextW(GetDlgItem(messagePanel,2213),(L"背景模糊　"+std::to_wstring(blur)+L" px").c_str());
+            }
             if(list){fillRoster(list,false);const int n=int(SendMessageW(list,LB_GETCURSEL,0,0));const auto rows=last.value("characters",Json::array());ShowWindow(listEmpty,rows.empty()?SW_SHOW:SW_HIDE);const auto row=n>=0&&n<int(rows.size())?rows[n]:Json::object();const bool active=row.value("active",false);
                 SetWindowTextW(GetDlgItem(panel,2100),active?L"隐藏角色":L"显示角色");EnableWindow(GetDlgItem(panel,2100),n>=0&&(active||(row.value("available",false)&&last.value("activeCount",0)<5)));EnableWindow(GetDlgItem(panel,2101),n>=0&&active&&row.value("ready",false)&&highlighted!=last.value("selectedId",std::string{}));SetWindowTextW(GetDlgItem(panel,2102),row.value("managed",false)?L"删除模型":L"移除记录");EnableWindow(GetDlgItem(panel,2102),n>=0&&!row.value("loading",false));EnableWindow(GetDlgItem(panel,2103),last.value("activeCount",0)>0);EnableWindow(GetDlgItem(panel,2104),last.value("activeCount",0)>0);}
             for(int i=0;i<4;++i)InvalidateRect(GetDlgItem(window,1000+i),nullptr,FALSE);
@@ -331,10 +338,17 @@ struct NativeSettings {
         if(syncing||last.empty())return;auto value=last.at("value");
         for(const auto& c:controls){const auto key=c.field->key;
             if(!IsWindowEnabled(c.input))continue;
-            if(c.field->kind==0)value[key]=c.checked;else if(c.field->kind==3||c.field->kind==4)value[key]=int(SendMessageW(c.input,TBM_GETPOS,0,0));
+            if(c.field->kind==0)value[key]=c.checked;else if(c.field->kind==3)value[key]=int(SendMessageW(c.input,TBM_GETPOS,0,0));
             else if(c.field->kind==2){const int n=int(SendMessageW(c.input,CB_GETCURSEL,0,0));if(n<0)continue;if(std::string(key)=="mode"){const auto modes=modeChoices();if(n<int(modes.size()))value[key]=modes[n];}else if(std::string(key)=="cafeLookMode")value[key]=n?"threshold":"smooth";else value[key]=n;}
             else{wchar_t text[80]{};GetWindowTextW(c.input,text,80);wchar_t* end{};const double n=std::wcstod(text,&end);if(end==text||*end||!std::isfinite(n)){SetWindowTextW(GetDlgItem(window,2300),L"请输入有效数字；该更改尚未保存。");return;}value[key]=n;}
         }sendValue(std::move(value));
+    }
+    void saveBubble(){
+        if(syncing||!receive||!messagePanel)return;
+        receive({{"type","bubble_settings"},
+            {"bubbleOpacity",int(SendMessageW(GetDlgItem(messagePanel,2215),TBM_GETPOS,0,0))},
+            {"bubbleBlur",int(SendMessageW(GetDlgItem(messagePanel,2216),TBM_GETPOS,0,0))}});
+        sync();
     }
     void toggleRoster(int index){
         const auto rows=last.value("characters",Json::array());if(index<0||index>=int(rows.size()))return;const auto row=rows[index];
@@ -424,7 +438,7 @@ struct NativeSettings {
         if(id==2107||id==2108){receive({{"type",id==2107?"change_models_folder":"reset_models_folder"}});return;}
         if(id>=2100&&id<=2102){const int n=int(SendMessageW(list,LB_GETCURSEL,0,0));if(n<0)return;const auto row=last["characters"][n];if(id==2100)toggleRoster(n);else if(id==2101)receive({{"type","roster_select"},{"id",row["id"]}});else removeModel(row);return;}
         if(id==2200){receive({{"type","import"}});return;}
-        if(id==2201){auto value=last["value"];NativePreferences defaults;const auto ini=defaultsFile.wstring();defaults.load(ini);value.update(defaults.json());value.update({{"look",GetPrivateProfileIntW(L"Behavior",L"Tracking",1,ini.c_str())!=0},{"idleSeconds",std::clamp(int(GetPrivateProfileIntW(L"Behavior",L"InputIdleSeconds",60,ini.c_str())),1,3600)},{"activeSeconds",std::clamp(int(GetPrivateProfileIntW(L"Behavior",L"ContinuedInputSeconds",30,ini.c_str())),1,3600)}});sendValue(std::move(value));}
+        if(id==2201){auto value=last["value"];NativePreferences defaults;const auto ini=defaultsFile.wstring();defaults.load(ini);auto behavior=defaults.json();behavior.erase("bubbleOpacity");behavior.erase("bubbleBlur");value.update(behavior);value.update({{"look",GetPrivateProfileIntW(L"Behavior",L"Tracking",1,ini.c_str())!=0},{"idleSeconds",std::clamp(int(GetPrivateProfileIntW(L"Behavior",L"InputIdleSeconds",60,ini.c_str())),1,3600)},{"activeSeconds",std::clamp(int(GetPrivateProfileIntW(L"Behavior",L"ContinuedInputSeconds",30,ini.c_str())),1,3600)}});sendValue(std::move(value));}
     }
     void drawRoster(const DRAWITEMSTRUCT& d,bool compact){
         auto& theme=compact?quickUi:ui;const auto rows=last.value("characters",Json::array());if(d.itemID>=rows.size())return;const auto& row=rows[d.itemID];auto r=d.rcItem;const bool active=row.value("active",false),available=row.value("available",false);
@@ -474,7 +488,9 @@ struct NativeSettings {
         RECT r{};GetClientRect(hwnd,&r);const bool context=hwnd==modelMenu,compact=hwnd==quickWindow;auto& theme=context?modelUi:compact?quickUi:ui;NativeFluent::fill(dc,r,context||compact?theme.surface:theme.canvas);
         if(hwnd==outlineHost){ui.inputFrame(dc,r,GetFocus()==outlineValue,GetPropW(outlineValue,L"FluentInputError")!=nullptr,IsWindowEnabled(outlineValue));return;}
         if(hwnd==panel){const int width=panelWidth();for(const auto& c:controls)if(c.field->kind!=0){RECT box{u(16),u(c.y)-scroll,u(16+width),u(c.y+68)-scroll};if(box.bottom<0||box.top>r.bottom)continue;NativeFluent::round(dc,box,ui.surface,ui.line,u(8));RECT icon{u(30),u(c.y)-scroll,u(56),u(c.y+68)-scroll};ui.glyph(dc,c.field->icon,icon,IsWindowEnabled(c.input)?ui.text:ui.disabled);}}
-        else if(hwnd==window){RECT divider{u(232),0,u(233),r.bottom};NativeFluent::fill(dc,divider,theme.line);}else if(compact||context)NativeFluent::round(dc,r,theme.surface,theme.line,theme.px(8));
+        else if(hwnd==window){const int left=ui.dip(r.right)<1040?176:232;RECT divider{u(left),0,u(left)+1,r.bottom};NativeFluent::fill(dc,divider,theme.line);}
+        else if(hwnd==messagePanel){RECT divider{0,0,1,r.bottom};NativeFluent::fill(dc,divider,theme.line);}
+        else if(compact||context)NativeFluent::round(dc,r,theme.surface,theme.line,theme.px(8));
     }
     static LRESULT CALLBACK listProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l,UINT_PTR,DWORD_PTR data){
         auto* self=reinterpret_cast<NativeSettings*>(data);const bool compact=hwnd==self->quickList;
@@ -514,7 +530,9 @@ struct NativeSettings {
         EnumChildWindows(target,[](HWND h,LPARAM data)->BOOL{auto* t=reinterpret_cast<NativeFluent*>(data);SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(t->font),FALSE);t->themed(h);return TRUE;},reinterpret_cast<LPARAM>(&theme));
         if(target==modelMenu){hideModelMenu();}
         else if(target==quickWindow){SendMessageW(GetDlgItem(target,3100),WM_SETFONT,reinterpret_cast<WPARAM>(theme.heading),FALSE);for(int id:{3101,3102})SendMessageW(GetDlgItem(target,id),WM_SETFONT,reinterpret_cast<WPARAM>(theme.small),FALSE);layoutQuick();}
-        else{SendMessageW(GetDlgItem(window,10),WM_SETFONT,reinterpret_cast<WPARAM>(ui.title),FALSE);SendMessageW(GetDlgItem(window,11),WM_SETFONT,reinterpret_cast<WPARAM>(ui.small),FALSE);const int before=scroll;build();scrollTo(before);}
+        else{SendMessageW(GetDlgItem(window,10),WM_SETFONT,reinterpret_cast<WPARAM>(ui.title),FALSE);SendMessageW(GetDlgItem(window,11),WM_SETFONT,reinterpret_cast<WPARAM>(ui.small),FALSE);
+            if(messagePanel)SendMessageW(GetDlgItem(messagePanel,2211),WM_SETFONT,reinterpret_cast<WPARAM>(ui.heading),FALSE);
+            const int before=scroll;build();scrollTo(before);}
         RedrawWindow(target,nullptr,nullptr,RDW_INVALIDATE|RDW_ALLCHILDREN|RDW_ERASE);
     }
     static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
@@ -530,10 +548,11 @@ struct NativeSettings {
         if((compact||context)&&(msg==WM_NCCALCSIZE||msg==WM_NCPAINT))return 0;
         if((compact||context)&&msg==WM_NCACTIVATE)return TRUE;
         if(msg==WM_NCHITTEST&&(compact||context))return HTCLIENT;
-        if(msg==WM_SIZE&&hwnd==self->window&&self->panel){if(w==SIZE_MINIMIZED)self->hideModelMenu();self->layout();self->notify();return 0;}if(msg==WM_GETMINMAXINFO&&hwnd==self->window){auto* info=reinterpret_cast<MINMAXINFO*>(l);info->ptMinTrackSize={self->u(800),self->u(540)};return 0;}
+        if(msg==WM_SIZE&&hwnd==self->window&&self->panel){if(w==SIZE_MINIMIZED)self->hideModelMenu();self->layout();self->notify();return 0;}if(msg==WM_GETMINMAXINFO&&hwnd==self->window){auto* info=reinterpret_cast<MINMAXINFO*>(l);info->ptMinTrackSize={self->u(920),self->u(540)};return 0;}
         if(msg==WM_DPICHANGED){const auto* r=reinterpret_cast<RECT*>(l);self->reloadTheme(hwnd,HIWORD(w));SetWindowPos(hwnd,nullptr,r->left,r->top,r->right-r->left,r->bottom-r->top,SWP_NOZORDER|SWP_NOACTIVATE);return 0;}
-        if((msg==WM_SETTINGCHANGE||msg==WM_THEMECHANGED)&&hwnd!=self->panel&&hwnd!=self->outlineHost){if(self->panel||compact)self->reloadTheme(hwnd,GetDpiForWindow(hwnd));return 0;}
-        if(msg==WM_COMMAND){self->command(LOWORD(w),HIWORD(w));return 0;}if(msg==WM_HSCROLL){self->save();return 0;}
+        if((msg==WM_SETTINGCHANGE||msg==WM_THEMECHANGED)&&hwnd!=self->panel&&hwnd!=self->outlineHost&&hwnd!=self->messagePanel){if(self->panel||compact)self->reloadTheme(hwnd,GetDpiForWindow(hwnd));return 0;}
+        if(msg==WM_COMMAND){self->command(LOWORD(w),HIWORD(w));return 0;}
+        if(msg==WM_HSCROLL){if(hwnd==self->messagePanel)self->saveBubble();else self->save();return 0;}
         if(hwnd==self->panel&&(msg==WM_VSCROLL||msg==WM_MOUSEWHEEL)){int next=self->scroll;if(msg==WM_MOUSEWHEEL)next-=GET_WHEEL_DELTA_WPARAM(w)/120*self->u(96);else if(LOWORD(w)==SB_LINEUP)next-=self->u(40);else if(LOWORD(w)==SB_LINEDOWN)next+=self->u(40);else if(LOWORD(w)==SB_PAGEUP)next-=self->u(320);else if(LOWORD(w)==SB_PAGEDOWN)next+=self->u(320);else if(LOWORD(w)==SB_THUMBTRACK){SCROLLINFO info{sizeof(info),SIF_TRACKPOS};GetScrollInfo(hwnd,SB_VERT,&info);next=info.nTrackPos;}self->scrollTo(next);return 0;}
         if(msg==WM_MOUSEWHEEL&&hwnd==self->window){SendMessageW(self->panel,msg,w,l);return 0;}
         if(msg==WM_CTLCOLORSTATIC||msg==WM_CTLCOLORBTN||msg==WM_CTLCOLOREDIT||msg==WM_CTLCOLORLISTBOX){
@@ -549,11 +568,22 @@ struct NativeSettings {
     }
     void ensureFull(){
         if(window)return;INITCOMMONCONTROLSEX common{sizeof(common),ICC_BAR_CLASSES};InitCommonControlsEx(&common);WNDCLASSW wc{};wc.lpfnWndProc=proc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"BaCafeNativeSettings";wc.hIcon=LoadIconW(wc.hInstance,MAKEINTRESOURCEW(101));wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&wc);ui.load(GetDpiForSystem());
-        window=CreateWindowExW(WS_EX_APPWINDOW|WS_EX_CONTROLPARENT,wc.lpszClassName,L"BA Cafe · 设置",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,0,0,u(1040),u(780),nullptr,nullptr,wc.hInstance,this);if(!window)throw std::runtime_error("Cannot create Fluent settings window");ui.frame(window);
+        window=CreateWindowExW(WS_EX_APPWINDOW|WS_EX_CONTROLPARENT,wc.lpszClassName,L"BA Cafe · 设置",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,0,0,u(1210),u(780),nullptr,nullptr,wc.hInstance,this);if(!window)throw std::runtime_error("Cannot create Fluent settings window");ui.frame(window);
         auto h=control(window,L"STATIC",L"全局设置",SS_ENDELLIPSIS,10,256,24,400,40);SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(ui.title),FALSE);h=control(window,L"STATIC",L"",SS_ENDELLIPSIS,11,258,70,600,22);SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(ui.small),FALSE);SetPropW(h,L"FluentMuted",reinterpret_cast<HANDLE>(1));
         h=control(window,L"STATIC",L"BA Cafe",0,12,24,24,176,28);SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(ui.heading),FALSE);h=control(window,L"STATIC",L"桌面陪伴",0,13,24,54,176,20);SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(ui.small),FALSE);SetPropW(h,L"FluentMuted",reinterpret_cast<HANDLE>(1));
         for(int i=0;i<4;++i)control(window,L"BUTTON",pages[i],BS_OWNERDRAW,1000+i,12,106+i*48,200,40);control(window,L"BUTTON",L"使用说明",BS_OWNERDRAW,3,12,660,200,40);control(window,L"BUTTON",L"退出桌宠",BS_OWNERDRAW,2,12,708,200,40);control(window,L"BUTTON",L"＋ 导入模型",BS_OWNERDRAW,2200,840,28,146,36);
         panel=CreateWindowExW(WS_EX_CONTROLPARENT,wc.lpszClassName,L"",WS_CHILD|WS_VISIBLE|WS_VSCROLL|WS_CLIPCHILDREN,u(240),u(112),u(750),u(550),window,nullptr,wc.hInstance,this);ui.themed(panel);
+        messagePanel=CreateWindowExW(WS_EX_CONTROLPARENT,wc.lpszClassName,L"",WS_CHILD|WS_VISIBLE|WS_CLIPCHILDREN,
+            0,0,0,0,window,nullptr,wc.hInstance,this);
+        h=control(messagePanel,L"STATIC",L"Codex 消息",0,2211,0,0,0,0);
+        SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(ui.heading),FALSE);
+        control(messagePanel,L"STATIC",L"不透明度",0,2212,0,0,0,0);
+        control(messagePanel,L"STATIC",L"背景模糊",0,2213,0,0,0,0);
+        for(auto [id,range]:{std::pair{2215,100},{2216,24}}){
+            auto slider=control(messagePanel,TRACKBAR_CLASSW,L"",TBS_HORZ|TBS_NOTICKS|TBS_FIXEDLENGTH,id,0,0,0,0);
+            SendMessageW(slider,TBM_SETRANGE,TRUE,MAKELPARAM(0,range));
+        }
+        control(messagePanel,L"BUTTON",L"预览气泡",BS_OWNERDRAW,2214,0,0,0,0);
         h=control(window,L"STATIC",L"",SS_ENDELLIPSIS,2300,258,712,600,34);SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(ui.small),FALSE);SetPropW(h,L"FluentMuted",reinterpret_cast<HANDLE>(1));progress=control(window,L"STATIC",L"",SS_OWNERDRAW,2301,258,760,600,3);
     }
     void show(HWND,const std::filesystem::path& directory){
@@ -561,7 +591,7 @@ struct NativeSettings {
         defaultsFile=directory/L"defaults.ini";ensureFull();if(snapshot)last=readSnapshot();highlighted=last.value("selectedId",std::string{});build();
         if(!IsWindowVisible(window)){POINT p{};GetCursorPos(&p);MONITORINFO info{sizeof(info)};GetMonitorInfoW(MonitorFromPoint(p,MONITOR_DEFAULTTONEAREST),&info);const auto area=info.rcWork;
             SetWindowPos(window,nullptr,p.x,p.y,0,0,SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE);const auto dpi=GetDpiForWindow(window);if(dpi!=ui.dpi)reloadTheme(window,dpi);
-            const int width=std::min(u(1040),int(area.right-area.left)-u(32)),height=std::min(u(780),int(area.bottom-area.top)-u(32));SetWindowPos(window,HWND_NOTOPMOST,area.left+(area.right-area.left-width)/2,area.top+(area.bottom-area.top-height)/2,width,height,SWP_SHOWWINDOW);}else ShowWindow(window,SW_RESTORE);
+            const int width=std::min(u(1210),int(area.right-area.left)-u(32)),height=std::min(u(780),int(area.bottom-area.top)-u(32));SetWindowPos(window,HWND_NOTOPMOST,area.left+(area.right-area.left-width)/2,area.top+(area.bottom-area.top-height)/2,width,height,SWP_SHOWWINDOW);}else ShowWindow(window,SW_RESTORE);
         hideQuick();notify();SetForegroundWindow(window);SetFocus(GetDlgItem(window,1000+page));sync();
     }
     void ensureQuick(){

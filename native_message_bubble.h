@@ -35,7 +35,7 @@ struct NativeMessageBubble {
     NativeFluent theme;
     ULONG_PTR gdiplus{};
     std::optional<NativeMessages::Message> current;
-    ULONGLONG expires=0,nextPaint=0;
+    ULONGLONG expires=0,earliestAdvance=0,nextPaint=0;
     int opacity=-1,blur=-1;
     unsigned revision=0,paintedRevision=0;
     POINT origin{};
@@ -45,7 +45,7 @@ struct NativeMessageBubble {
         if(gdiplus)Gdiplus::GdiplusShutdown(gdiplus);
     }
     HWND visible() const {return window&&IsWindowVisible(window)?window:nullptr;}
-    void hide(){if(visible())ShowWindow(window,SW_HIDE);}
+    void hide(){if(visible()){ShowWindow(window,SW_HIDE);SetWindowTextW(window,L"");}}
     bool open(){
         if(window)return true;
         if(!gdiplus){
@@ -171,16 +171,24 @@ struct NativeMessageBubble {
         BLENDFUNCTION blend{AC_SRC_OVER,0,255,AC_SRC_ALPHA};
         if(!UpdateLayeredWindow(window,nullptr,&at,&size,surface->dc,&source,0,&blend,ULW_ALPHA))return false;
         origin=at;
+        if(paintedRevision!=revision||!visible())SetWindowTextW(window,(current->title+L"\n"+current->body).c_str());
         ShowWindow(window,SW_SHOWNOACTIVATE);
         return true;
     }
     void update(NativeMessages& messages,HWND actor,std::optional<RECT> model,bool paused,int tint,int radius){
         const auto now=GetTickCount64();
         if(paused){hide();current.reset();messages.pending.clear();return;}
-        if(current&&now>=expires)current.reset();
+        if(current){
+            using Phase=NativeMessages::Phase;
+            const bool advance=!messages.pending.empty()&&now>=earliestAdvance&&
+                (current->phase==Phase::Start||current->phase==Phase::Progress||
+                 messages.pending.front().phase==Phase::Start);
+            if(now>=expires||advance)current.reset();
+        }
         if(!model){hide();return;}
         if(!current&&!messages.pending.empty()){
             current=std::move(messages.pending.front());messages.pending.pop_front();
+            earliestAdvance=now+1300;
             expires=now+std::clamp<ULONGLONG>(4500+current->body.size()*24,5000,11000);++revision;
         }
         if(!current){hide();return;}

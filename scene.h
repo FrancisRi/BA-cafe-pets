@@ -310,8 +310,23 @@ struct Scene {
         if(type!="import"&&type!="refresh_models")importNotice.clear();
         if(type=="exit"){save();stopping=true;PostQuitMessage(0);return;}
         if(type=="preview_bubble"){
-            messages.push(L"Codex · 已完成",L"回复会显示在这里。\n可在全局设置调节气泡的不透明度和背景模糊。");
+            messages.push(L"Codex",L"任务开始了哦...");
             updateBubble();return;
+        }
+        if(type=="bubble_settings"){
+            auto& host=leader();
+            auto values=host.preferences.json();
+            values["bubbleOpacity"]=j.at("bubbleOpacity");
+            values["bubbleBlur"]=j.at("bubbleBlur");
+            if(host.preferences.apply(values)){
+                host.preferences.save(host.settings->ini);
+                for(auto& a:actors){
+                    a->preferences.bubbleOpacity=host.preferences.bubbleOpacity;
+                    a->preferences.bubbleBlur=host.preferences.bubbleBlur;
+                }
+                updateBubble();
+            }
+            sync();return;
         }
         if(type=="refresh_models"){refreshModels();sync();return;}
         if(type=="set_autostart"){
@@ -446,7 +461,10 @@ struct Scene {
             if(!drainNativeMessages([&](MSG& message){NativeHealth::mark("message dispatch");
                 if(host.nativeSettings&&host.nativeSettings->route(message))return;TranslateMessage(&message);DispatchMessageW(&message);
             }))stopping=true;
-            if(!stopping&&host.session.paused())updateBubble();
+            if(!stopping){
+                if(host.session.paused())updateBubble();
+                else messages.pollCodex();
+            }
             if(!stopping&&!host.session.paused()){
                 if(motion>=0&&(wake==WAIT_OBJECT_0+DWORD(motion)||WaitForSingleObject(host.motionTimer,0)==WAIT_OBJECT_0))tick();
                 if(!stopping&&frame>=0&&(wake==WAIT_OBJECT_0+DWORD(frame)||WaitForSingleObject(frameTimer,0)==WAIT_OBJECT_0))renderScene();

@@ -40,19 +40,31 @@ cmake --build build-rust-movement --target ba_cafe_lite_crowd_tests ba_cafe_lite
 
 ### Codex 消息气泡
 
-全局设置的「Codex 消息气泡」提供预览、0–100% 的底色不透明度和 0–24 逻辑像素的背景模糊。气泡在有空间时显示于当前可见角色轮廓上方 8 个逻辑像素，贴近屏幕顶边时会移入工作区。消息短暂排队显示，内容存放在内存中。
+设置窗口右侧的「Codex 消息」栏提供预览、0–100% 的底色不透明度和 0–24 逻辑像素的背景模糊。气泡在有空间时显示于当前可见角色轮廓上方 8 个逻辑像素，贴近屏幕顶边时会移入工作区。
 
-启动桌宠后，将下面的 `Stop` Hook 添加到 Codex 的用户配置 `%USERPROFILE%\.codex\config.toml`，并将路径替换为实际使用的桌宠 EXE。桌面版可在「设置 → Hooks」审核并信任此命令。只想在桌宠上看完成提示时，可在 Codex 桌面版的通知设置中关闭回合完成提示。 [Codex Hooks](https://learn.chatgpt.com/docs/hooks)
+启动桌宠后，将下列 Hook 添加到 Codex 的用户配置 `%USERPROFILE%\.codex\config.toml`，并将路径替换为实际使用的桌宠 EXE。已配置 `Stop` 的用户只需保留一条现有的桌宠 `Stop` 命令，再添加 `UserPromptSubmit` 和 `Interrupt`。桌面版可在「设置 → Hooks」审核并信任命令。 [Codex Hooks](https://learn.chatgpt.com/docs/hooks)
 
 ```toml
+[[hooks.UserPromptSubmit]]
+[[hooks.UserPromptSubmit.hooks]]
+type = "command"
+command = 'F:/ba-cafe-lite/build-rust-movement/bin/BA-Cafe-Pets-RustMovement.exe --codex-hook'
+timeout = 5
+
 [[hooks.Stop]]
 [[hooks.Stop.hooks]]
 type = "command"
 command = 'F:/ba-cafe-lite/build-rust-movement/bin/BA-Cafe-Pets-RustMovement.exe --codex-hook'
 timeout = 5
+
+[[hooks.Interrupt]]
+[[hooks.Interrupt.hooks]]
+type = "command"
+command = 'F:/ba-cafe-lite/build-rust-movement/bin/BA-Cafe-Pets-RustMovement.exe --codex-hook'
+timeout = 3
 ```
 
-较旧的 Codex CLI 也可以使用顶层 `notify`。同一个 Codex 客户端配置其中一种入口即可。便携版和单文件版都可直接调用对应 EXE。
+发送提示词时显示「任务开始了哦...」。桌宠只跟随 Hook 提供的当前回合本地会话文件，显示已完整写入的 `commentary` 文本，并合并同一回合尚未显示的多条进度。缺少本地记录或记录格式发生变化时，开始、完成和中断仍通过各自的 Hook 显示。旧版 Codex CLI 可用顶层 `notify` 接收完成提示。便携版和单文件版都支持 Hook。
 
 ```toml
 notify = ['F:\ba-cafe-lite\build\bin\BA-Cafe-Pets.exe', '--codex-notify']

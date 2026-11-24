@@ -17,6 +17,9 @@ user.IsWindowVisible.argtypes = [wintypes.HWND]
 user.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
 user.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
 user.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+user.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+user.FindWindowExW.argtypes = [wintypes.HWND, wintypes.HWND, wintypes.LPCWSTR, wintypes.LPCWSTR]
+user.FindWindowExW.restype = wintypes.HWND
 user.GetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int]
 user.GetWindowLongPtrW.restype = ctypes.c_ssize_t
 user.GetDpiForWindow.argtypes = [wintypes.HWND]
@@ -54,6 +57,18 @@ def wait_for(condition, limit=12):
     raise AssertionError("Timed out waiting for the message bubble")
 
 
+def endpoint_exists(pid):
+    target = None
+    while True:
+        target = user.FindWindowExW(-3, target, "BaCafeNativeMessages.v1", None)
+        if not target:
+            return False
+        owner = wintypes.DWORD()
+        user.GetWindowThreadProcessId(target, ctypes.byref(owner))
+        if owner.value == pid:
+            return True
+
+
 def run(binary, sender):
     binary = Path(binary).resolve(strict=True)
     sender = Path(sender).resolve(strict=True)
@@ -67,20 +82,43 @@ def run(binary, sender):
             "[Behavior]\nWandering=0\n[Messages]\nOpacity=80\nBlur=8\n",
             encoding="ascii",
         )
-        env = dict(os.environ, BA_NATIVE_PROGRAM_DIR=scratch)
+        codex_dir = Path(scratch) / "codex"
+        transcript = codex_dir / "sessions" / "rollout-test.jsonl"
+        transcript.parent.mkdir(parents=True)
+        env = dict(os.environ, BA_NATIVE_PROGRAM_DIR=scratch, CODEX_HOME=str(codex_dir))
         pet = subprocess.Popen([binary, "--data-dir", data, "--diagnostics"], env=env)
         try:
-            # A valid send confirms that the scene's endpoint is ready.
-            first_event = json.dumps(
-                {"type": "agent-turn-complete", "last-assistant-message": "第一条 Codex 回复"},
-                ensure_ascii=False,
-            )
+            wait_for(lambda: endpoint_exists(pet.pid))
+            turn = "test-turn"
 
-            def send_completion():
-                assert pet.poll() is None, "Desktop pet exited during startup"
-                return subprocess.run([sender, "--codex-notify", first_event], timeout=3).returncode == 0
+            def hook(kind, **fields):
+                event = {"hook_event_name": kind, "turn_id": turn, "transcript_path": str(transcript), **fields}
+                reply = subprocess.run(
+                    [sender, "--codex-hook"], input=json.dumps(event, ensure_ascii=False).encode("utf-8"),
+                    capture_output=True, timeout=3, check=True,
+                )
+                assert json.loads(reply.stdout) == {}, "The hook returns an empty decision"
 
-            wait_for(send_completion)
+            def message_is(expected):
+                hwnd = window(pet.pid, "BaCafeMessageBubble")
+                if not hwnd:
+                    return False
+                value = ctypes.create_unicode_buffer(2048)
+                user.GetWindowTextW(hwnd, value, len(value))
+                return hwnd if value.value.split("\n", 1)[-1] == expected else False
+
+            def append_record(text, owner=turn, phase="commentary"):
+                entry = {"type": "response_item", "payload": {
+                    "type": "message", "role": "assistant", "phase": phase,
+                    "internal_chat_message_metadata_passthrough": {"turn_id": owner},
+                    "content": [{"type": "output_text", "text": text}],
+                }}
+                with transcript.open("a", encoding="utf-8") as target:
+                    target.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+            append_record("历史任务的进度", owner="other-turn")
+            hook("UserPromptSubmit", prompt="内部提示词")
+            wait_for(lambda: message_is("任务开始了哦..."))
             hwnd = wait_for(lambda: window(pet.pid, "BaCafeMessageBubble"))
             style = user.GetWindowLongPtrW(hwnd, -20)
             assert style & 0x08080020 == 0x08080020, "Bubble must be layered, click-through and non-activating"
@@ -89,30 +127,26 @@ def run(binary, sender):
             actor = wait_for(lambda: window(pet.pid, "BaCafeNativePet"))
             expected_width = round(328 * user.GetDpiForWindow(actor) / 96)
             assert first.right - first.left == expected_width, (first.right - first.left, expected_width)
-            event = json.dumps(
-                {
-                    "hook_event_name": "Stop",
-                    "last_assistant_message": "第二条消息\n多行文本验证\n新一行",
-                    "transcript_path": "x" * 40_000,
-                },
-                ensure_ascii=False,
-            )
-            reply = subprocess.run(
-                [sender, "--codex-hook"], input=event.encode("utf-8"),
-                capture_output=True, timeout=3, check=True,
-            )
-            assert json.loads(reply.stdout) == {}, "Codex Stop hook returns an empty decision"
+            append_record("正在检查现有代码。")
+            wait_for(lambda: message_is("正在检查现有代码。"), limit=4)
+            append_record("正在运行测试。")
+            append_record("其他任务的输出", owner="other-turn")
+            append_record("由 Stop 提供的回复", phase="final_answer")
+            wait_for(lambda: message_is("正在运行测试。"), limit=4)
+            hook("Stop", last_assistant_message="已完成验证。\n测试均通过。", fixture_padding="x" * 40_000)
+            wait_for(lambda: message_is("已完成验证。\n测试均通过。"), limit=4)
+            append_record("任务结束后的输出")
+            assert message_is("已完成验证。\n测试均通过。")
             assert subprocess.run([sender, "--codex-notify", "invalid"], timeout=3).returncode != 0
-
-            def next_message():
-                rect = wintypes.RECT()
-                ready = window(pet.pid, "BaCafeMessageBubble")
-                return ready and user.GetWindowRect(ready, ctypes.byref(rect)) and (
-                    rect.bottom - rect.top > first.bottom - first.top
-                )
-
-            wait_for(next_message)
+            turn = "interrupted-turn"
+            hook("UserPromptSubmit", prompt="准备中断")
+            wait_for(lambda: message_is("任务开始了哦..."), limit=4)
+            hook("Interrupt")
+            wait_for(lambda: message_is("任务已中断。"), limit=4)
             wait_for(lambda: not window(pet.pid, "BaCafeMessageBubble"))
+            completion = json.dumps({"type": "agent-turn-complete", "last-assistant-message": "旧版 CLI 回复"})
+            subprocess.run([sender, "--codex-notify", completion], timeout=3, check=True)
+            wait_for(lambda: message_is("旧版 CLI 回复"))
         except Exception:
             for log in (data / "logs").glob("pet.*"):
                 print(log.read_text(errors="replace").splitlines()[-10:], file=sys.stderr)
@@ -121,7 +155,7 @@ def run(binary, sender):
             if pet.poll() is None:
                 pet.terminate()
                 pet.wait(timeout=5)
-    print("Codex notify and Stop hook reached the DPI-scaled click-through bubble.")
+    print("Codex start, live commentary, completion, interrupt and CLI notify reached the bubble.")
 
 
 if __name__ == "__main__":
