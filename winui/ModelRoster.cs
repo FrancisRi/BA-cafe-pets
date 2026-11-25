@@ -42,7 +42,15 @@ internal sealed class ModelRoster
         internal ModelRow(Model model, bool compact, Action<ModelRow, bool> setActive)
         {
             Model = model;
-            if (compact) return;
+            if (compact)
+            {
+                DoubleTapped += (_, args) =>
+                {
+                    setActive(this, !Model.Active);
+                    args.Handled = true;
+                };
+                return;
+            }
 
             MinHeight = 40;
             HorizontalContentAlignment = HorizontalAlignment.Stretch;
@@ -94,10 +102,9 @@ internal sealed class ModelRoster
         this.dialogVisibility = dialogVisibility;
         list.MaxHeight = compact ? 76 : 320;
         AutomationProperties.SetName(list, "已导入的模型");
+        if (compact) AutomationProperties.SetHelpText(list, "双击模型名称或按空格显示或隐藏角色");
         list.SelectionChanged += (_, _) => UpdateActions();
         list.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(KeyDown), true);
-        list.IsItemClickEnabled = compact;
-        list.ItemClick += (_, args) => { if (compact && args.ClickedItem is ModelRow row) Toggle(row.Model); };
         toggle = Controls.Button("显示角色", () => { if (SelectedModel is Model model) Toggle(model); });
         select = Controls.Button("设为当前", () => Command("roster_select"));
         rename = Controls.Button("重命名…", async () => { if (SelectedModel is Model model) await Rename(model); });
@@ -126,7 +133,7 @@ internal sealed class ModelRoster
         if (!next.Select(model => model.Id).SequenceEqual(rows.Select(row => row.Model.Id)))
         {
             var selected = SelectedModel?.Id ?? current;
-            rows = next.Select(model => new ModelRow(model, compact, CheckChanged)).ToArray();
+            rows = next.Select(model => new ModelRow(model, compact, RowToggled)).ToArray();
             list.ItemsSource = rows;
             list.SelectedItem = rows.FirstOrDefault(row => row.Model.Id == selected);
         }
@@ -159,7 +166,7 @@ internal sealed class ModelRoster
         if (SelectedModel is Model model) app.Send(new { type, id = model.Id });
     }
 
-    private void CheckChanged(ModelRow row, bool active)
+    private void RowToggled(ModelRow row, bool active)
     {
         list.SelectedItem = row;
         SetActive(row.Model, active);

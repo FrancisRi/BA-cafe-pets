@@ -283,6 +283,13 @@ int main(int argc,char** argv){
         const auto untouched=state["value"];menu.command(3002,BN_CLICKED);check(state["value"]["follow"]==true,"Quick follow saves to the existing host");
         check(state["value"]["renderQuality"]==untouched["renderQuality"]&&state["value"]["followNear"]==untouched["followNear"],"Quick commands preserve unrelated settings");
         check(IsWindowVisible(menu.quickWindow),"Quick commands keep the menu open for multiple edits");
+        RECT modelRow{};check(SendMessageW(menu.quickList,LB_GETITEMRECT,1,reinterpret_cast<LPARAM>(&modelRow))!=LB_ERR,"Locate the hidden model row");
+        const auto modelPoint=MAKELPARAM(modelRow.left+menu.quickUi.px(60),(modelRow.top+modelRow.bottom)/2);
+        const auto click=[&](UINT down){SendMessageW(menu.quickList,down,MK_LBUTTON,modelPoint);SendMessageW(menu.quickList,WM_LBUTTONUP,0,modelPoint);};
+        const auto beforeClick=sent.size();
+        click(WM_LBUTTONDOWN);check(sent.size()==beforeClick,"A single click only selects a quick roster row");
+        click(WM_LBUTTONDBLCLK);check(sent.size()==beforeClick+1&&state["characters"][1]["active"]==true,"Double-click shows the clicked model once");
+        click(WM_LBUTTONDOWN);click(WM_LBUTTONDBLCLK);check(sent.size()==beforeClick+2&&state["characters"][1]["active"]==false,"Double-click hides the clicked model once");
         SendMessageW(menu.quickList,LB_SETCURSEL,1,0);SendMessageW(menu.quickList,WM_KEYDOWN,VK_SPACE,0);check(state["characters"][1]["active"]==true,"Space toggles the focused imported model");
         const auto count=sent.size();menu.toggleRoster(14);check(sent.size()==count,"Missing model cannot be activated");
         state["activeCount"]=5;menu.sync();menu.toggleRoster(2);check(sent.size()==count,"Five-model cap is respected");menu.toggleRoster(1);check(state["characters"][1]["active"]==false,"Models can still be hidden at the cap");state["activeCount"]=1;

@@ -641,7 +641,13 @@ struct NativeSettings {
         }
         if(msg==WM_CONTEXTMENU&&!compact){self->showModelMenu(hwnd,l);return 0;}
         if(msg==WM_KEYDOWN&&w==VK_DELETE&&!compact){const int index=int(SendMessageW(hwnd,LB_GETCURSEL,0,0));const auto rows=self->last.value("characters",Json::array());if(index>=0&&index<int(rows.size()))self->removeModel(rows[index]);return 0;}
-        if(msg==WM_LBUTTONUP){const auto result=DefSubclassProc(hwnd,msg,w,l);const auto hit=SendMessageW(hwnd,LB_ITEMFROMPOINT,0,l);if(HIWORD(hit)==0&&(compact||GET_X_LPARAM(l)<self->u(42)))self->toggleRoster(LOWORD(hit));return result;}
+        if((compact&&msg==WM_LBUTTONDBLCLK)||(!compact&&msg==WM_LBUTTONUP&&GET_X_LPARAM(l)<self->u(42))){
+            const auto result=DefSubclassProc(hwnd,msg,w,l);
+            const auto hit=SendMessageW(hwnd,LB_ITEMFROMPOINT,0,l);
+            RECT row{};const POINT point{GET_X_LPARAM(l),GET_Y_LPARAM(l)};
+            if(HIWORD(hit)==0&&SendMessageW(hwnd,LB_GETITEMRECT,LOWORD(hit),reinterpret_cast<LPARAM>(&row))!=LB_ERR&&PtInRect(&row,point))self->toggleRoster(LOWORD(hit));
+            return result;
+        }
         if(msg==WM_KEYDOWN&&w==VK_SPACE){self->toggleRoster(int(SendMessageW(hwnd,LB_GETCURSEL,0,0)));return 0;}
         if(msg==WM_KEYDOWN&&w==VK_RETURN&&compact){const auto rows=self->last.value("characters",Json::array());const int n=int(SendMessageW(hwnd,LB_GETCURSEL,0,0));if(n>=0&&n<int(rows.size())&&rows[n].value("ready",false)){self->receive({{"type","roster_select"},{"id",rows[n]["id"]}});self->sync();}return 0;}
         if(msg==WM_NCDESTROY)RemoveWindowSubclass(hwnd,listProc,2);return DefSubclassProc(hwnd,msg,w,l);
@@ -730,7 +736,7 @@ struct NativeSettings {
         if(quickWindow)return;INITCOMMONCONTROLSEX common{sizeof(common),ICC_STANDARD_CLASSES};InitCommonControlsEx(&common);WNDCLASSW wc{};wc.lpfnWndProc=proc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"BaCafeQuickMenu";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.style=CS_DROPSHADOW;RegisterClassW(&wc);quickUi.load(GetDpiForSystem());
         quickWindow=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_CONTROLPARENT,wc.lpszClassName,L"BA Cafe 快捷菜单",WS_POPUP|WS_CLIPCHILDREN,0,0,quickUi.px(344),quickUi.px(600),nullptr,nullptr,wc.hInstance,this);if(!quickWindow)throw std::runtime_error("Cannot create Fluent quick menu");quickUi.frame(quickWindow,true);SetWindowPos(quickWindow,nullptr,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_FRAMECHANGED);
         auto h=control(quickWindow,L"STATIC",L"桌面角色",SS_ENDELLIPSIS,3100,20,14,300,24,true);SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(quickUi.heading),FALSE);h=control(quickWindow,L"STATIC",L"",SS_RIGHT,3101,20,44,300,22,true);SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(quickUi.small),FALSE);SetPropW(h,L"FluentMuted",reinterpret_cast<HANDLE>(1));
-        quickList=control(quickWindow,L"LISTBOX",L"勾选显示模型，空格切换，回车设为当前角色",LBS_NOTIFY|LBS_OWNERDRAWFIXED|LBS_HASSTRINGS|LBS_NOINTEGRALHEIGHT|WS_VSCROLL,3200,8,72,328,144,true);SetWindowSubclass(quickList,listProc,2,reinterpret_cast<DWORD_PTR>(this));SendMessageW(quickList,LB_SETITEMHEIGHT,0,quickUi.px(36));
+        quickList=control(quickWindow,L"LISTBOX",L"双击模型名称或按空格显示或隐藏角色，回车设为当前角色",LBS_NOTIFY|LBS_OWNERDRAWFIXED|LBS_HASSTRINGS|LBS_NOINTEGRALHEIGHT|WS_VSCROLL,3200,8,72,328,144,true);SetWindowSubclass(quickList,listProc,2,reinterpret_cast<DWORD_PTR>(this));SendMessageW(quickList,LB_SETITEMHEIGHT,0,quickUi.px(36));
         control(quickWindow,L"STATIC",L"尚未导入模型",SS_CENTER,3103,20,72,304,36,true);
         for(auto [id,text]:{std::pair{3000,L"咖啡厅"},{3001,L"战斗"},{3006,L"列队"},{3002,L"位置跟随鼠标"},{3003,L"允许散步"},{3004,L"视线追踪鼠标"},{3005,L"允许战斗走动"},{3007,L"右键拖动旋转"},{3008,L"观赏模式"},{3011,L"打开设置"},{3013,L"模型文件夹"},{3010,L"导入模型"},{3012,L"退出桌宠"}})control(quickWindow,L"BUTTON",text,BS_OWNERDRAW,id,8,0,328,36,true);
         h=control(quickWindow,L"STATIC",L"",0,3102,20,0,304,34,true);SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(quickUi.small),FALSE);SetPropW(h,L"FluentMuted",reinterpret_cast<HANDLE>(1));

@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 from message_bubbles import enum_callback, user, wait_for, window
 
@@ -16,6 +17,10 @@ from message_bubbles import enum_callback, user, wait_for, window
 user.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
 user.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
                              ctypes.c_int, ctypes.c_int, wintypes.UINT]
+user.WindowFromPoint.argtypes = [wintypes.POINT]
+user.WindowFromPoint.restype = wintypes.HWND
+user.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+user.GetAncestor.restype = wintypes.HWND
 kernel = ctypes.WinDLL("kernel32", use_last_error=True)
 kernel.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
 kernel.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
@@ -129,6 +134,29 @@ def automation(hwnd, script):
     result = subprocess.run(command, env=dict(os.environ, BA_CAFE_TEST_HWND=str(hwnd)),
                             capture_output=True, timeout=15)
     assert result.returncode == 0, (result.stdout.decode(errors="replace"), result.stderr.decode(errors="replace"))
+    return result.stdout.decode().strip()
+
+
+def click_model_row(hwnd, label, clicks):
+    point = automation(hwnd, f"""
+        $row = Find-Control '{label}' ([Windows.Automation.ControlType]::ListItem)
+        $rect = $row.Current.BoundingRectangle
+        if ($row.Current.IsOffscreen -or $rect.IsEmpty) {{ throw 'Model row is outside the quick menu' }}
+        '{{0}},{{1}}' -f [int]($rect.Left + 30), [int]($rect.Top + $rect.Height / 2)
+    """)
+    x, y = map(int, point.split(","))
+    assert user.GetAncestor(user.WindowFromPoint(wintypes.POINT(x, y)), 2) == hwnd
+    cursor = wintypes.POINT()
+    assert user.GetCursorPos(ctypes.byref(cursor))
+    try:
+        assert user.SetCursorPos(x, y)
+        for index in range(clicks):
+            if index:
+                time.sleep(.04)
+            user.mouse_event(0x0002, 0, 0, 0, 0)
+            user.mouse_event(0x0004, 0, 0, 0, 0)
+    finally:
+        user.SetCursorPos(cursor.x, cursor.y)
 
 
 def top_window(title=None, owner=None, class_name=None, visible=True):
@@ -243,10 +271,15 @@ def main(binary):
             user.PostMessageW(picker, 0x10, 0, 0)
             wait_for(lambda: not user.IsWindowVisible(picker))
             pet_input = wait_for(lambda: window(pet.pid, "BaCafeNativeInput"))
-            user.PostMessageW(pet_input, 0x204, 2, 0)
-            user.PostMessageW(pet_input, 0x205, 0, 0)
-            quick, quick_pid = view("BA Cafe · 快捷菜单")
-            assert quick_pid == ui_pid
+
+            def open_quick_menu():
+                user.PostMessageW(pet_input, 0x204, 2, 0)
+                user.PostMessageW(pet_input, 0x205, 0, 0)
+                menu, quick_pid = view("BA Cafe · 快捷菜单")
+                assert quick_pid == ui_pid
+                return menu
+
+            quick = open_quick_menu()
             assert not (user.GetWindowLongPtrW(quick, -16) & 0x00400000), "Quick menu has a Win32 dialog frame"
             bounds = wintypes.RECT()
             assert user.GetWindowRect(quick, ctypes.byref(bounds))
@@ -327,6 +360,15 @@ def main(binary):
                 $hidden.GetCurrentPattern([Windows.Automation.TogglePattern]::Pattern).Toggle()
             """)
             wait_for(lambda: not extra_active(), 6)
+            quick = open_quick_menu()
+            click_model_row(quick, "测试备用模型 · 已隐藏", 1)
+            time.sleep(user.GetDoubleClickTime() / 1000)
+            assert not extra_active(), "A single click in the quick roster toggled visibility"
+            click_model_row(quick, "测试备用模型 · 已隐藏", 2)
+            wait_for(extra_active, 6)
+            click_model_row(quick, "测试备用模型 · 已显示", 2)
+            wait_for(lambda: not extra_active(), 6)
+            automation(quick, "Click '打开设置'")
             automation(full, r"""
                 $null = Model-Check '测试备用模型' 'Off'
                 $active = Model-Check '测试白子' 'On'
@@ -341,7 +383,7 @@ def main(binary):
             wait_for(lambda: not user.IsWindowVisible(picker))
             automation(open_tray_menu(), "Click '退出桌宠'")
             assert pet.wait(timeout=6) == 0
-            print("WinUI 3 pet and tray menus, model checkboxes and rename, movement settings, and Codex bubble preview passed.")
+            print("WinUI 3 quick-menu double-clicks, tray actions, model checkboxes and rename, movement settings, and Codex bubble preview passed.")
         finally:
             if pet.poll() is None:
                 pet.terminate()
