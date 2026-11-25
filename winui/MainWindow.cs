@@ -35,7 +35,7 @@ internal sealed class MainWindow : NativeWindow
     private readonly TextBlock opacityLabel = Controls.Text("");
     private readonly TextBlock blurLabel = Controls.Text("");
     private readonly ModelRoster roster;
-    private readonly Button import, changeFolder, resetFolder, uniformSize, hideActive;
+    private readonly Button import, changeFolder, resetFolder;
     private JsonElement state;
     private SettingsPage? page;
     private bool applying;
@@ -112,8 +112,6 @@ internal sealed class MainWindow : NativeWindow
         roster = new ModelRoster(app, false, open => DialogOpen = open);
         changeFolder = Controls.Button("更改保存位置…", () => app.Send(new { type = "change_models_folder" }));
         resetFolder = Controls.Button("恢复默认位置", () => app.Send(new { type = "reset_models_folder" }));
-        uniformSize = Controls.Button("统一角色大小", () => app.Send(new { type = "uniform_size" }));
-        hideActive = Controls.Button("隐藏当前角色", () => app.Send(new { type = "close_character" }));
         startup.Toggled += (_, _) => { if (!applying) app.Send(new { type = "set_autostart", enabled = startup.IsOn }); };
         opacity.ValueChanged += (_, _) => BubbleChanged();
         blur.ValueChanged += (_, _) => BubbleChanged();
@@ -179,13 +177,12 @@ internal sealed class MainWindow : NativeWindow
     {
         content.Children.Add(Controls.Text("本地模型库", 17, true));
         content.Children.Add(modelPath);
-        content.Children.Add(Controls.Row(
+        content.Children.Add(Controls.AdaptiveButtonGrid(
             Controls.Button("打开模型文件夹", () => app.Send(new { type = "open_models_folder" })),
-            Controls.Button("刷新模型库", () => app.Send(new { type = "refresh_models" }))));
-        content.Children.Add(Controls.Row(changeFolder, resetFolder));
+            Controls.Button("刷新模型库", () => app.Send(new { type = "refresh_models" })),
+            changeFolder, resetFolder));
         content.Children.Add(Controls.Text("已导入的模型", 17, true));
         content.Children.Add(roster.View);
-        content.Children.Add(Controls.Row(uniformSize, hideActive));
     }
 
     private void BuildCodex(StackPanel content)
@@ -234,7 +231,6 @@ internal sealed class MainWindow : NativeWindow
             modelPath.Text = state.String("modelsDirectory");
             changeFolder.IsEnabled = !state.Boolean("busy");
             resetFolder.IsEnabled = changeFolder.IsEnabled && !state.Boolean("modelsDirectoryDefault");
-            uniformSize.IsEnabled = hideActive.IsEnabled = state.Integer("activeCount") > 0;
             roster.Apply(state);
         }
         else if (current == SettingsPage.Codex)

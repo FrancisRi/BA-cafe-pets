@@ -5,6 +5,7 @@ from ctypes import wintypes
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -13,6 +14,8 @@ from message_bubbles import enum_callback, user, wait_for, window
 
 
 user.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+user.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                             ctypes.c_int, ctypes.c_int, wintypes.UINT]
 kernel = ctypes.WinDLL("kernel32", use_last_error=True)
 kernel.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
 kernel.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
@@ -83,6 +86,12 @@ function Click([string]$Name) {
     $item = Find-Control $Name
     $item.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
 }
+function Model-Check([string]$Name, [string]$State) {
+    $item = Find-Control $Name ([Windows.Automation.ControlType]::CheckBox)
+    $toggle = $item.GetCurrentPattern([Windows.Automation.TogglePattern]::Pattern)
+    if ($toggle.Current.ToggleState.ToString() -ne $State) { throw "Unexpected checkbox state for $Name" }
+    return $item
+}
 function Action-Bounds([string[]]$Names) {
     foreach ($name in $Names) {
         $button = Find-Control $name ([Windows.Automation.ControlType]::Button)
@@ -94,6 +103,22 @@ function Check-EqualSize($Bounds) {
     foreach ($item in $Bounds) {
         if ([Math]::Abs($item.Width - $Bounds[0].Width) -gt 1 -or
             [Math]::Abs($item.Height - $Bounds[0].Height) -gt 1) { throw 'Menu buttons have different sizes' }
+    }
+}
+function Check-ModelActions([int]$Columns) {
+    $library = @(Action-Bounds @('打开模型文件夹', '刷新模型库', '更改保存位置…', '恢复默认位置'))
+    $models = @(Action-Bounds @('隐藏角色', '设为当前', '重命名…', '定位文件', '删除模型…', '统一角色大小', '隐藏当前角色'))
+    Check-EqualSize ($library + $models)
+    $gap = $library[1].Left - $library[0].Right
+    foreach ($buttons in @($library, $models)) {
+        for ($i = 0; $i -lt $buttons.Length; $i++) {
+            $column = $i % $Columns
+            if ([Math]::Abs($buttons[$i].Left - $library[$column].Left) -gt 1 -or
+                [Math]::Abs($buttons[$i].Top - $buttons[$i - $column].Top) -gt 1 -or
+                ($i -ge $Columns -and [Math]::Abs($buttons[$i].Top - $buttons[$i - $Columns].Bottom - $gap) -gt 1)) {
+                throw 'Model actions do not align on a shared grid'
+            }
+        }
     }
 }
 """
@@ -182,6 +207,18 @@ def main(binary):
                     for row in json.loads(path.read_text(encoding="utf-8"))["characters"])
 
             wait_for(saved_name, 6)
+            full_bounds = wintypes.RECT()
+            assert user.GetWindowRect(full, ctypes.byref(full_bounds))
+            full_width = full_bounds.right - full_bounds.left
+            full_height = full_bounds.bottom - full_bounds.top
+            full_scale = user.GetDpiForWindow(full) / 96
+            if full_width >= 790 * full_scale:
+                automation(full, "Check-ModelActions 4")
+                assert user.SetWindowPos(full, None, 0, 0, round(650 * full_scale), full_height, 0x16)
+                try:
+                    automation(full, "Check-ModelActions 2")
+                finally:
+                    assert user.SetWindowPos(full, None, 0, 0, full_width, full_height, 0x16)
             automation(full, r"""
                 Open-Page 'Codex 消息'
                 $slider = Find-Control '不透明度' ([Windows.Automation.ControlType]::Slider)
@@ -265,7 +302,36 @@ def main(binary):
                 Check-EqualSize @(Action-Bounds $actions)
                 Click '打开设置'
             """)
-            automation(full, "Open-Page '模型管理'; Click '隐藏当前角色'")
+            extra = Path(scratch) / "model" / "测试备用模型.glb"
+            shutil.copyfile(binary.parent / "model" / "Shiroko.glb", extra)
+            automation(full, r"""
+                Open-Page '模型管理'
+                $active = Model-Check '测试白子' 'On'
+                $hidden = Model-Check '测试备用模型' 'Off'
+                $activeBox = $active.Current.BoundingRectangle
+                $hiddenBox = $hidden.Current.BoundingRectangle
+                if ($activeBox.IsEmpty -or $hiddenBox.IsEmpty -or
+                    $activeBox.Left -ne $hiddenBox.Left -or $activeBox.Bottom -gt $hiddenBox.Top) {
+                    throw 'The model checkboxes are not aligned in separate rows'
+                }
+                $hidden.GetCurrentPattern([Windows.Automation.TogglePattern]::Pattern).Toggle()
+            """)
+
+            def extra_active():
+                rows = json.loads((data / "characters.json").read_text(encoding="utf-8"))["characters"]
+                return next(row["active"] for row in rows if row["name"] == extra.stem)
+
+            wait_for(extra_active, 6)
+            automation(full, r"""
+                $hidden = Model-Check '测试备用模型' 'On'
+                $hidden.GetCurrentPattern([Windows.Automation.TogglePattern]::Pattern).Toggle()
+            """)
+            wait_for(lambda: not extra_active(), 6)
+            automation(full, r"""
+                $null = Model-Check '测试备用模型' 'Off'
+                $active = Model-Check '测试白子' 'On'
+                $active.GetCurrentPattern([Windows.Automation.TogglePattern]::Pattern).Toggle()
+            """)
             wait_for(lambda: not user.IsWindowVisible(pet_input))
             menu = open_tray_menu()
             automation(menu, "$null = Find-Control '没有活动模型'; Click '导入模型'")
@@ -275,7 +341,7 @@ def main(binary):
             wait_for(lambda: not user.IsWindowVisible(picker))
             automation(open_tray_menu(), "Click '退出桌宠'")
             assert pet.wait(timeout=6) == 0
-            print("WinUI 3 pet and tray menus, model rename, movement settings, and Codex bubble preview passed.")
+            print("WinUI 3 pet and tray menus, model checkboxes and rename, movement settings, and Codex bubble preview passed.")
         finally:
             if pet.poll() is None:
                 pet.terminate()

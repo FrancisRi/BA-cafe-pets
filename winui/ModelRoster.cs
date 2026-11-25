@@ -13,20 +13,78 @@ internal sealed class ModelRoster
     private readonly SettingsApplication app;
     private readonly bool compact;
     private readonly Action<bool> dialogVisibility;
-    private readonly ListView list = new() { DisplayMemberPath = "Label", SelectionMode = ListViewSelectionMode.Single };
+    private readonly ListView list = new() { SelectionMode = ListViewSelectionMode.Single };
     private readonly TextBlock empty = Controls.Text("尚未导入模型");
     private readonly Button toggle, select, rename, locate, remove;
-    private Model[] rows = [];
-    private int activeCount;
+    private readonly Button[] activeModelActions = [];
+    private ModelRow[] rows = [];
+    private int activeCount, maximum;
     private string current = "";
+    private Model? SelectedModel => (list.SelectedItem as ModelRow)?.Model;
 
     internal StackPanel View { get; } = new() { Spacing = 8 };
     private sealed record Model(string Id, string Name, bool Active, bool Available, bool Ready, bool Loading, bool Failed, bool Managed)
     {
-        public string Label => Name + " · " + (Loading ? "加载中" : Failed ? "加载失败" :
-            !Available ? "文件不存在" : Active ? "已显示" : "已隐藏");
+        internal string Status => Loading ? "加载中" : Failed ? "加载失败" :
+            !Available ? "文件不存在" : Active ? "已显示" : "已隐藏";
         internal static Model From(JsonElement row) => new(row.String("id"), row.String("name"), row.Boolean("active"),
             row.Boolean("available"), row.Boolean("ready"), row.Boolean("loading"), row.Boolean("failed"), row.Boolean("managed"));
+    }
+
+    private sealed class ModelRow : ListViewItem
+    {
+        private readonly CheckBox? check;
+        private readonly TextBlock? name, status;
+        private bool applying;
+
+        internal Model Model { get; private set; }
+
+        internal ModelRow(Model model, bool compact, Action<ModelRow, bool> setActive)
+        {
+            Model = model;
+            if (compact) return;
+
+            MinHeight = 40;
+            HorizontalContentAlignment = HorizontalAlignment.Stretch;
+            var columns = new Grid { ColumnSpacing = 8 };
+            columns.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            columns.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            check = new CheckBox { MinWidth = 0, Width = 32, VerticalAlignment = VerticalAlignment.Center };
+            name = Controls.Text("");
+            name.MaxLines = 2;
+            name.TextTrimming = TextTrimming.CharacterEllipsis;
+            name.VerticalAlignment = VerticalAlignment.Center;
+            status = Controls.Text("", 12);
+            status.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(name, 1);
+            Grid.SetColumn(status, 2);
+            columns.Children.Add(check);
+            columns.Children.Add(name);
+            columns.Children.Add(status);
+            Content = columns;
+            check.Checked += (_, _) => { if (!applying) setActive(this, true); };
+            check.Unchecked += (_, _) => { if (!applying) setActive(this, false); };
+        }
+
+        internal void Apply(Model model, bool canToggle)
+        {
+            Model = model;
+            if (check == null)
+            {
+                Content = $"{model.Name} · {model.Status}";
+                return;
+            }
+
+            name!.Text = model.Name;
+            status!.Text = model.Status;
+            AutomationProperties.SetName(this, model.Name);
+            AutomationProperties.SetName(check, model.Name);
+            applying = true;
+            check.IsChecked = model.Active;
+            check.IsEnabled = canToggle;
+            applying = false;
+        }
     }
 
     internal ModelRoster(SettingsApplication app, bool compact, Action<bool> dialogVisibility)
@@ -34,23 +92,27 @@ internal sealed class ModelRoster
         this.app = app;
         this.compact = compact;
         this.dialogVisibility = dialogVisibility;
-        list.MaxHeight = compact ? 76 : 280;
+        list.MaxHeight = compact ? 76 : 320;
         AutomationProperties.SetName(list, "已导入的模型");
         list.SelectionChanged += (_, _) => UpdateActions();
         list.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(KeyDown), true);
         list.IsItemClickEnabled = compact;
-        list.ItemClick += (_, args) => { if (compact && args.ClickedItem is Model model) Toggle(model); };
-        toggle = Controls.Button("显示角色", () => { if (list.SelectedItem is Model model) Toggle(model); });
+        list.ItemClick += (_, args) => { if (compact && args.ClickedItem is ModelRow row) Toggle(row.Model); };
+        toggle = Controls.Button("显示角色", () => { if (SelectedModel is Model model) Toggle(model); });
         select = Controls.Button("设为当前", () => Command("roster_select"));
-        rename = Controls.Button("重命名…", async () => { if (list.SelectedItem is Model model) await Rename(model); });
+        rename = Controls.Button("重命名…", async () => { if (SelectedModel is Model model) await Rename(model); });
         locate = Controls.Button("定位文件", () => Command("model_locate"));
-        remove = Controls.Button("删除模型…", async () => { if (list.SelectedItem is Model model) await Remove(model); });
+        remove = Controls.Button("删除模型…", async () => { if (SelectedModel is Model model) await Remove(model); });
         View.Children.Add(empty);
         View.Children.Add(list);
         if (!compact)
         {
-            View.Children.Add(Controls.Row(toggle, select, rename));
-            View.Children.Add(Controls.Row(locate, remove));
+            activeModelActions =
+            [
+                Controls.Button("统一角色大小", () => app.Send(new { type = "uniform_size" })),
+                Controls.Button("隐藏当前角色", () => app.Send(new { type = "close_character" }))
+            ];
+            View.Children.Add(Controls.AdaptiveButtonGrid([toggle, select, rename, locate, remove, .. activeModelActions]));
             list.RightTapped += RightTapped;
         }
     }
@@ -58,26 +120,31 @@ internal sealed class ModelRoster
     internal void Apply(JsonElement state)
     {
         activeCount = state.Integer("activeCount");
+        maximum = state.Integer("maximum", 5);
         current = state.String("selectedId");
         var next = state.Items("characters").Select(Model.From).ToArray();
-        if (!next.SequenceEqual(rows))
+        if (!next.Select(model => model.Id).SequenceEqual(rows.Select(row => row.Model.Id)))
         {
-            var selected = (list.SelectedItem as Model)?.Id ?? current;
-            rows = next;
+            var selected = SelectedModel?.Id ?? current;
+            rows = next.Select(model => new ModelRow(model, compact, CheckChanged)).ToArray();
             list.ItemsSource = rows;
-            list.SelectedItem = rows.FirstOrDefault(model => model.Id == selected) ??
-                rows.FirstOrDefault(model => model.Id == current);
+            list.SelectedItem = rows.FirstOrDefault(row => row.Model.Id == selected);
         }
+        if (list.SelectedItem == null && current.Length > 0)
+            list.SelectedItem = rows.FirstOrDefault(row => row.Model.Id == current);
+        for (var index = 0; index < rows.Length; index++)
+            rows[index].Apply(next[index], CanToggle(next[index]));
         empty.Visibility = rows.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         list.Visibility = rows.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+        foreach (var action in activeModelActions) action.IsEnabled = activeCount > 0;
         UpdateActions();
     }
 
-    private bool CanToggle(Model model) => model.Active || (model.Available && activeCount < 5);
+    private bool CanToggle(Model model) => model.Active || (model.Available && activeCount < maximum);
     private bool CanSelect(Model model) => model.Active && model.Ready && model.Id != current;
     private void UpdateActions()
     {
-        var model = list.SelectedItem as Model;
+        var model = SelectedModel;
         toggle.Content = model?.Active == true ? "隐藏角色" : "显示角色";
         toggle.IsEnabled = model != null && CanToggle(model);
         select.IsEnabled = model != null && CanSelect(model);
@@ -89,18 +156,30 @@ internal sealed class ModelRoster
 
     private void Command(string type)
     {
-        if (list.SelectedItem is Model model) app.Send(new { type, id = model.Id });
+        if (SelectedModel is Model model) app.Send(new { type, id = model.Id });
     }
 
-    private void Toggle(Model model)
+    private void CheckChanged(ModelRow row, bool active)
     {
-        if (CanToggle(model)) app.Send(new { type = "roster_toggle", id = model.Id, active = !model.Active });
+        list.SelectedItem = row;
+        SetActive(row.Model, active);
+    }
+
+    private void Toggle(Model model) => SetActive(model, !model.Active);
+
+    private void SetActive(Model model, bool active)
+    {
+        if (CanToggle(model)) app.Send(new { type = "roster_toggle", id = model.Id, active });
     }
 
     private async void KeyDown(object sender, KeyRoutedEventArgs args)
     {
-        if (list.SelectedItem is not Model model) return;
-        if (args.Key == Windows.System.VirtualKey.Space) { Toggle(model); args.Handled = true; }
+        if (SelectedModel is not Model model) return;
+        if (args.Key == Windows.System.VirtualKey.Space && args.OriginalSource is not CheckBox)
+        {
+            Toggle(model);
+            args.Handled = true;
+        }
         else if (!compact && args.Key == Windows.System.VirtualKey.F2) { args.Handled = true; await Rename(model); }
         else if (!compact && args.Key == Windows.System.VirtualKey.Delete && !model.Loading)
         {
@@ -114,8 +193,9 @@ internal sealed class ModelRoster
         for (var source = args.OriginalSource as DependencyObject; source != null && source != list;
             source = VisualTreeHelper.GetParent(source))
         {
-            if (source is not ListViewItem { Content: Model model }) continue;
-            list.SelectedItem = model;
+            if (source is not ModelRow row) continue;
+            var model = row.Model;
+            list.SelectedItem = row;
             var flyout = new MenuFlyout();
             Add(model.Active ? "隐藏角色" : "显示角色", CanToggle(model), () => Toggle(model));
             Add("设为当前角色", CanSelect(model), () => app.Send(new { type = "roster_select", id = model.Id }));

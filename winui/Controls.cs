@@ -31,6 +31,49 @@ internal static class Controls
         return row;
     }
 
+    internal static Grid ButtonGrid(int columns, params Button[] buttons)
+    {
+        var grid = new Grid { ColumnSpacing = 6, RowSpacing = 6 };
+        foreach (var button in buttons)
+        {
+            button.HorizontalAlignment = HorizontalAlignment.Stretch;
+            button.VerticalAlignment = VerticalAlignment.Stretch;
+            button.HorizontalContentAlignment = HorizontalAlignment.Center;
+            grid.Children.Add(button);
+        }
+        ArrangeButtonGrid(grid, buttons, columns);
+        return grid;
+    }
+
+    internal static Grid AdaptiveButtonGrid(params Button[] buttons)
+    {
+        foreach (var button in buttons) button.MinHeight = 36;
+        var grid = ButtonGrid(4, buttons);
+        grid.SizeChanged += (_, args) => ArrangeButtonGrid(grid, buttons, args.NewSize.Width switch
+        {
+            >= 520 => 4,
+            >= 260 => 2,
+            _ => 1
+        });
+        return grid;
+    }
+
+    private static void ArrangeButtonGrid(Grid grid, Button[] buttons, int columns)
+    {
+        if (grid.ColumnDefinitions.Count == columns) return;
+        grid.ColumnDefinitions.Clear();
+        grid.RowDefinitions.Clear();
+        for (var column = 0; column < columns; column++)
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        for (var index = 0; index < buttons.Length; index++)
+        {
+            if (index % columns == 0)
+                grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            Grid.SetColumn(buttons[index], index % columns);
+            Grid.SetRow(buttons[index], index / columns);
+        }
+    }
+
     internal static FrameworkElement Card(string title, string detail, FrameworkElement control, string icon = "", TextBlock? status = null)
     {
         var content = new Grid { ColumnSpacing = 12 };

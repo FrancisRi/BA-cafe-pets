@@ -43,7 +43,7 @@ internal sealed class QuickWindow : NativeWindow
             var button = MenuButton(Controls.Mode(mode), () => app.Send(new { type = "option", key = "mode", value = mode }));
             modes.Add(mode, button);
         }
-        content.Children.Add(ButtonGrid(3, modes.Values.ToArray()));
+        content.Children.Add(Controls.ButtonGrid(3, modes.Values.ToArray()));
         var switches = new StackPanel { Spacing = 1 };
         content.Children.Add(switches);
         foreach (var (key, label) in new[] { ("inspectionMode", "观赏模式"), ("follow", "位置跟随鼠标"),
@@ -67,7 +67,7 @@ internal sealed class QuickWindow : NativeWindow
             switches.Children.Add(row);
         }
         import = MenuButton("导入模型", () => app.OpenFull(import: true));
-        content.Children.Add(ButtonGrid(2, MenuButton("打开设置", () => app.OpenFull(), true), import,
+        content.Children.Add(Controls.ButtonGrid(2, MenuButton("打开设置", () => app.OpenFull(), true), import,
             MenuButton("模型文件夹", app.OpenModelsFolder), MenuButton("退出桌宠", () => app.Send(new { type = "exit" }))));
         content.Children.Add(status);
     }
@@ -77,25 +77,7 @@ internal sealed class QuickWindow : NativeWindow
         var button = Controls.Button(label, action, primary);
         button.Padding = new Thickness(8, 4, 8, 4);
         button.MinHeight = 30;
-        button.HorizontalAlignment = HorizontalAlignment.Stretch;
-        button.VerticalAlignment = VerticalAlignment.Stretch;
-        button.HorizontalContentAlignment = HorizontalAlignment.Center;
         return button;
-    }
-
-    private static Grid ButtonGrid(int columns, params Button[] buttons)
-    {
-        var grid = new Grid { ColumnSpacing = 6, RowSpacing = 6 };
-        for (int column = 0; column < columns; ++column)
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        for (int index = 0; index < buttons.Length; ++index)
-        {
-            if (index % columns == 0) grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            Grid.SetColumn(buttons[index], index % columns);
-            Grid.SetRow(buttons[index], index / columns);
-            grid.Children.Add(buttons[index]);
-        }
-        return grid;
     }
 
     private string tracking = "cafeTracking";
