@@ -164,8 +164,11 @@ struct NativeModelStorage {
             changes.push_back({oldId,row.id,original,file});
             if(auto* existing=updated.find(row.id)){
                 const bool active=existing->active||row.active;
+                const auto order=row.active&&(!existing->active||Roster::earlier(row,*existing))?
+                    row.activationOrder:existing->activationOrder;
                 if(source.selected==oldId)*existing=row;
                 existing->active=active;
+                existing->activationOrder=order;
             }else updated.remember(row);
             if(source.selected==oldId)updated.selected=row.id;
         }

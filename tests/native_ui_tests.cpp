@@ -19,6 +19,22 @@ using Json=nlohmann::json;
 #include "native_settings.h"
 #include "native_message_bubble.h"
 static void check(bool value,const char* message){if(!value)throw std::runtime_error(message);}
+static void CALLBACK submitModelName(HWND parent,UINT,UINT_PTR timer,DWORD){
+    HWND dialog{};
+    EnumThreadWindows(GetCurrentThreadId(),[](HWND candidate,LPARAM result)->BOOL{
+        wchar_t title[48]{};GetWindowTextW(candidate,title,48);
+        if(std::wstring_view(title)!=L"重命名模型")return TRUE;
+        *reinterpret_cast<HWND*>(result)=candidate;return FALSE;
+    },LPARAM(&dialog));
+    if(!dialog)return;
+    KillTimer(parent,timer);
+    SetDlgItemTextW(dialog,100,L"　 ");
+    SendMessageW(dialog,WM_COMMAND,IDOK,0);
+    if(IsWindow(dialog)){
+        SetDlgItemTextW(dialog,100,L"  水着优香　");
+        SendMessageW(dialog,WM_COMMAND,IDOK,0);
+    }
+}
 static void checkBubbleRendering(){
     NativeMessageBubble bubble;
     bubble.cleanBounds={4,0,8,2};
@@ -367,8 +383,16 @@ int main(int argc,char** argv){
         SendMessageW(menu.list,WM_CONTEXTMENU,reinterpret_cast<WPARAM>(menu.list),MAKELPARAM(location.x,location.y));pump(menu);
         check(menu.contextId=="1"&&menu.highlighted=="1"&&SendMessageW(menu.list,LB_GETCURSEL,0,0)==1,"Right-click selects the pointed model rather than the current actor");
         check(IsWindowVisible(menu.modelMenu)&&IsWindowEnabled(GetDlgItem(menu.modelMenu,4003)),"Selected local models expose deletion in the Fluent context menu");
+        check(IsWindowEnabled(GetDlgItem(menu.modelMenu,4004))&&IsWindowEnabled(GetDlgItem(menu.panel,2109)),
+            "Model management provides rename from the row actions and context menu");
         checkFlyoutFrame(menu.modelMenu,menu.modelUi);
         check(!menu.pausesPets(),"Model management context menu never pauses pets");
+        const auto renameTimer=SetTimer(menu.window,4500,15,submitModelName);
+        SendMessageW(GetDlgItem(menu.modelMenu,4004),BM_CLICK,0,0);
+        KillTimer(menu.window,renameTimer);
+        check(sent.back()==Json{{"type","model_rename"},{"id","1"},{"name","水着优香"}},
+            "The real rename dialog rejects an empty name, trims spaces, and submits the right-clicked model ID");
+        SendMessageW(menu.list,WM_CONTEXTMENU,reinterpret_cast<WPARAM>(menu.list),MAKELPARAM(-1,-1));pump(menu);
         menu.modelCommand(4000);check(sent.back()["type"]=="roster_toggle"&&sent.back()["id"]=="1","Context actions address the right-clicked model");
         SendMessageW(menu.list,LB_SETCURSEL,1,0);SendMessageW(menu.list,WM_CONTEXTMENU,reinterpret_cast<WPARAM>(menu.list),MAKELPARAM(-1,-1));pump(menu);
         check(menu.contextId=="1"&&IsWindowVisible(menu.modelMenu),"Keyboard context-menu invocation uses the selected model");

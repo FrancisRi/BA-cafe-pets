@@ -5,6 +5,7 @@
 #include <tuple>
 #include "native_autostart.h"
 #include "native_codex_hooks.h"
+#include "native_model_name.h"
 #include "native_outline_input.h"
 
 // Both interfaces use the existing host messages; the host remains responsible
@@ -198,12 +199,12 @@ struct NativeSettings {
             auto reset=control(panel,L"BUTTON",L"恢复默认位置",BS_OWNERDRAW,2108,212,y,162,36);placeContent(reset,212,y,162,36);y+=48;
             note(L"所有模型（含白子）统一保存在 model 文件夹；更改目录会复制并校验全部模型，原文件保留。",40);
             auto folderPath=control(panel,L"STATIC",L"",SS_PATHELLIPSIS,2110,16,y,panelWidth(),24);SendMessageW(folderPath,WM_SETFONT,reinterpret_cast<WPARAM>(ui.small),FALSE);SetPropW(folderPath,L"FluentMuted",reinterpret_cast<HANDLE>(1));placeContent(folderPath,16,y,0,24,true);y+=40;
-            section(L"已导入的模型");note(L"勾选显示角色；右键模型可切换、定位或删除。模型库与本地文件同步，同时显示最多 5 个。",40);
+            section(L"已导入的模型");note(L"勾选显示角色；右键模型可重命名、定位或删除。同时显示最多 5 个角色。",40);
             const int rosterHeight=last.value("characters",Json::array()).empty()?128:std::min(4,int(last["characters"].size()))*64;
             list=control(panel,L"LISTBOX",L"已导入的模型",LBS_NOTIFY|LBS_OWNERDRAWFIXED|LBS_HASSTRINGS|LBS_NOINTEGRALHEIGHT|WS_VSCROLL,2000,16,y,panelWidth(),rosterHeight);
             SendMessageW(list,LB_SETITEMHEIGHT,0,u(64));SetWindowSubclass(list,listProc,2,reinterpret_cast<DWORD_PTR>(this));placeContent(list,16,y,0,rosterHeight,true);
             const int emptyY=y+(rosterHeight-58)/2;listEmpty=control(panel,L"STATIC",L"尚未导入模型\n点击右上角「导入模型」添加角色",SS_CENTER,0,16,emptyY,panelWidth(),58);placeContent(listEmpty,16,emptyY,0,58,true);y+=rosterHeight+16;
-            int x=16;for(auto [id,text]:{std::pair{2100,L"显示角色"},{2101,L"设为当前"},{2102,L"删除模型"}}){auto h=control(panel,L"BUTTON",text,BS_OWNERDRAW,id,x,y,132,36);placeContent(h,x,y,132,36);x+=144;}y+=50;
+            int x=16;for(auto [id,text]:{std::pair{2100,L"显示角色"},{2101,L"设为当前"},{2109,L"重命名…"}, {2102,L"删除模型"}}){auto h=control(panel,L"BUTTON",text,BS_OWNERDRAW,id,x,y,110,36);placeContent(h,x,y,110,36);x+=122;}y+=50;
             section(L"显示管理");for(auto [id,text]:{std::pair{2103,L"统一角色大小"},{2104,L"隐藏当前角色"}}){const int pos=id==2103?16:190;auto h=control(panel,L"BUTTON",text,BS_OWNERDRAW,id,pos,y,162,36);placeContent(h,pos,y,162,36);}y+=52;
             note(L"白子与其他本地模型均可删除，文件移入回收站并移除记录；隐藏或删除全部角色后，程序仍在托盘运行。",40);
         }else{
@@ -318,11 +319,10 @@ struct NativeSettings {
                 const int opacity=value.value("bubbleOpacity",88),blur=value.value("bubbleBlur",8);
                 SendMessageW(GetDlgItem(panel,2215),TBM_SETPOS,TRUE,opacity);
                 SendMessageW(GetDlgItem(panel,2216),TBM_SETPOS,TRUE,blur);
-                SetWindowTextW(GetDlgItem(panel,2212),(L"不透明度　"+std::to_wstring(opacity)+L"%").c_str());
-                SetWindowTextW(GetDlgItem(panel,2213),(L"背景模糊　"+std::to_wstring(blur)+L" px").c_str());
+                bubbleLabels(opacity,blur);
             }
             if(list){fillRoster(list,false);const int n=int(SendMessageW(list,LB_GETCURSEL,0,0));const auto rows=last.value("characters",Json::array());ShowWindow(listEmpty,rows.empty()?SW_SHOW:SW_HIDE);const auto row=n>=0&&n<int(rows.size())?rows[n]:Json::object();const bool active=row.value("active",false);
-                SetWindowTextW(GetDlgItem(panel,2100),active?L"隐藏角色":L"显示角色");EnableWindow(GetDlgItem(panel,2100),n>=0&&(active||(row.value("available",false)&&last.value("activeCount",0)<5)));EnableWindow(GetDlgItem(panel,2101),n>=0&&active&&row.value("ready",false)&&highlighted!=last.value("selectedId",std::string{}));SetWindowTextW(GetDlgItem(panel,2102),row.value("managed",false)?L"删除模型":L"移除记录");EnableWindow(GetDlgItem(panel,2102),n>=0&&!row.value("loading",false));EnableWindow(GetDlgItem(panel,2103),last.value("activeCount",0)>0);EnableWindow(GetDlgItem(panel,2104),last.value("activeCount",0)>0);}
+                SetWindowTextW(GetDlgItem(panel,2100),active?L"隐藏角色":L"显示角色");EnableWindow(GetDlgItem(panel,2100),n>=0&&(active||(row.value("available",false)&&last.value("activeCount",0)<5)));EnableWindow(GetDlgItem(panel,2101),n>=0&&active&&row.value("ready",false)&&highlighted!=last.value("selectedId",std::string{}));SetWindowTextW(GetDlgItem(panel,2102),row.value("managed",false)?L"删除模型":L"移除记录");EnableWindow(GetDlgItem(panel,2102),n>=0&&!row.value("loading",false));EnableWindow(GetDlgItem(panel,2109),n>=0);EnableWindow(GetDlgItem(panel,2103),last.value("activeCount",0)>0);EnableWindow(GetDlgItem(panel,2104),last.value("activeCount",0)>0);}
             for(int i=0;i<pageCount;++i)InvalidateRect(GetDlgItem(window,1000+i),nullptr,FALSE);
         }
         if(quickWindow){
@@ -355,12 +355,18 @@ struct NativeSettings {
             else{wchar_t text[80]{};GetWindowTextW(c.input,text,80);wchar_t* end{};const double n=std::wcstod(text,&end);if(end==text||*end||!std::isfinite(n)){SetWindowTextW(GetDlgItem(window,2300),L"请输入有效数字；该更改尚未保存。");return;}value[key]=n;}
         }sendValue(std::move(value));
     }
+    void bubbleLabels(int opacity,int blur){
+        SetWindowTextW(GetDlgItem(panel,2212),(L"不透明度　"+std::to_wstring(opacity)+L"%").c_str());
+        SetWindowTextW(GetDlgItem(panel,2213),(L"背景模糊　"+std::to_wstring(blur)+L" px").c_str());
+    }
     void saveBubble(){
         if(syncing||!receive||page!=messagesPage)return;
-        receive({{"type","bubble_settings"},
-            {"bubbleOpacity",int(SendMessageW(GetDlgItem(panel,2215),TBM_GETPOS,0,0))},
-            {"bubbleBlur",int(SendMessageW(GetDlgItem(panel,2216),TBM_GETPOS,0,0))}});
-        sync();
+        const int opacity=int(SendMessageW(GetDlgItem(panel,2215),TBM_GETPOS,0,0));
+        const int blur=int(SendMessageW(GetDlgItem(panel,2216),TBM_GETPOS,0,0));
+        auto& value=last["value"];
+        if(opacity==value.value("bubbleOpacity",88)&&blur==value.value("bubbleBlur",8))return;
+        value["bubbleOpacity"]=opacity;value["bubbleBlur"]=blur;bubbleLabels(opacity,blur);
+        receive({{"type","bubble_settings"},{"bubbleOpacity",opacity},{"bubbleBlur",blur}});
     }
     void toggleRoster(int index){
         const auto rows=last.value("characters",Json::array());if(index<0||index>=int(rows.size()))return;const auto row=rows[index];
@@ -374,6 +380,11 @@ struct NativeSettings {
         text+=managed?L"将本地模型副本移入回收站，并从模型库中移除？原始下载文件保留。":L"从列表中移除该模型？外部原始文件将保留。";
         if(row.value("active",false)&&last.value("activeCount",0)==1)text+=L"\n\n删除后程序继续在任务栏托盘运行，可重新导入或显示其他模型。";
         if(nativeMessageBox(window,text.c_str(),managed?L"删除模型":L"移除模型记录",MB_YESNO|MB_ICONWARNING|MB_DEFBUTTON2)==IDYES&&receive)receive({{"type","model_delete"},{"id",row.at("id")}});
+    }
+    void renameModel(const Json& row){
+        NativeHealth::Pause editing;
+        if(const auto name=NativeModelName::edit(dialogOwner(),wide(row.value("name",std::string{})));name&&receive)
+            receive({{"type","model_rename"},{"id",row.at("id")},{"name",utf8(*name)}});
     }
     void updateModelMenu(){
         if(!modelMenu||!IsWindowVisible(modelMenu))return;
@@ -394,7 +405,7 @@ struct NativeSettings {
         for(size_t index=0;index<rows.size();++index)if(rows[index].value("id",std::string{})==contextId){
             if(!IsWindowEnabled(GetDlgItem(modelMenu,id)))return;const auto row=rows[index];hideModelMenu();
             if(id==4000)toggleRoster(int(index));else if(id==4001)receive({{"type","roster_select"},{"id",row["id"]}});
-            else if(id==4002)receive({{"type","model_locate"},{"id",row["id"]}});else if(id==4003)removeModel(row);
+            else if(id==4002)receive({{"type","model_locate"},{"id",row["id"]}});else if(id==4003)removeModel(row);else if(id==4004)renameModel(row);
             sync();return;
         }hideModelMenu();
     }
@@ -409,17 +420,19 @@ struct NativeSettings {
             modelMenu=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_CONTROLPARENT,wc.lpszClassName,L"模型操作",WS_POPUP|WS_CLIPCHILDREN,0,0,280,230,nullptr,nullptr,wc.hInstance,this);
             if(!modelMenu)throw std::runtime_error("Cannot create model context menu");}
         modelUi.load(GetDpiForWindow(source));modelUi.frame(modelMenu,true);
+        const std::array<std::pair<int,const wchar_t*>,5> actions{{{4000,L"显示角色"},{4001,L"设为当前角色"},
+            {4002,L"在文件夹中定位"},{4004,L"重命名…"},{4003,L"删除模型…"}}};
         if(!GetDlgItem(modelMenu,4100)){
             auto title=CreateWindowExW(0,L"STATIC",L"",WS_CHILD|WS_VISIBLE|SS_ENDELLIPSIS,0,0,0,0,modelMenu,reinterpret_cast<HMENU>(4100),GetModuleHandleW(nullptr),nullptr);SendMessageW(title,WM_SETFONT,reinterpret_cast<WPARAM>(modelUi.heading),TRUE);
-            for(auto [id,text]:{std::pair{4000,L"显示角色"},{4001,L"设为当前角色"},{4002,L"在文件夹中定位"},{4003,L"删除模型…"}}){auto child=CreateWindowExW(0,L"BUTTON",text,WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,0,0,0,0,modelMenu,reinterpret_cast<HMENU>(INT_PTR(id)),GetModuleHandleW(nullptr),nullptr);SetWindowSubclass(child,NativeFluent::controlProc,1,reinterpret_cast<DWORD_PTR>(&modelUi));}
+            for(auto [id,text]:actions){auto child=CreateWindowExW(0,L"BUTTON",text,WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,0,0,0,0,modelMenu,reinterpret_cast<HMENU>(INT_PTR(id)),GetModuleHandleW(nullptr),nullptr);SetWindowSubclass(child,NativeFluent::controlProc,1,reinterpret_cast<DWORD_PTR>(&modelUi));}
         }
         SetWindowPos(GetDlgItem(modelMenu,4100),nullptr,modelUi.px(16),modelUi.px(12),modelUi.px(240),modelUi.px(26),SWP_NOZORDER|SWP_NOACTIVATE);SendMessageW(GetDlgItem(modelMenu,4100),WM_SETFONT,reinterpret_cast<WPARAM>(modelUi.heading),TRUE);
-        for(int id=4000;id<=4003;++id){auto child=GetDlgItem(modelMenu,id);SendMessageW(child,WM_SETFONT,reinterpret_cast<WPARAM>(modelUi.font),TRUE);SetWindowPos(child,nullptr,modelUi.px(8),modelUi.px(46+(id-4000)*38),modelUi.px(256),modelUi.px(36),SWP_NOZORDER|SWP_NOACTIVATE);}
-        MONITORINFO info{sizeof(info)};GetMonitorInfoW(MonitorFromPoint(point,MONITOR_DEFAULTTONEAREST),&info);const int width=modelUi.px(272),height=modelUi.px(208);
+        int yAction=46;for(auto [id,text]:actions){auto child=GetDlgItem(modelMenu,id);SendMessageW(child,WM_SETFONT,reinterpret_cast<WPARAM>(modelUi.font),TRUE);SetWindowPos(child,nullptr,modelUi.px(8),modelUi.px(yAction),modelUi.px(256),modelUi.px(36),SWP_NOZORDER|SWP_NOACTIVATE);yAction+=38;}
+        MONITORINFO info{sizeof(info)};GetMonitorInfoW(MonitorFromPoint(point,MONITOR_DEFAULTTONEAREST),&info);const int width=modelUi.px(272),height=modelUi.px(yAction+10);
         const int x=std::clamp(int(point.x),int(info.rcWork.left),std::max(int(info.rcWork.left),int(info.rcWork.right)-width)),y=std::clamp(int(point.y),int(info.rcWork.top),std::max(int(info.rcWork.top),int(info.rcWork.bottom)-height));
         SendMessageW(modelMenu,WM_CHANGEUISTATE,MAKEWPARAM(keyboard?UIS_CLEAR:UIS_SET,UISF_HIDEFOCUS),0);
         SetWindowPos(modelMenu,HWND_TOPMOST,x,y,width,height,SWP_SHOWWINDOW|SWP_FRAMECHANGED);updateModelMenu();RedrawWindow(modelMenu,nullptr,nullptr,RDW_INVALIDATE|RDW_ERASE|RDW_ALLCHILDREN|RDW_UPDATENOW);SetForegroundWindow(modelMenu);
-        for(int id=4000;id<=4003;++id)if(IsWindowEnabled(GetDlgItem(modelMenu,id))){SetFocus(GetDlgItem(modelMenu,id));break;}
+        for(auto [id,text]:actions)if(IsWindowEnabled(GetDlgItem(modelMenu,id))){SetFocus(GetDlgItem(modelMenu,id));break;}
     }
     void quickCommand(int id){
         if(!quickEnabled(id))return;if(id==3011){show(nullptr,defaultsFile.parent_path());return;}if(id==3010){page=3;show(nullptr,defaultsFile.parent_path());receive({{"type","import"}});return;}if(id==3012){receive({{"type","exit"}});return;}if(id==3013){hideQuick();receive({{"type","open_models_folder"}});return;}
@@ -427,7 +440,7 @@ struct NativeSettings {
     }
     void command(int id,int code){
         if(closing)return;
-        if(id>=4000&&id<=4003){modelCommand(id);return;}
+        if(id>=4000&&id<=4004){modelCommand(id);return;}
         if(syncing)return;if(id>=3000&&id<=3013){quickCommand(id);return;}if(id==1){hide();return;}if(id==2){receive({{"type","exit"}});return;}
         if(id==2112){
             if(code==EN_SETFOCUS){editingOutline=true;outlineError(false);SetWindowTextW(outlineValue,std::to_wstring(last["value"].value("outlineWidth",100)).c_str());SendMessageW(outlineValue,EM_SETSEL,0,-1);}
@@ -459,7 +472,7 @@ struct NativeSettings {
         if(id==2105){receive({{"type","open_models_folder"}});return;}
         if(id==2106){receive({{"type","refresh_models"}});return;}
         if(id==2107||id==2108){receive({{"type",id==2107?"change_models_folder":"reset_models_folder"}});return;}
-        if(id>=2100&&id<=2102){const int n=int(SendMessageW(list,LB_GETCURSEL,0,0));if(n<0)return;const auto row=last["characters"][n];if(id==2100)toggleRoster(n);else if(id==2101)receive({{"type","roster_select"},{"id",row["id"]}});else removeModel(row);return;}
+        if((id>=2100&&id<=2102)||id==2109){const int n=int(SendMessageW(list,LB_GETCURSEL,0,0));if(n<0)return;const auto row=last["characters"][n];if(id==2100)toggleRoster(n);else if(id==2101)receive({{"type","roster_select"},{"id",row["id"]}});else if(id==2109)renameModel(row);else removeModel(row);return;}
         if(id==2200){receive({{"type","import"}});return;}
         if(id==2201){auto value=last["value"];NativePreferences defaults;const auto ini=defaultsFile.wstring();defaults.load(ini);auto behavior=defaults.json();behavior.erase("bubbleOpacity");behavior.erase("bubbleBlur");value.update(behavior);value.update({{"look",GetPrivateProfileIntW(L"Behavior",L"Tracking",1,ini.c_str())!=0},{"idleSeconds",std::clamp(int(GetPrivateProfileIntW(L"Behavior",L"InputIdleSeconds",60,ini.c_str())),1,3600)},{"activeSeconds",std::clamp(int(GetPrivateProfileIntW(L"Behavior",L"ContinuedInputSeconds",30,ini.c_str())),1,3600)}});sendValue(std::move(value));}
     }
@@ -484,7 +497,7 @@ struct NativeSettings {
         wchar_t title[256]{};GetWindowTextW(d.hwndItem,title,256);COLORREF color=disabled?theme.disabled:theme.text;
         if(context){
             NativeFluent::round(dc,r,pressed?theme.pressed:hover?theme.hover:theme.surface,theme.surface,theme.px(6));if(id==4003&&!disabled)color=theme.danger;
-            RECT icon{r.left+theme.px(8),r.top,r.left+theme.px(32),r.bottom};theme.glyph(dc,id==4000?L"\xE890":id==4001?L"\xE73E":id==4002?L"\xE8B7":L"\xE74D",icon,disabled?theme.disabled:color);
+            RECT icon{r.left+theme.px(8),r.top,r.left+theme.px(32),r.bottom};theme.glyph(dc,id==4000?L"\xE890":id==4001?L"\xE73E":id==4002?L"\xE8B7":id==4004?L"\xE8AC":L"\xE74D",icon,disabled?theme.disabled:color);
             r.left+=theme.px(44);theme.label(dc,title,r,theme.font,disabled?theme.disabled:color);
         }else if(compact){
             const bool mode=id==3000||id==3001||id==3006,checked=quickChecked(id),isToggle=(id>=3002&&id<=3005)||id==3007||id==3008;auto fill=pressed?theme.pressed:hover?theme.hover:theme.surface;if(mode&&checked)fill=theme.selection;NativeFluent::round(dc,r,fill,mode?theme.line:fill,theme.px(6));if(id==3012)color=theme.danger;

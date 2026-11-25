@@ -107,7 +107,7 @@ def run(binary, sender):
                     return False
                 value = ctypes.create_unicode_buffer(2048)
                 user.GetWindowTextW(hwnd, value, len(value))
-                return hwnd if value.value.split("\n", 1)[-1] == expected else False
+                return hwnd if value.value == "Shiroko\n" + expected else False
 
             def append_record(*texts, owner=None, phase="commentary"):
                 entries = [

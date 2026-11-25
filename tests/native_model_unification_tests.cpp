@@ -46,18 +46,61 @@ int wmain(int argc,wchar_t** argv){try{
         scene.tick();check(a.loaded,"Load the actual GLB after relocating its pending path");
         auto* renderer=a.renderer.get();scene.changeModelsFolder(root/L"another-library");paths(scene,root/L"another-library");
         check(a.loaded&&a.renderer.get()==renderer&&a.model.parent_path()==root/L"another-library"&&a.actorId==scene.roster.selected,"Relocating a loaded actor preserves its renderer and selection");
+        const auto file=a.model;
+        scene.message({{"type","model_rename"},{"id",a.actorId},{"name","  桌宠白子　"}});
+        check(scene.snapshot()["name"]=="桌宠白子"&&a.renderer.get()==renderer&&a.model==file&&fs::is_regular_file(file),
+            "Renaming a running model changes its display name without reloading or moving the GLB");
+        scene.message({{"type","model_rename"},{"id",a.actorId},{"name","　 "}});
+        check(!scene.error.empty()&&scene.roster.find(a.actorId)->name=="桌宠白子","Invalid rename preserves the last saved name");
+
+        const auto& ini=a.settings->ini;
+        const auto saved=GetPrivateProfileIntW(L"Messages",L"Opacity",88,ini.c_str());
+        scene.message({{"type","bubble_settings"},{"bubbleOpacity",51},{"bubbleBlur",17}});
+        check(a.preferences.bubbleOpacity==51&&a.preferences.bubbleBlur==17&&scene.bubbleSaveAt&&
+            GetPrivateProfileIntW(L"Messages",L"Opacity",88,ini.c_str())==saved,"Bubble sliders update in memory before saving");
+        scene.flushBubblePreferences();
+        check(GetPrivateProfileIntW(L"Messages",L"Opacity",88,ini.c_str())==51&&
+            GetPrivateProfileIntW(L"Messages",L"Blur",8,ini.c_str())==17,"A deferred save persists both bubble settings");
+
         scene.message({{"type","reset_models_folder"}});paths(scene,program/L"model");
-        scene.close(scene.roster.selected);check(scene.roster.activeCount()==0,"Hide all models");
+        const auto firstId=a.actorId;
+        const auto whiteId=std::find_if(scene.roster.entries.begin(),scene.roster.entries.end(),
+            [](const auto& row){return row.name=="Shiroko";})->id;
+        scene.activate(whiteId);
+        check(scene.roster.selected==whiteId&&scene.roster.firstActive()->id==firstId,
+            "The first activation takes precedence over selection and roster order");
+        SceneRoster savedOrder;savedOrder.load(scene.historyFile);
+        check(savedOrder.firstActive()->id==firstId&&savedOrder.find(firstId)->name=="桌宠白子",
+            "Activation order and renamed display name survive rereading the roster");
+        scene.tick();scene.renderScene();
+        auto* oldest=scene.find(firstId);check(oldest&&oldest->loaded&&oldest->renderer->modelPixels,"Render both active models");
+        scene.message({{"type","preview_bubble"}});
+        check(scene.bubble.visible()&&scene.bubble.current->title==L"桌宠白子","Bubble uses the oldest active model's renamed title");
+        RECT actor{},model=*oldest->renderer->modelPixels,bubble{};
+        GetWindowRect(oldest->window,&actor);OffsetRect(&model,actor.left,actor.top);GetWindowRect(scene.bubble.window,&bubble);
+        MONITORINFO work{sizeof(work)};GetMonitorInfoW(MonitorFromPoint({std::midpoint(model.left,model.right),model.top},MONITOR_DEFAULTTONEAREST),&work);
+        const auto expected=NativeMessageBubble::position(model,work.rcWork,{bubble.right-bubble.left,bubble.bottom-bubble.top},scene.bubble.theme.px(8));
+        check(bubble.left==expected.x&&bubble.top==expected.y,"Bubble is physically anchored to the oldest active model");
+        scene.close(firstId);
+        check(scene.bubble.visible()&&scene.bubble.current->title==L"Shiroko","Hiding the oldest model hands the visible bubble to the next model");
+        scene.activate(firstId);
+        check(scene.roster.firstActive()->id==whiteId,"Reopening a model places it after existing active models");
+        scene.close(whiteId);
+        check(scene.bubble.visible()&&scene.bubble.current->title==L"桌宠白子","The renamed model retains its title after reopening");
+        scene.close(firstId);check(scene.roster.activeCount()==0,"Hide all models");
         scene.changeModelsFolder(custom);paths(scene,custom);check(scene.roster.activeCount()==0,"Changing folders must not reveal hidden models");
     }
     {
         Scene restarted(app());paths(restarted,root/L"全部 模型");
         check(restarted.roster.activeCount()==0&&!restarted.leader().displayed,"Restart preserves the all-hidden state and does not activate Shiroko");
+        check(std::any_of(restarted.roster.entries.begin(),restarted.roster.entries.end(),[](const auto& row){return row.name=="桌宠白子";}),
+            "Renamed model display name survives application restart and model-folder migration");
         check(restarted.roster.find(restarted.roster.selected)!=nullptr,"Restart retains the selected record");
         const auto white=std::find_if(restarted.roster.entries.begin(),restarted.roster.entries.end(),[](const auto& row){return row.name=="Shiroko";});
         check(white!=restarted.roster.entries.end(),"Find the bundled record");const auto whiteId=white->id;
         restarted.message({{"type","model_delete"},{"id",whiteId}});restarted.refreshModels();
-        check(!restarted.roster.find(whiteId)&&fs::is_regular_file(restarted.leader().modelStorageSettings->bundledModel),"Removing Shiroko keeps its file but refreshing does not resurrect its record");
+        check(!restarted.roster.find(whiteId)&&fs::is_regular_file(package/L"model/Shiroko.glb"),
+            "Removing the library copy keeps the packaged source and refreshing does not resurrect the record");
     }
     {
         Scene restarted(app());check(restarted.error.empty(),restarted.error.c_str());

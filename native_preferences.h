@@ -53,6 +53,10 @@ struct NativePreferences {
         inputGrace=3;
         if(followNear>followFar){followNear=3;followFar=5;}
     }
+    void saveBubble(const std::wstring& ini) const {
+        WritePrivateProfileStringW(L"Messages",L"Opacity",std::to_wstring(bubbleOpacity).c_str(),ini.c_str());
+        WritePrivateProfileStringW(L"Messages",L"Blur",std::to_wstring(bubbleBlur).c_str(),ini.c_str());
+    }
     void save(const std::wstring& ini){
         WritePrivateProfileStringW(L"Behavior",L"Wandering",wandering?L"1":L"0",ini.c_str());
         WritePrivateProfileStringW(L"Behavior",L"BattleWalking",battleWalking?L"1":L"0",ini.c_str());
@@ -64,8 +68,7 @@ struct NativePreferences {
         WritePrivateProfileStringW(L"Three",L"Follow",follow?L"1":L"0",ini.c_str());auto v=values();
         WritePrivateProfileStringW(L"Three",L"RenderQuality",std::to_wstring(renderQuality).c_str(),ini.c_str());
         WritePrivateProfileStringW(L"Three",L"OutlineMode",std::to_wstring(outlineMode).c_str(),ini.c_str());
-        WritePrivateProfileStringW(L"Messages",L"Opacity",std::to_wstring(bubbleOpacity).c_str(),ini.c_str());
-        WritePrivateProfileStringW(L"Messages",L"Blur",std::to_wstring(bubbleBlur).c_str(),ini.c_str());
+        saveBubble(ini);
         for(size_t i=0;i<v.size();++i)WritePrivateProfileStringW(L"Three",keys[i],std::to_wstring(*v[i]).c_str(),ini.c_str());
     }
 };

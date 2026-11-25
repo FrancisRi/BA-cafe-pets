@@ -14,6 +14,7 @@ struct Scene {
     NativeDesktopInput input;
     std::filesystem::path historyFile;
     std::string error,importNotice;
+    ULONGLONG bubbleSaveAt=0;
     NativeTopmostOrder depthOrder;
     bool review=false,stopping=false,broadcasting=false,importingBatch=false,modifyingModels=false;
     App& leader(){return *actors.front();}
@@ -65,21 +66,28 @@ struct Scene {
     void updateBubble(){
         if(review)return;
         const auto& preferences=leader().preferences;
-        HWND window=nullptr;
+        const SceneEntry* entry=nullptr;
+        const App* actor=nullptr;
+        if(bubble.current||!messages.pending.empty()){
+            entry=roster.firstActive();
+            if(entry)actor=find(entry->id);
+        }
         std::optional<RECT> bounds;
-        const auto anchor=[&](const App& actor){
-            if(!actor.displayed||!actor.loaded||!actor.renderer||!actor.renderer->modelPixels||
-                !actor.window||!IsWindowVisible(actor.window))return false;
+        if(actor&&actor->displayed&&actor->loaded&&actor->renderer&&actor->renderer->modelPixels&&
+            actor->window&&IsWindowVisible(actor->window)){
             RECT surface{};
-            if(!GetWindowRect(actor.window,&surface))return false;
-            bounds=actor.renderer->modelPixels;
-            OffsetRect(&*bounds,surface.left,surface.top);
-            window=actor.window;
-            return true;
-        };
-        if((bubble.current||!messages.pending.empty())&&!anchor(selected()))
-            for(const auto& a:actors)if(anchor(*a))break;
-        bubble.update(messages,window,bounds,leader().session.paused(),preferences.bubbleOpacity,preferences.bubbleBlur);
+            if(GetWindowRect(actor->window,&surface)){
+                bounds=actor->renderer->modelPixels;
+                OffsetRect(&*bounds,surface.left,surface.top);
+            }
+        }
+        bubble.update(messages,actor?actor->window:nullptr,bounds,leader().session.paused(),
+            preferences.bubbleOpacity,preferences.bubbleBlur,entry?std::string_view(entry->name):std::string_view{});
+    }
+    void flushBubblePreferences(){
+        if(!bubbleSaveAt)return;
+        bubbleSaveAt=0;
+        leader().preferences.saveBubble(leader().settings->ini);
     }
     void orderDepth(){
         // App intent is authoritative: a shell-hidden window still needs to
@@ -197,7 +205,7 @@ struct Scene {
         bool explicitAccepted=false;
         if(!review&&first->modelSpecified){
             const auto id=SceneRoster::key(first->model);
-            if(!roster.find(id))roster.remember({id,utf8(first->model.wstring()),utf8(first->model.stem().wstring()),"cafe",false});
+            if(!roster.find(id))roster.remember({id,utf8(first->model.wstring()),utf8(NativeModelLibrary::displayName(first->model)),"cafe",false});
             explicitAccepted=roster.enable(id);
             if(explicitAccepted&&first->initialMode.empty())first->initialMode=roster.find(id)->mode;
             if(!explicitAccepted&&roster.find(id))error="模型已加入历史，最多同时显示 5 个角色。";
@@ -209,7 +217,7 @@ struct Scene {
             const auto* last=roster.find(roster.selected);if(last&&std::filesystem::is_regular_file(wide(last->path))){first->model=wide(last->path);first->initialMode=last->mode;}
         }
         const auto id=SceneRoster::key(first->model);
-        if(!background&&!roster.find(id))roster.remember({id,utf8(first->model.wstring()),utf8(first->model.stem().wstring()),first->initialMode.empty()?"cafe":first->initialMode,false});
+        if(!background&&!roster.find(id))roster.remember({id,utf8(first->model.wstring()),utf8(NativeModelLibrary::displayName(first->model)),first->initialMode.empty()?"cafe":first->initialMode,false});
         if(!review){if(background){if(const auto* entry=roster.find(id))first->zoom=entry->zoom;}else{std::vector<float> scales;for(const auto& e:roster.entries)if(e.active)scales.push_back(e.zoom);first->zoom=modalCharacterZoom(scales);for(auto& e:roster.entries)if(e.active)e.zoom=first->zoom;}}
         if(!background)roster.enable(id);first->displayed=!background;first->actorId=id;actors.push_back(std::move(first));attach(leader(),true);
         auto& menu=*leader().nativeSettings;
@@ -315,18 +323,16 @@ struct Scene {
         }
         if(type=="bubble_settings"){
             auto& host=leader();
-            auto values=host.preferences.json();
-            values["bubbleOpacity"]=j.at("bubbleOpacity");
-            values["bubbleBlur"]=j.at("bubbleBlur");
-            if(host.preferences.apply(values)){
-                host.preferences.save(host.settings->ini);
-                for(auto& a:actors){
-                    a->preferences.bubbleOpacity=host.preferences.bubbleOpacity;
-                    a->preferences.bubbleBlur=host.preferences.bubbleBlur;
-                }
-                updateBubble();
+            const int opacity=j.value("bubbleOpacity",host.preferences.bubbleOpacity);
+            const int blur=j.value("bubbleBlur",host.preferences.bubbleBlur);
+            if(opacity<0||opacity>100||blur<0||blur>24||
+                (opacity==host.preferences.bubbleOpacity&&blur==host.preferences.bubbleBlur))return;
+            for(auto& a:actors){
+                a->preferences.bubbleOpacity=opacity;
+                a->preferences.bubbleBlur=blur;
             }
-            sync();return;
+            bubbleSaveAt=GetTickCount64()+200;
+            return;
         }
         if(type=="refresh_models"){refreshModels();sync();return;}
         if(type=="set_autostart"){
@@ -357,6 +363,16 @@ struct Scene {
         if(type=="roster_select"){const auto id=j.value("id",std::string{});if(auto* e=roster.find(id);e&&e->active){roster.selected=id;save();sync();}return;}
         if(type=="roster_toggle"){const auto id=j.value("id",std::string{});if(j.at("active").get<bool>())activate(id);else close(id);return;}
         if(type=="roster_retry"){if(auto* a=find(j.value("id",std::string{}));a&&a->displayed&&!a->settings->importBusy)a->requestModel(a->model);return;}
+        if(type=="model_rename"){
+            auto* entry=roster.find(j.value("id",std::string{}));
+            if(!entry)return;
+            const auto name=NativeModelName::normalize(wide(j.value("name",std::string{})));
+            if(!name){error="请输入 1–120 个字符的单行名称。";sync();return;}
+            auto previous=std::exchange(entry->name,utf8(*name));
+            try{if(!review)roster.save(historyFile);}
+            catch(const std::exception& failure){entry->name=std::move(previous);error=failure.what();sync();return;}
+            error.clear();updateBubble();sync();return;
+        }
         if(type=="model_delete"){
             if(modifyingModels)return;
             const auto id=j.value("id",std::string{});if(!roster.find(id))return;
@@ -455,12 +471,15 @@ struct Scene {
             const bool paused=host.session.paused()||(!roster.activeCount()&&actors.size()==1&&std::none_of(actors.begin(),actors.end(),[](const auto& a){return a->displayed||a->pendingImport;}));DWORD wake;HANDLE waits[2]{};DWORD count=0;int motion=-1,frame=-1;
             if(!paused){if(host.motionTimer){motion=int(count);waits[count++]=host.motionTimer;}if(frameTimer){frame=int(count);waits[count++]=frameTimer;}}
             {NativeHealth::Pause idleWait;
-                wake=MsgWaitForMultipleObjectsEx(count,waits,500,QS_ALLINPUT,MWMO_INPUTAVAILABLE);}
+                const auto now=GetTickCount64();
+                const DWORD timeout=bubbleSaveAt?DWORD(std::min<ULONGLONG>(500,bubbleSaveAt>now?bubbleSaveAt-now:0)):500;
+                wake=MsgWaitForMultipleObjectsEx(count,waits,timeout,QS_ALLINPUT,MWMO_INPUTAVAILABLE);}
             if(wake==WAIT_FAILED)throw std::runtime_error("Scene timer wait failed");
             // Drain input before expensive rendering, as in the stable raylib host.
             if(!drainNativeMessages([&](MSG& message){NativeHealth::mark("message dispatch");
                 if(host.nativeSettings&&host.nativeSettings->route(message))return;TranslateMessage(&message);DispatchMessageW(&message);
             }))stopping=true;
+            if(bubbleSaveAt&&GetTickCount64()>=bubbleSaveAt)flushBubblePreferences();
             if(!stopping){
                 if(host.session.paused())updateBubble();
                 else messages.pollCodex();
@@ -471,5 +490,5 @@ struct Scene {
             }
         }return host.exitCode;
     }
-    ~Scene(){tray.reset();if(frameTimer){CancelWaitableTimer(frameTimer);CloseHandle(frameTimer);}cpuJobs.shutdown();input.enable(false);for(auto& a:actors){a->syncRequest=a->menuRequest=a->closeRequest=a->loadedCallback=a->destroyedCallback=a->tickCallback=a->settingsChanged=a->followRequest=a->depthRequest=a->sessionChanged={};}actors.clear();}
+    ~Scene(){flushBubblePreferences();tray.reset();if(frameTimer){CancelWaitableTimer(frameTimer);CloseHandle(frameTimer);}cpuJobs.shutdown();input.enable(false);for(auto& a:actors){a->syncRequest=a->menuRequest=a->closeRequest=a->loadedCallback=a->destroyedCallback=a->tickCallback=a->settingsChanged=a->followRequest=a->depthRequest=a->sessionChanged={};}actors.clear();}
 };

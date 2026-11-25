@@ -3,7 +3,7 @@
 #include <fstream>
 #include <iomanip>
 #include <cwctype>
-struct SceneEntry {std::string id,path,name,mode="cafe";bool active=false;float zoom=1;};
+struct SceneEntry {std::string id,path,name,mode="cafe";bool active=false;float zoom=1;uint64_t activationOrder=0;};
 struct SceneRoster {
     static constexpr size_t Maximum=5;
     std::vector<SceneEntry> entries;
@@ -14,10 +14,30 @@ struct SceneRoster {
     }
     SceneEntry* find(const std::string& id){for(auto& entry:entries)if(entry.id==id)return &entry;return nullptr;}
     size_t activeCount() const {return std::count_if(entries.begin(),entries.end(),[](const auto& e){return e.active;});}
-    bool remember(SceneEntry entry){if(find(entry.id))return true;entries.push_back(std::move(entry));return true;}
-    bool enable(const std::string& id){auto* e=find(id);if(!e||(!e->active&&activeCount()>=Maximum))return false;e->active=true;selected=id;return true;}
+    uint64_t nextActivationOrder() const {
+        uint64_t latest=0;for(const auto& e:entries)if(e.active)latest=std::max(latest,e.activationOrder);
+        return latest+1;
+    }
+    static bool earlier(const SceneEntry& a,const SceneEntry& b){
+        return a.activationOrder&&(!b.activationOrder||a.activationOrder<b.activationOrder);
+    }
+    const SceneEntry* firstActive() const {
+        const SceneEntry* first=nullptr;
+        for(const auto& e:entries)if(e.active&&(!first||earlier(e,*first)))first=&e;
+        return first;
+    }
+    bool remember(SceneEntry entry){
+        if(find(entry.id))return true;
+        if(entry.active&&!entry.activationOrder)entry.activationOrder=nextActivationOrder();
+        entries.push_back(std::move(entry));return true;
+    }
+    bool enable(const std::string& id){
+        auto* e=find(id);if(!e||(!e->active&&activeCount()>=Maximum))return false;
+        if(!e->active){e->activationOrder=nextActivationOrder();e->active=true;}
+        selected=id;return true;
+    }
     bool last(const std::string& id){const auto* e=find(id);return e&&e->active&&activeCount()==1;}
-    Json json() const {Json rows=Json::array();for(const auto& e:entries)rows.push_back({{"id",e.id},{"path",e.path},{"name",e.name},{"active",e.active},{"mode",e.mode},{"zoom",e.zoom}});return {{"selected",selected},{"characters",rows}};}
+    Json json() const {Json rows=Json::array();for(const auto& e:entries)rows.push_back({{"id",e.id},{"path",e.path},{"name",e.name},{"active",e.active},{"mode",e.mode},{"zoom",e.zoom},{"activationOrder",e.active?e.activationOrder:0}});return {{"selected",selected},{"characters",rows}};}
     void load(const std::filesystem::path& file){
         if(!std::filesystem::exists(file))return;std::ifstream input(file);const auto data=Json::parse(input);
         if(!data.at("characters").is_array())throw std::runtime_error("Invalid character history");
@@ -25,8 +45,17 @@ struct SceneRoster {
             SceneEntry e{row.at("id"),row.at("path"),row.at("name"),row.value("mode","cafe"),row.value("active",false)};
             e.zoom=std::clamp(row.value("zoom",1.0f),0.45f,1.65f);
             if(e.id.empty()||e.path.empty()||find(e.id))continue;if(e.mode!="battle"&&e.mode!="formation")e.mode="cafe";
-            if(activeCount()>=Maximum)e.active=false;entries.push_back(e);
-        }selected=data.value("selected",std::string{});
+            if(activeCount()>=Maximum)e.active=false;
+            const auto order=row.find("activationOrder");
+            if(e.active&&order!=row.end()&&order->is_number_unsigned())e.activationOrder=order->get<uint64_t>();
+            entries.push_back(e);
+        }
+        // Older profiles only record visibility. Use their saved roster order for ties.
+        std::vector<SceneEntry*> active;
+        for(auto& entry:entries)if(entry.active)active.push_back(&entry);
+        std::stable_sort(active.begin(),active.end(),[](const auto* a,const auto* b){return earlier(*a,*b);});
+        for(size_t i=0;i<active.size();++i)active[i]->activationOrder=i+1;
+        selected=data.value("selected",std::string{});
     }
     void save(const std::filesystem::path& file) const {
         const auto temporary=file.wstring()+L".tmp";{std::ofstream out(std::filesystem::path(temporary),std::ios::binary);out<<json().dump(2);if(!out)throw std::runtime_error("Cannot save character history");}
