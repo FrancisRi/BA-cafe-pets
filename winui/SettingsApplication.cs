@@ -11,8 +11,9 @@ public sealed partial class SettingsApplication : Application
     private IReadOnlyList<Field> fields = [];
     private MainWindow? full;
     private QuickWindow? quick;
+    private TrayWindow? tray;
     private JsonElement state;
-    private string status = "", sampling = "";
+    private string status = "", quickStatus = "", sampling = "";
     private NativeWindow.Point lastPosition;
     private bool exiting;
 
@@ -66,26 +67,37 @@ public sealed partial class SettingsApplication : Application
             case "state":
                 state = message.Property("state");
                 status = message.String("status");
+                quickStatus = message.String("quickStatus");
                 sampling = message.String("sampling");
                 if (full?.Shown == true) full.Apply(state, status, sampling);
-                if (quick?.Shown == true) quick.Apply(state, status);
+                if (quick?.Shown == true) quick.Apply(state, quickStatus);
+                if (tray?.Shown == true) tray.Apply(state);
                 break;
             case "show":
                 lastPosition = new(message.Integer("x"), message.Integer("y"));
-                if (message.String("surface") == "quick")
+                string surface = message.String("surface");
+                if (surface == "quick")
                 {
+                    tray?.Hide();
                     quick ??= new QuickWindow(this);
                     if (quick.Shown && message.Boolean("toggle")) quick.Hide();
                     else
                     {
-                        quick.Apply(state, status);
+                        quick.Apply(state, quickStatus);
                         quick.Show(lastPosition);
                     }
+                }
+                else if (surface == "tray")
+                {
+                    quick?.Hide();
+                    tray ??= new TrayWindow(this);
+                    tray.Apply(state);
+                    tray.Show(lastPosition);
                 }
                 else OpenFull();
                 break;
             case "hide":
-                quick?.Hide();
+                HideMenus();
                 if (message.String("surface") != "quick") full?.Hide();
                 break;
             case "codex_result":
@@ -99,15 +111,27 @@ public sealed partial class SettingsApplication : Application
 
     internal void OpenFull(bool import = false)
     {
-        quick?.Hide();
+        HideMenus();
         full ??= new MainWindow(this, fields);
         full.Apply(state, status, sampling);
         full.Show(lastPosition);
         if (import)
         {
-            full.Navigate(3);
+            full.Navigate(SettingsPage.Models);
             Send(new { type = "import" });
         }
+    }
+
+    internal void OpenModelsFolder()
+    {
+        HideMenus();
+        Send(new { type = "open_models_folder" });
+    }
+
+    private void HideMenus()
+    {
+        quick?.Hide();
+        tray?.Hide();
     }
 
     private void Shutdown()
@@ -115,6 +139,7 @@ public sealed partial class SettingsApplication : Application
         if (exiting) return;
         exiting = true;
         quick?.Close();
+        tray?.Close();
         full?.Close();
         Exit();
     }

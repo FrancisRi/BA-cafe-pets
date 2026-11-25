@@ -42,7 +42,10 @@ struct Scene {
         for(const auto& e:roster.entries){const auto* a=find(e.id);rows.push_back({{"id",e.id},{"name",e.name},{"path",e.path},{"active",e.active},{"managed",bool(leader().managedLibrary(wide(e.path)))},
             {"available",std::filesystem::is_regular_file(wide(e.path))},{"ready",a&&a->loaded&&a->displayed},{"failed",a&&a->done&&!a->loaded},{"loading",e.active&&(!a||(!a->loaded&&a->settings->importBusy))},{"battleAvailable",a&&a->loaded&&a->settings->battleAvailable},{"formationAvailable",a&&a->loaded&&a->formationIdle>=0},{"mode",e.mode}});}
         result["characters"]=rows;result["selectedId"]=roster.selected;result["activeCount"]=roster.activeCount();result["maximum"]=SceneRoster::Maximum;
-        if(const auto* entry=roster.find(roster.selected))result["name"]=entry->name;
+        const auto* entry=roster.find(roster.selected);
+        if(entry)result["name"]=entry->name;
+        const auto* active=entry&&entry->active?entry:roster.firstActive();
+        if(active)result["activeModelName"]=active->name;
         if(const auto* e=roster.find(roster.selected);e&&e->active){const auto* a=find(e->id);if(!a){result["name"]=e->name;result["busy"]=true;result["percent"]=0;result["detail"]="等待加载模型";result["battleAvailable"]=false;result["value"]["mode"]=e->mode;}}
         if(!error.empty())result["error"]=error;
         result["notice"]=importNotice;
@@ -228,7 +231,7 @@ struct Scene {
         menu.pauseChanged=[this](bool paused){
             for(auto& a:actors){a->state.settingsOpen=paused;if(!paused){a->placementNeeded=true;a->interactionUntil=a->preferences.follow?0:preciseSeconds()+0.5;}}
         };
-        if(!review){tray=std::make_unique<NativeTray>([this]{leader().nativeSettings->show(leader().window,leader().directory);},[this]{leader().nativeSettings->showQuick(leader().window,leader().directory,false);},[this]{message({{"type","exit"}});});tray->update(int(roster.activeCount()));if(!tray->available()&&background)leader().settingsOnLoad=true;}
+        if(!review){tray=std::make_unique<NativeTray>([this]{leader().nativeSettings->show(leader().window,leader().directory);},[this]{leader().nativeSettings->showTray(leader().directory);},[this]{message({{"type","exit"}});});tray->update(int(roster.activeCount()));if(!tray->available()&&background)leader().settingsOnLoad=true;}
         if(!review)messages.open();
         // Load sequentially: allocating five GLBs simultaneously would stall the desktop.
         refreshModels();input.pollKeyboard=false;input.enable(roster.activeCount()>0);save();

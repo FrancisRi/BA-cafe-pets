@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
@@ -6,16 +7,21 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 
 namespace BaCafe.Settings;
 
+internal enum SettingsPage { Global, Movement, Cafe, Battle, Models, Codex }
+
 internal sealed class MainWindow : NativeWindow
 {
-    private static readonly string[] Pages = ["全局设置", "咖啡厅", "战斗", "模型管理", "Codex 消息"];
-    private static readonly string[] Icons = ["\uE713", "\uE80F", "\uE7FC", "\uE716", "\uE8BD"];
+    private static readonly (string Label, string Icon)[] Pages =
+    [
+        ("全局设置", "\uE713"), ("移动", "\uE7C1"), ("咖啡厅", "\uE80F"),
+        ("战斗", "\uE7FC"), ("模型管理", "\uE716"), ("Codex 消息", "\uE8BD")
+    ];
     private readonly SettingsApplication app;
     private readonly IReadOnlyList<Field> fields;
     private readonly ListView navigation = new() { SelectionMode = ListViewSelectionMode.Single };
-    private readonly Dictionary<int, StackPanel> views = [];
-    private readonly Dictionary<int, List<OptionEditor>> editors = [];
-    private readonly TextBlock title = Controls.Text(Pages[0], 28, true);
+    private readonly Dictionary<SettingsPage, StackPanel> views = [];
+    private readonly Dictionary<SettingsPage, List<OptionEditor>> editors = [];
+    private readonly TextBlock title = Controls.Text("", 28, true);
     private readonly TextBlock subtitle = Controls.Text("");
     private readonly TextBlock status = Controls.Text("", 12);
     private readonly TextBlock sampling = Controls.Text("", 12);
@@ -31,44 +37,51 @@ internal sealed class MainWindow : NativeWindow
     private readonly ModelRoster roster;
     private readonly Button import, changeFolder, resetFolder, uniformSize, hideActive;
     private JsonElement state;
-    private int page = -1;
+    private SettingsPage? page;
     private bool applying;
 
     internal MainWindow(SettingsApplication app, IReadOnlyList<Field> fields) : this(app, fields, new Grid()) { }
 
-    private MainWindow(SettingsApplication app, IReadOnlyList<Field> fields, Grid root) : base(app, false, root)
+    private MainWindow(SettingsApplication app, IReadOnlyList<Field> fields, Grid root)
+        : base(app, root, "BA Cafe · 设置", 1000, 748)
     {
         this.app = app;
         this.fields = fields;
         AutomationProperties.SetAutomationId(root, "BaCafe.WinUI.Settings");
         AutomationProperties.SetName(navigation, "设置导航");
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(197) });
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        if (AppWindowTitleBar.IsCustomizationSupported())
+        {
+            var titleBar = new TitleBar { Title = Window.Title };
+            Grid.SetColumnSpan(titleBar, 2);
+            root.Children.Add(titleBar);
+            Window.ExtendsContentIntoTitleBar = true;
+            Window.SetTitleBar(titleBar);
+        }
         var sidebar = new Grid { Padding = new Thickness(12, 16, 8, 16), RowSpacing = 10 };
-        sidebar.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         sidebar.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         sidebar.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        var brand = Controls.Text("BA Cafe", 23, true);
-        brand.Margin = new Thickness(10, 0, 0, 8);
-        sidebar.Children.Add(brand);
-        for (int i = 0; i < Pages.Length; ++i)
+        foreach (var (label, icon) in Pages)
         {
-            var content = Controls.Row(new FontIcon { Glyph = Icons[i], FontSize = 16 }, Controls.Text(Pages[i]));
+            var content = Controls.Row(new FontIcon { Glyph = icon, FontSize = 16 }, Controls.Text(label));
             var item = new ListViewItem { Content = content, MinHeight = 40 };
-            AutomationProperties.SetName(item, Pages[i]);
+            AutomationProperties.SetName(item, label);
             navigation.Items.Add(item);
         }
         navigation.SelectionChanged += (_, _) =>
         {
-            if (navigation.SelectedIndex >= 0) Navigate(navigation.SelectedIndex);
+            if (navigation.SelectedIndex >= 0) Navigate((SettingsPage)navigation.SelectedIndex);
         };
-        Grid.SetRow(navigation, 1);
         sidebar.Children.Add(navigation);
         var commands = new StackPanel { Spacing = 6, Margin = new Thickness(4, 0, 0, 0) };
         commands.Children.Add(Controls.Button("使用说明", async () => await Help()));
         commands.Children.Add(Controls.Button("退出桌宠", () => app.Send(new { type = "exit" })));
-        Grid.SetRow(commands, 2);
+        Grid.SetRow(commands, 1);
         sidebar.Children.Add(commands);
+        Grid.SetRow(sidebar, 1);
         root.Children.Add(sidebar);
         var frame = new Grid { Padding = new Thickness(24, 12, 24, 16), RowSpacing = 12 };
         frame.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -93,6 +106,7 @@ internal sealed class MainWindow : NativeWindow
         footer.Children.Add(progress);
         Grid.SetRow(footer, 2);
         frame.Children.Add(footer);
+        Grid.SetRow(frame, 1);
         Grid.SetColumn(frame, 1);
         root.Children.Add(frame);
         roster = new ModelRoster(app, false, open => DialogOpen = open);
@@ -103,33 +117,43 @@ internal sealed class MainWindow : NativeWindow
         startup.Toggled += (_, _) => { if (!applying) app.Send(new { type = "set_autostart", enabled = startup.IsOn }); };
         opacity.ValueChanged += (_, _) => BubbleChanged();
         blur.ValueChanged += (_, _) => BubbleChanged();
-        Navigate(0);
+        Navigate(SettingsPage.Global);
     }
 
-    internal void Navigate(int index)
+    internal void Navigate(SettingsPage target)
     {
-        if (page == index) return;
-        page = index;
+        if (page == target) return;
+        page = target;
+        int index = (int)target;
         if (navigation.SelectedIndex != index) navigation.SelectedIndex = index;
-        title.Text = Pages[index];
-        if (!views.TryGetValue(index, out var content))
+        title.Text = Pages[index].Label;
+        if (!views.TryGetValue(target, out var content))
         {
             content = new StackPanel { Spacing = 10, MaxWidth = 820, HorizontalAlignment = HorizontalAlignment.Stretch };
-            if (index == 3) BuildModels(content);
-            else if (index == 4) BuildCodex(content);
-            else BuildOptions(content, index);
-            views[index] = content;
+            if (target == SettingsPage.Models) BuildModels(content);
+            else if (target == SettingsPage.Codex) BuildCodex(content);
+            else BuildOptions(content, target);
+            views[target] = content;
         }
         scroll.Content = content;
         scroll.ChangeView(null, 0, null, true);
         RefreshPage();
-        if (index == 3) app.Send(new { type = "refresh_models" });
+        if (target == SettingsPage.Models) app.Send(new { type = "refresh_models" });
     }
 
-    private void BuildOptions(StackPanel content, int index)
+    private static SettingsPage PageFor(Field field) => field.Page switch
+    {
+        1 => SettingsPage.Cafe,
+        2 => SettingsPage.Battle,
+        _ => field.Key is "wandering" or "follow" or "followNear" or "followFar" or "idleSeconds"
+            or "activeSeconds" or "moveInterval" or "moveBodies" or "walkTimeJitter" or "walkDistanceJitter"
+            ? SettingsPage.Movement : SettingsPage.Global
+    };
+
+    private void BuildOptions(StackPanel content, SettingsPage target)
     {
         var controls = new List<OptionEditor>();
-        foreach (var field in fields.Where(field => field.Page == index))
+        foreach (var field in fields.Where(field => PageFor(field) == target))
         {
             string? section = field.Key switch
             {
@@ -137,13 +161,13 @@ internal sealed class MainWindow : NativeWindow
                 "cafeTracking" => "视线追踪", "battleWalking" => "战斗动作", _ => null
             };
             if (section != null) content.Children.Add(Controls.Text(section, 17, true));
-            var control = new OptionEditor(field, value => app.Send(new { type = "option", key = field.Key, value }));
+            var control = new OptionEditor(field, value => app.Send(new { type = "option", key = field.Key, value }),
+                field.Key == "renderQuality" ? sampling : null);
             controls.Add(control);
             content.Children.Add(control.View);
-            if (field.Key == "renderQuality") content.Children.Add(sampling);
         }
-        editors[index] = controls;
-        if (index == 0)
+        editors[target] = controls;
+        if (target == SettingsPage.Global)
         {
             content.Children.Add(Controls.Button("恢复默认设置", () => app.Send(new { type = "reset_preferences" })));
             content.Children.Add(Controls.Text("应用", 17, true));
@@ -195,17 +219,17 @@ internal sealed class MainWindow : NativeWindow
 
     private void RefreshPage()
     {
-        if (page == -1 || state.ValueKind != JsonValueKind.Object) return;
+        if (page is not { } current || state.ValueKind != JsonValueKind.Object) return;
         applying = true;
-        if (editors.TryGetValue(page, out var controls))
+        if (editors.TryGetValue(current, out var controls))
             foreach (var control in controls) control.Apply(state);
-        if (page == 0)
+        if (current == SettingsPage.Global)
         {
             var value = state.Property("startup");
             startup.IsEnabled = value.Boolean("available");
             startup.IsOn = value.Boolean("enabled");
         }
-        else if (page == 3)
+        else if (current == SettingsPage.Models)
         {
             modelPath.Text = state.String("modelsDirectory");
             changeFolder.IsEnabled = !state.Boolean("busy");
@@ -213,7 +237,7 @@ internal sealed class MainWindow : NativeWindow
             uniformSize.IsEnabled = hideActive.IsEnabled = state.Integer("activeCount") > 0;
             roster.Apply(state);
         }
-        else if (page == 4)
+        else if (current == SettingsPage.Codex)
         {
             var value = state.Property("value");
             opacity.Value = value.Integer("bubbleOpacity", 88);

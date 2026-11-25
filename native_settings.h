@@ -28,8 +28,9 @@ struct NativeSettings {
     std::vector<Control> controls;
     std::vector<HWND> content;
     std::vector<Placement> placements;
-    int page=0,scroll=0,contentHeight=0,quickRows=0;
+    int page=0,scroll=0,contentHeight=0;
     bool syncing=false,closing=false,notifiedVisible=false,notifiedPaused=false;
+    bool quickFromTray=false;
     bool editingOutline=false,endingOutline=false;
     bool codexHooksConfigured=false;
     std::string highlighted,contextId;
@@ -267,6 +268,7 @@ struct NativeSettings {
     bool quickEnabled(int id) const {
         if(id==3010)return !last.value("busy",false);
         if(id==3011||id==3012||id==3013)return true;if(last.value("busy",false))return false;
+        if(quickFromTray)return false;
         if(inspectionSelected()&&id>=3002&&id<=3007&&id!=3006)return false;
         if(id==3006)return last.value("formationAvailable",false);
         if(formationSelected()&&id>=3002&&id<=3005)return false;
@@ -284,10 +286,11 @@ struct NativeSettings {
         const auto error=last.value("error",std::string{});if(!error.empty())return wide(error);
         if(last.value("busy",false))return std::to_wstring(last.value("percent",0))+L"%  "+wide(last.value("detail",std::string{}));
         const auto notice=last.value("notice",std::string{});if(!notice.empty())return wide(notice);
-        if(last.value("activeCount",1)==0)return L"所有模型已隐藏 · 可从列表或任务栏托盘重新显示";
+        if(compact)return {};
+        if(last.value("activeCount",1)==0)return L"所有模型已隐藏 · 可从「模型管理」重新显示";
         if(inspectionSelected())return L"观赏 · 右键自由旋转，左键提放，双击 Exs";
         if(formationSelected())return last.value("value",Json::object()).value("rightDragRotation",true)?L"列队 · 可右键旋转，滚轮缩放，双击 Exs":L"列队 · 滚轮缩放，双击 Exs，三击切换";
-        return compact?L"更改自动保存 · Esc 关闭菜单":L"更改已自动保存   ·   角色保持活动";
+        return L"更改已自动保存   ·   角色保持活动";
     }
     std::wstring samplingText() const {
         const auto sampling=last.value("renderSampling",Json::object());
@@ -330,10 +333,17 @@ struct NativeSettings {
             for(int i=0;i<pageCount;++i)InvalidateRect(GetDlgItem(window,1000+i),nullptr,FALSE);
         }
         if(quickWindow){
-            SetWindowTextW(GetDlgItem(quickWindow,3100),wide(last.value("name",std::string{"桌面角色"})).c_str());SetWindowTextW(GetDlgItem(quickWindow,3101),(L"已导入的模型  ·  "+std::to_wstring(last.value("activeCount",0))+L" / 5 已显示").c_str());
+            const auto title=quickFromTray?last.value("activeModelName",std::string{"没有活动模型"}):last.value("name",std::string{"桌面角色"});
+            SetWindowTextW(GetDlgItem(quickWindow,3100),wide(title).c_str());
             for(int id:{3000,3001,3006,3002,3003,3004,3005,3007,3008,3010,3011,3012,3013}){EnableWindow(GetDlgItem(quickWindow,id),quickEnabled(id));InvalidateRect(GetDlgItem(quickWindow,id),nullptr,FALSE);}
-            SetWindowTextW(GetDlgItem(quickWindow,3004),value.value("mode",std::string{})=="battle"?L"战斗朝向鼠标":L"视线追踪鼠标");SetWindowTextW(GetDlgItem(quickWindow,3102),statusText(true).c_str());fillRoster(quickList,true);
-            const bool empty=last.value("characters",Json::array()).empty();ShowWindow(quickList,empty?SW_HIDE:SW_SHOW);ShowWindow(GetDlgItem(quickWindow,3103),empty?SW_SHOW:SW_HIDE);
+            if(!quickFromTray){
+                SetWindowTextW(GetDlgItem(quickWindow,3101),(L"已显示 "+std::to_wstring(last.value("activeCount",0))+L" / 5").c_str());
+                SetWindowTextW(GetDlgItem(quickWindow,3004),value.value("mode",std::string{})=="battle"?L"战斗朝向鼠标":L"视线追踪鼠标");
+                const auto status=statusText(true);const auto statusLabel=GetDlgItem(quickWindow,3102);
+                SetWindowTextW(statusLabel,status.c_str());ShowWindow(statusLabel,status.empty()?SW_HIDE:SW_SHOWNA);
+                fillRoster(quickList,true);
+                const bool empty=last.value("characters",Json::array()).empty();ShowWindow(quickList,empty?SW_HIDE:SW_SHOWNA);ShowWindow(GetDlgItem(quickWindow,3103),empty?SW_SHOWNA:SW_HIDE);
+            }
         }
         updateModelMenu();syncing=false;
     }
@@ -354,7 +364,7 @@ struct NativeSettings {
         last=next;if(window&&IsWindowVisible(window)&&((capabilitiesChanged&&(page==0||page==2))||(rosterChanged&&page==3))){const int before=scroll;build();scrollTo(before);}else update();
     }
     Json winUiState() const {
-        return {{"type","state"},{"state",last},{"status",utf8(statusText())},{"sampling",utf8(samplingText())}};
+        return {{"type","state"},{"state",last},{"status",utf8(statusText())},{"quickStatus",utf8(statusText(true))},{"sampling",utf8(samplingText())}};
     }
     static Json winUiFields(){
         Json controls=Json::array();
@@ -370,7 +380,7 @@ struct NativeSettings {
         }
         return controls;
     }
-    bool showWinUi(const std::filesystem::path& directory,bool quick,bool toggle){
+    bool showWinUi(const std::filesystem::path& directory,const char* surface,bool toggle=false){
         if(winUi&&!winUi->alive()){winUi.reset();notify();}
         if(!winUi){
             const auto exe=directory/L"winui/BaCafe.Settings.exe";
@@ -388,7 +398,7 @@ struct NativeSettings {
         winUi->send(winUiState().dump(),true);
         POINT cursor{};GetCursorPos(&cursor);
         winUi->allowActivation();
-        winUi->send(Json{{"type","show"},{"surface",quick?"quick":"full"},{"toggle",toggle},
+        winUi->send(Json{{"type","show"},{"surface",surface},{"toggle",toggle},
             {"x",cursor.x},{"y",cursor.y}}.dump());
         return true;
     }
@@ -590,8 +600,8 @@ struct NativeSettings {
         }else if(compact){
             const bool mode=id==3000||id==3001||id==3006,checked=quickChecked(id),isToggle=(id>=3002&&id<=3005)||id==3007||id==3008;auto fill=pressed?theme.pressed:hover?theme.hover:theme.surface;if(mode&&checked)fill=theme.selection;NativeFluent::round(dc,r,fill,mode?theme.line:fill,theme.px(6));if(id==3012)color=theme.danger;
             if(mode)theme.label(dc,title,r,theme.font,disabled?theme.disabled:checked?theme.accent:color,DT_CENTER|DT_SINGLELINE|DT_VCENTER);
-            else{const wchar_t* icon=id==3008?L"\xE890":id==3007?L"\xE7AD":id==3002?L"\xE7C2":id==3003?L"\xE7C1":id==3004?L"\xE890":id==3005?L"\xE7FC":id==3010?L"\xE710":id==3011?L"\xE713":id==3013?L"\xE8B7":L"\xE7E8";RECT glyph{r.left+theme.px(8),r.top,r.left+theme.px(32),r.bottom};theme.glyph(dc,icon,glyph,color);RECT text{r.left+theme.px(44),r.top,r.right-theme.px(isToggle?56:36),r.bottom};theme.label(dc,title,text,theme.font,color);
-                if(isToggle){RECT track{r.right-theme.px(46),r.top+theme.px(8),r.right-theme.px(8),r.top+theme.px(28)};theme.toggle(dc,track,checked,!disabled);}if(id==3011){RECT arrow{r.right-theme.px(28),r.top,r.right-theme.px(8),r.bottom};theme.glyph(dc,L"\xE76C",arrow,color);}}
+            else{const wchar_t* icon=id==3008?L"\xE890":id==3007?L"\xE7AD":id==3002?L"\xE7C2":id==3003?L"\xE7C1":id==3004?L"\xE890":id==3005?L"\xE7FC":id==3010?L"\xE710":id==3011?L"\xE713":id==3013?L"\xE8B7":L"\xE7E8";RECT glyph{r.left+theme.px(8),r.top,r.left+theme.px(32),r.bottom};theme.glyph(dc,icon,glyph,color);RECT text{r.left+theme.px(38),r.top,r.right-theme.px(isToggle?56:id==3011?28:8),r.bottom};theme.label(dc,title,text,theme.font,color);
+                if(isToggle){const int center=(r.top+r.bottom)/2;RECT track{r.right-theme.px(46),center-theme.px(10),r.right-theme.px(8),center+theme.px(10)};theme.toggle(dc,track,checked,!disabled);}if(id==3011){RECT arrow{r.right-theme.px(28),r.top,r.right-theme.px(8),r.bottom};theme.glyph(dc,L"\xE76C",arrow,color);}}
         }else if(id>=1000&&id<1000+pageCount){
             const bool selected=page==id-1000;const auto fill=selected?theme.pressed:pressed?theme.pressed:hover?theme.line:theme.canvas;NativeFluent::round(dc,r,fill,fill,theme.px(6));RECT icon{r.left+theme.px(10),r.top,r.left+theme.px(36),r.bottom};theme.glyph(dc,pageIcons[id-1000],icon,color);auto text=r;text.left+=theme.px(48);theme.label(dc,title,text,theme.font,color);if(selected){RECT indicator{r.left,r.top+theme.px(12),r.left+theme.px(3),r.bottom-theme.px(12)};NativeFluent::round(dc,indicator,theme.accent,theme.accent,theme.px(3));}
         }else if(id==2210){
@@ -708,7 +718,7 @@ struct NativeSettings {
         h=control(window,L"STATIC",L"",SS_ENDELLIPSIS,2300,258,712,600,34);SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(ui.small),FALSE);SetPropW(h,L"FluentMuted",reinterpret_cast<HANDLE>(1));progress=control(window,L"STATIC",L"",SS_OWNERDRAW,2301,258,760,600,3);
     }
     void show(HWND,const std::filesystem::path& directory){
-        if(showWinUi(directory,false,false))return;
+        if(showWinUi(directory,"full"))return;
         if(receive)receive({{"type","refresh_models"}});
         defaultsFile=directory/L"defaults.ini";ensureFull();if(snapshot)last=readSnapshot();highlighted=last.value("selectedId",std::string{});build();
         if(!IsWindowVisible(window)){POINT p{};GetCursorPos(&p);MONITORINFO info{sizeof(info)};GetMonitorInfoW(MonitorFromPoint(p,MONITOR_DEFAULTTONEAREST),&info);const auto area=info.rcWork;
@@ -719,26 +729,52 @@ struct NativeSettings {
     void ensureQuick(){
         if(quickWindow)return;INITCOMMONCONTROLSEX common{sizeof(common),ICC_STANDARD_CLASSES};InitCommonControlsEx(&common);WNDCLASSW wc{};wc.lpfnWndProc=proc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"BaCafeQuickMenu";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.style=CS_DROPSHADOW;RegisterClassW(&wc);quickUi.load(GetDpiForSystem());
         quickWindow=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_CONTROLPARENT,wc.lpszClassName,L"BA Cafe 快捷菜单",WS_POPUP|WS_CLIPCHILDREN,0,0,quickUi.px(344),quickUi.px(600),nullptr,nullptr,wc.hInstance,this);if(!quickWindow)throw std::runtime_error("Cannot create Fluent quick menu");quickUi.frame(quickWindow,true);SetWindowPos(quickWindow,nullptr,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_FRAMECHANGED);
-        auto h=control(quickWindow,L"STATIC",L"桌面角色",SS_ENDELLIPSIS,3100,20,14,300,24,true);SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(quickUi.heading),FALSE);h=control(quickWindow,L"STATIC",L"已导入的模型",0,3101,20,44,300,22,true);SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(quickUi.small),FALSE);SetPropW(h,L"FluentMuted",reinterpret_cast<HANDLE>(1));
+        auto h=control(quickWindow,L"STATIC",L"桌面角色",SS_ENDELLIPSIS,3100,20,14,300,24,true);SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(quickUi.heading),FALSE);h=control(quickWindow,L"STATIC",L"",SS_RIGHT,3101,20,44,300,22,true);SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(quickUi.small),FALSE);SetPropW(h,L"FluentMuted",reinterpret_cast<HANDLE>(1));
         quickList=control(quickWindow,L"LISTBOX",L"勾选显示模型，空格切换，回车设为当前角色",LBS_NOTIFY|LBS_OWNERDRAWFIXED|LBS_HASSTRINGS|LBS_NOINTEGRALHEIGHT|WS_VSCROLL,3200,8,72,328,144,true);SetWindowSubclass(quickList,listProc,2,reinterpret_cast<DWORD_PTR>(this));SendMessageW(quickList,LB_SETITEMHEIGHT,0,quickUi.px(36));
         control(quickWindow,L"STATIC",L"尚未导入模型",SS_CENTER,3103,20,72,304,36,true);
-        for(auto [id,text]:{std::pair{3000,L"咖啡厅"},{3001,L"战斗"},{3006,L"列队"},{3002,L"位置跟随鼠标"},{3003,L"允许散步"},{3004,L"视线追踪鼠标"},{3005,L"允许战斗走动"},{3007,L"右键拖动旋转"},{3008,L"观赏模式"},{3011,L"显示完整界面"},{3013,L"打开模型文件夹"},{3010,L"导入模型…"},{3012,L"退出桌宠"}})control(quickWindow,L"BUTTON",text,BS_OWNERDRAW,id,8,0,328,36,true);
+        for(auto [id,text]:{std::pair{3000,L"咖啡厅"},{3001,L"战斗"},{3006,L"列队"},{3002,L"位置跟随鼠标"},{3003,L"允许散步"},{3004,L"视线追踪鼠标"},{3005,L"允许战斗走动"},{3007,L"右键拖动旋转"},{3008,L"观赏模式"},{3011,L"打开设置"},{3013,L"模型文件夹"},{3010,L"导入模型"},{3012,L"退出桌宠"}})control(quickWindow,L"BUTTON",text,BS_OWNERDRAW,id,8,0,328,36,true);
         h=control(quickWindow,L"STATIC",L"",0,3102,20,0,304,34,true);SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(quickUi.small),FALSE);SetPropW(h,L"FluentMuted",reinterpret_cast<HANDLE>(1));
     }
+    int quickWidth() const {return quickFromTray?208:300;}
     int layoutQuick(){
-        RECT rect{};GetWindowRect(quickWindow,&rect);MONITORINFO info{sizeof(info)};GetMonitorInfoW(MonitorFromRect(&rect,MONITOR_DEFAULTTONEAREST),&info);const int maxDip=quickUi.dip(info.rcWork.bottom-info.rcWork.top)-24;
-        quickRows=std::clamp(int(last.value("characters",Json::array()).size()),1,std::clamp((maxDip-556)/36,1,4));
         const auto place=[&](int id,int x,int y,int w,int h){SetWindowPos(GetDlgItem(quickWindow,id),nullptr,quickUi.px(x),quickUi.px(y),quickUi.px(w),quickUi.px(h),SWP_NOZORDER|SWP_NOACTIVATE);};
-        place(3100,20,14,300,24);place(3101,20,44,300,22);place(3200,8,72,328,quickRows*36);place(3103,20,72,304,36);SendMessageW(quickList,LB_SETITEMHEIGHT,0,quickUi.px(36));int y=72+quickRows*36+12;place(3000,12,y,100,36);place(3001,120,y,100,36);place(3006,228,y,100,36);y+=48;
-        for(int id:{3008,3002,3003,3004,3005,3007}){place(id,8,y,328,36);y+=36;}y+=12;for(int id:{3011,3013,3010,3012}){place(id,8,y,328,36);y+=36;}y+=8;place(3102,20,y,304,34);return y+44;
+        const int width=quickWidth();
+        place(3100,14,10,width-(quickFromTray?28:112),26);
+        for(int id:{3101,3000,3001,3006,3008,3002,3003,3004,3005,3007})
+            ShowWindow(GetDlgItem(quickWindow,id),quickFromTray?SW_HIDE:SW_SHOWNA);
+        int y=40;
+        if(quickFromTray){
+            for(int id:{3102,3103,3200})ShowWindow(GetDlgItem(quickWindow,id),SW_HIDE);
+            for(int id:{3011,3010,3013,3012}){place(id,8,y,width-16,32);y+=32;}
+            return y+8;
+        }
+        const int rows=std::clamp(int(last.value("characters",Json::array()).size()),1,2);
+        place(3101,width-96,12,82,22);
+        place(3200,8,y,width-16,rows*32);place(3103,8,y,width-16,32);
+        SendMessageW(quickList,LB_SETITEMHEIGHT,0,quickUi.px(32));y+=rows*32+6;
+        const int modeWidth=(width-24)/3;
+        place(3000,8,y,modeWidth,28);place(3001,12+modeWidth,y,modeWidth,28);place(3006,16+2*modeWidth,y,modeWidth,28);y+=34;
+        for(int id:{3008,3002,3003,3004,3005,3007}){place(id,8,y,width-16,30);y+=30;}
+        y+=4;const int actionWidth=(width-20)/2;
+        place(3011,8,y,actionWidth,30);place(3010,12+actionWidth,y,actionWidth,30);y+=34;
+        place(3013,8,y,actionWidth,30);place(3012,12+actionWidth,y,actionWidth,30);y+=34;
+        place(3102,14,y,width-28,34);return y+(statusText(true).empty()?8:42);
     }
-    void showQuick(HWND owner,const std::filesystem::path& directory,bool toggleIfVisible=true){
-        if(showWinUi(directory,true,toggleIfVisible))return;
-        hideModelMenu();if(receive)receive({{"type","refresh_models"}});
-        defaultsFile=directory/L"defaults.ini";if(quickWindow&&IsWindowVisible(quickWindow)){if(toggleIfVisible)hideQuick();else{SetForegroundWindow(quickWindow);SetFocus(quickList);}return;}if(snapshot)last=readSnapshot();highlighted=last.value("selectedId",std::string{});ensureQuick();
+    void showQuick(HWND,const std::filesystem::path& directory){showQuickMenu(directory,false);}
+    void showTray(const std::filesystem::path& directory){showQuickMenu(directory,true);}
+    void showQuickMenu(const std::filesystem::path& directory,bool fromTray){
+        if(showWinUi(directory,fromTray?"tray":"quick",!fromTray))return;
+        hideModelMenu();if(!fromTray&&receive)receive({{"type","refresh_models"}});
+        defaultsFile=directory/L"defaults.ini";
+        if(quickWindow&&IsWindowVisible(quickWindow)&&fromTray==quickFromTray){
+            if(!fromTray)hideQuick();else SetForegroundWindow(quickWindow);
+            return;
+        }
+        quickFromTray=fromTray;
+        if(snapshot)last=readSnapshot();highlighted=last.value("selectedId",std::string{});ensureQuick();
         POINT cursor{};GetCursorPos(&cursor);MONITORINFO info{sizeof(info)};GetMonitorInfoW(MonitorFromPoint(cursor,MONITOR_DEFAULTTONEAREST),&info);SetWindowPos(quickWindow,nullptr,cursor.x,cursor.y,0,0,SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE);
-        const auto dpi=GetDpiForWindow(quickWindow);if(dpi!=quickUi.dpi)reloadTheme(quickWindow,dpi);const int height=quickUi.px(layoutQuick()),width=quickUi.px(344);const auto area=info.rcWork;
+        const auto dpi=GetDpiForWindow(quickWindow);if(dpi!=quickUi.dpi)reloadTheme(quickWindow,dpi);const int height=quickUi.px(layoutQuick()),width=quickUi.px(quickWidth());const auto area=info.rcWork;
         const int x=std::clamp(int(cursor.x),int(area.left),std::max(int(area.left),int(area.right)-width)),y=std::clamp(int(cursor.y),int(area.top),std::max(int(area.top),int(area.bottom)-height));
-        update();SetWindowPos(quickWindow,HWND_TOPMOST,x,y,width,height,SWP_SHOWWINDOW);RedrawWindow(quickWindow,nullptr,nullptr,RDW_INVALIDATE|RDW_ERASE|RDW_ALLCHILDREN|RDW_UPDATENOW);notify();SetForegroundWindow(quickWindow);SetFocus(quickList);
+        update();SetWindowPos(quickWindow,HWND_TOPMOST,x,y,width,height,SWP_SHOWWINDOW);RedrawWindow(quickWindow,nullptr,nullptr,RDW_INVALIDATE|RDW_ERASE|RDW_ALLCHILDREN|RDW_UPDATENOW);notify();SetForegroundWindow(quickWindow);SetFocus(fromTray?GetDlgItem(quickWindow,3011):quickList);
     }
 };

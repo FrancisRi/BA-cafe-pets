@@ -76,12 +76,25 @@ function Find-Control([string]$Name, $ControlType = $null) {
     throw "Control missing: $Name"
 }
 function Open-Page([string]$Name) {
-    $item = Find-Control $Name
+    $item = Find-Control $Name ([Windows.Automation.ControlType]::ListItem)
     $item.GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Select()
 }
 function Click([string]$Name) {
     $item = Find-Control $Name
     $item.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+}
+function Action-Bounds([string[]]$Names) {
+    foreach ($name in $Names) {
+        $button = Find-Control $name ([Windows.Automation.ControlType]::Button)
+        if ($button.Current.IsOffscreen) { throw "Button outside the visible menu: $name" }
+        $button.Current.BoundingRectangle
+    }
+}
+function Check-EqualSize($Bounds) {
+    foreach ($item in $Bounds) {
+        if ([Math]::Abs($item.Width - $Bounds[0].Width) -gt 1 -or
+            [Math]::Abs($item.Height - $Bounds[0].Height) -gt 1) { throw 'Menu buttons have different sizes' }
+    }
 }
 """
 
@@ -145,6 +158,13 @@ def main(binary):
             full, ui_pid = view("BA Cafe · 设置")
             assert ui_pid != pet.pid, "WinUI must run outside the renderer process"
             automation(full, r"""
+                $nameProperty = [Windows.Automation.AutomationElement]::NameProperty
+                $wandering = [Windows.Automation.PropertyCondition]::new($nameProperty, '允许散步')
+                if ($null -ne $root.FindFirst($tree, $wandering)) { throw 'Movement is still on the global page' }
+                Open-Page '移动'
+                $null = Find-Control '允许散步'
+                $null = Find-Control '时间与随机变化'
+                $null = Find-Control '无输入等待'
                 Open-Page '咖啡厅'
                 $null = Find-Control '视线追踪鼠标'
                 Open-Page '战斗'
@@ -173,29 +193,89 @@ def main(binary):
             user.GetWindowTextW(bubble, text, len(text))
             assert text.value == "测试白子\n任务开始了哦..."
 
-            def opacity_saved():
+            def setting(section, key):
                 cfg = configparser.ConfigParser(strict=False)
                 raw = (data / "settings.ini").read_bytes()
                 cfg.read_string(raw.decode("utf-16" if raw.startswith(b"\xff\xfe") else "utf-8-sig"))
-                return cfg.getint("Messages", "Opacity", fallback=-1) == 64
+                return cfg.getint(section, key, fallback=-1)
 
-            wait_for(opacity_saved, 5)
+            wait_for(lambda: setting("Messages", "Opacity") == 64, 5)
             automation(full, "Click '导入模型'")
             picker, _ = wait_for(lambda: top_window(
                 owner=pet.pid, title="导入模型（可按住 Ctrl 或 Shift 多选）"))
             user.PostMessageW(picker, 0x10, 0, 0)
             wait_for(lambda: not user.IsWindowVisible(picker))
-            tray, _ = wait_for(lambda: top_window(owner=pet.pid, class_name="BaCafeNativeTray", visible=False))
-            user.PostMessageW(tray, 0x803D, 0, 0x1007B)
-            user.PostMessageW(tray, 0x803D, 1, 0x205)
+            pet_input = wait_for(lambda: window(pet.pid, "BaCafeNativeInput"))
+            user.PostMessageW(pet_input, 0x204, 2, 0)
+            user.PostMessageW(pet_input, 0x205, 0, 0)
             quick, quick_pid = view("BA Cafe · 快捷菜单")
             assert quick_pid == ui_pid
-            automation(quick, "Click '打开设置'")
+            assert not (user.GetWindowLongPtrW(quick, -16) & 0x00400000), "Quick menu has a Win32 dialog frame"
+            bounds = wintypes.RECT()
+            assert user.GetWindowRect(quick, ctypes.byref(bounds))
+            scale = user.GetDpiForWindow(quick) / 96
+            assert bounds.right - bounds.left <= 300 * scale
+            assert bounds.bottom - bounds.top <= 416 * scale
+            wandering = setting("Behavior", "Wandering")
+            automation(quick, r"""
+                $elements = $root.FindAll($tree, [Windows.Automation.Condition]::TrueCondition)
+                if ($elements | Where-Object { $_.Current.Name -like '更改已自动保存*' }) { throw 'Unexpected quick menu status' }
+                $modes = @(Action-Bounds @('咖啡厅', '战斗', '列队'))
+                Check-EqualSize $modes
+                if ($modes[0].Top -ne $modes[1].Top -or $modes[1].Top -ne $modes[2].Top -or
+                    [Math]::Abs(($modes[1].Left - $modes[0].Right) - ($modes[2].Left - $modes[1].Right)) -gt 1) {
+                    throw 'Mode buttons are not evenly spaced in one row'
+                }
+                $actions = @(Action-Bounds @('打开设置', '导入模型', '模型文件夹', '退出桌宠'))
+                Check-EqualSize $actions
+                if ($actions[0].Left -ne $actions[2].Left -or $actions[1].Left -ne $actions[3].Left -or
+                    $actions[0].Top -ne $actions[1].Top -or $actions[2].Top -ne $actions[3].Top -or
+                    [Math]::Abs(($actions[1].Left - $actions[0].Right) - ($actions[2].Top - $actions[0].Bottom)) -gt 1) {
+                    throw 'Bottom actions are not evenly spaced in a two-by-two grid'
+                }
+                $label = Find-Control '允许散步' ([Windows.Automation.ControlType]::Text)
+                $switch = Find-Control '允许散步' ([Windows.Automation.ControlType]::Button)
+                $textBox = $label.Current.BoundingRectangle
+                $switchBox = $switch.Current.BoundingRectangle
+                if ($switchBox.Left -le $textBox.Left -or $textBox.Top -ge $switchBox.Bottom -or
+                    $textBox.Bottom -le $switchBox.Top) { throw 'Quick menu switch is not on the right of its label' }
+                $switch.GetCurrentPattern([Windows.Automation.TogglePattern]::Pattern).Toggle()
+                Click '打开设置'
+            """)
+            wait_for(lambda: setting("Behavior", "Wandering") == (0 if wandering == 1 else 1), 5)
             full, reopened_pid = view("BA Cafe · 设置")
             assert reopened_pid == ui_pid
-            automation(full, "Click '退出桌宠'")
+
+            tray, _ = wait_for(lambda: top_window(owner=pet.pid, class_name="BaCafeNativeTray", visible=False))
+
+            def open_tray_menu():
+                user.PostMessageW(tray, 0x803D, 0, 0x1007B)
+                user.PostMessageW(tray, 0x803D, 1, 0x205)
+                menu, tray_pid = view("BA Cafe · 托盘菜单")
+                assert tray_pid == ui_pid and menu != quick and not user.IsWindowVisible(quick)
+                return menu
+
+            menu = open_tray_menu()
+            automation(menu, r"""
+                $null = Find-Control '测试白子' ([Windows.Automation.ControlType]::Text)
+                $buttons = [Windows.Automation.PropertyCondition]::new(
+                    [Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Button)
+                $actions = $root.FindAll($tree, $buttons) | Where-Object { -not $_.Current.IsOffscreen } | ForEach-Object { $_.Current.Name }
+                if (($actions -join ',') -ne '打开设置,导入模型,模型文件夹,退出桌宠') { throw "Unexpected tray menu actions: $actions" }
+                Check-EqualSize @(Action-Bounds $actions)
+                Click '打开设置'
+            """)
+            automation(full, "Open-Page '模型管理'; Click '隐藏当前角色'")
+            wait_for(lambda: not user.IsWindowVisible(pet_input))
+            menu = open_tray_menu()
+            automation(menu, "$null = Find-Control '没有活动模型'; Click '导入模型'")
+            picker, _ = wait_for(lambda: top_window(
+                owner=pet.pid, title="导入模型（可按住 Ctrl 或 Shift 多选）"))
+            user.PostMessageW(picker, 0x10, 0, 0)
+            wait_for(lambda: not user.IsWindowVisible(picker))
+            automation(open_tray_menu(), "Click '退出桌宠'")
             assert pet.wait(timeout=6) == 0
-            print("WinUI 3 settings, model rename, Codex preview and sliders, and tray quick menu passed.")
+            print("WinUI 3 pet and tray menus, model rename, movement settings, and Codex bubble preview passed.")
         finally:
             if pet.poll() is None:
                 pet.terminate()

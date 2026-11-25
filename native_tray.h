@@ -43,10 +43,10 @@ public:
         if(!window)throw std::runtime_error("Cannot create notification area window");
         icon=static_cast<HICON>(LoadImageW(module,MAKEINTRESOURCEW(101),IMAGE_ICON,GetSystemMetrics(SM_CXSMICON),GetSystemMetrics(SM_CYSMICON),0));if(!icon)icon=CopyIcon(LoadIconW(nullptr,IDI_APPLICATION));
         data.cbSize=sizeof(data);data.hWnd=window;data.uID=1;data.uFlags=NIF_MESSAGE|NIF_ICON|NIF_TIP|NIF_SHOWTIP;data.uCallbackMessage=Callback;data.hIcon=icon;
-        lstrcpynW(data.szTip,L"BA Cafe Pets · 单击打开，右键切换模型",128);add();
+        lstrcpynW(data.szTip,L"BA Cafe Pets · 单击打开设置，右键打开菜单",128);add();
     }
     ~NativeTray(){if(added)Shell_NotifyIconW(NIM_DELETE,&data);if(window){KillTimer(window,1);DestroyWindow(window);}if(icon)DestroyIcon(icon);}
     NativeTray(const NativeTray&)=delete;NativeTray& operator=(const NativeTray&)=delete;
     bool available() const {return added;}
-    void update(int count){if(displayed==count)return;displayed=count;const auto text=L"BA Cafe Pets · "+std::to_wstring(count)+L" 个模型已显示\n单击打开，右键切换模型";lstrcpynW(data.szTip,text.c_str(),128);if(added&&!Shell_NotifyIconW(NIM_MODIFY,&data)){added=false;SetTimer(window,1,5000,nullptr);}}
+    void update(int count){if(displayed==count)return;displayed=count;const auto text=L"BA Cafe Pets · "+std::to_wstring(count)+L" 个模型已显示\n单击打开设置，右键打开菜单";lstrcpynW(data.szTip,text.c_str(),128);if(added&&!Shell_NotifyIconW(NIM_MODIFY,&data)){added=false;SetTimer(window,1,5000,nullptr);}}
 };

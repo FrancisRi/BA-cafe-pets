@@ -19,7 +19,7 @@ cmake --build build --target ba_cafe_lite_native -j 4
 ./build/bin/BA-Cafe-Pets.exe --settings
 ```
 
-CMake 会下载并校验固定版本的 raylib 6.0 与 BehaviorTree.CPP 4.8.0。可将相应源码放入 `vendor/raylib-6.0`、`vendor/BehaviorTree.CPP-4.8.0` 进行本地构建；首次下载需要网络。cgltf 位于 `shared/`。
+CMake 会下载并校验固定版本的 raylib 6.0、BehaviorTree.CPP 4.8.0 和 toml++ 3.4.0。可将相应源码放入 `vendor/raylib-6.0`、`vendor/BehaviorTree.CPP-4.8.0` 和 `vendor/tomlplusplus-3.4.0` 进行本地构建。cgltf 位于 `shared/`。
 
 ### WinUI 3 设置与菜单
 

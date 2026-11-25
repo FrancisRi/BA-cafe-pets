@@ -34,7 +34,7 @@ internal sealed class ModelRoster
         this.app = app;
         this.compact = compact;
         this.dialogVisibility = dialogVisibility;
-        list.MaxHeight = compact ? 144 : 280;
+        list.MaxHeight = compact ? 76 : 280;
         AutomationProperties.SetName(list, "已导入的模型");
         list.SelectionChanged += (_, _) => UpdateActions();
         list.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(KeyDown), true);

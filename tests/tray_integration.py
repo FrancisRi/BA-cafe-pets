@@ -157,12 +157,14 @@ try:
     assert not windows('BaCafeNativePet')
     user.PostMessageW(tray,0x8000+61,0,(1<<16)|0x7B)
     quick=wait_for(lambda: windows('BaCafeQuickMenu'),'tray context menu')[0]
-    compact=user.GetDlgItem(quick,3200)
-    send(compact,0x186,0);send(compact,0x100,0x20)
-    wait_for(lambda: windows('BaCafeNativePet'),'show pet from tray roster')
-    wait_for(lambda: user.IsWindowEnabled(user.GetDlgItem(quick,3000)),'restored pet loaded')
+    assert not user.IsWindowVisible(user.GetDlgItem(quick,3200)), 'Tray menu is limited to app actions'
     send(quick,0x111,3011)
+    send(full,0x111,1003)
+    page=panel();listing=user.GetDlgItem(page,2000)
+    send(listing,0x186,0);send(page,0x111,2000|(1<<16),listing);send(page,0x111,2100)
+    wait_for(lambda: windows('BaCafeNativePet'),'show pet from model management')
     send(full,0x111,1000)
+    wait_for(lambda: sampling_text().startswith('已生效：'), 'restored pet loaded')
     mode=user.GetDlgItem(panel(),100)
     assert send(mode,0x146)>=3,'Formation is available in the shipped full-interface mode combo'
     send(mode,0x14E,2);send(panel(),0x111,(1<<16)|100)

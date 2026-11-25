@@ -105,7 +105,9 @@ for case in (('menu','models') if args.case=='both' else (args.case,)):
             assert quick,'Tray right-click notifications must leave the flyout open'
             quick=quick[0];notify(tray,0x7B);time.sleep(.2)
             assert user.IsWindowVisible(quick),'Repeated context notifications must not toggle the flyout closed'
-            assert send(user.GetDlgItem(quick,3200),0x18B)==3,'All imported choices remain accessible'
+            assert text(user.GetDlgItem(quick,3100))=='没有活动模型'
+            assert not user.IsWindowVisible(user.GetDlgItem(quick,3200)),'Tray menu only exposes app actions'
+            assert all(user.IsWindowVisible(user.GetDlgItem(quick,id)) for id in (3011,3010,3013,3012))
             send(quick,0x111,3011)
             assert user.IsWindowVisible(full) and not user.IsWindowVisible(quick),'Flyout opens the full interface'
             notify(tray,0x7B);quick=wait(lambda: windows('BaCafeQuickMenu'),'Reopen tray menu')[0]
@@ -118,13 +120,13 @@ for case in (('menu','models') if args.case=='both' else (args.case,)):
             wait(lambda: 'READY OtherB:' in (profile/'logs/pet.log').read_text(encoding='utf-8',errors='replace'),'OtherB finishes loading')
             assert 'OtherB' in text(user.GetDlgItem(full,11)),'The chosen model becomes current'
             send(page,0x111,2100);wait(lambda: not windows('BaCafeNativePet'),'Hide OtherB');time.sleep(.6)
-            notify(tray,0x7B);quick=wait(lambda: windows('BaCafeQuickMenu'),'Select another model from tray')[0]
-            compact=user.GetDlgItem(quick,3200)
-            for index in (1,2):send(compact,0x186,index);send(compact,0x100,0x20)
-            wait(lambda: len(windows('BaCafeNativePet'))==2,'Two queued models load from the tray while the host stays hidden',6)
-            wait(lambda: user.IsWindowEnabled(user.GetDlgItem(quick,3000)),'OtherC load completed')
-            wait(lambda: all('READY '+row['name']+':' in (profile/'logs/pet.log').read_text(encoding='utf-8',errors='replace') for row in rows),'All three models finish initialization')
+            notify(tray,0x7B);quick=wait(lambda: windows('BaCafeQuickMenu'),'Reopen settings from tray')[0]
             send(quick,0x111,3011)
+            for index in (1,2):
+                listing=user.GetDlgItem(page,2000)
+                send(listing,0x186,index);send(page,0x111,2000|(1<<16),listing);send(page,0x111,2100)
+            wait(lambda: len(windows('BaCafeNativePet'))==2,'Two queued models load from model management',6)
+            wait(lambda: all('READY '+row['name']+':' in (profile/'logs/pet.log').read_text(encoding='utf-8',errors='replace') for row in rows),'All three models finish initialization')
             assert 'OtherC' in text(user.GetDlgItem(full,11))
             saved=json.loads((profile/'characters.json').read_text())
             assert saved['selected']==rows[2]['id'] and sum(row['active'] for row in saved['characters'])==2

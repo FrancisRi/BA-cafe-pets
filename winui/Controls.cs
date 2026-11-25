@@ -31,7 +31,7 @@ internal static class Controls
         return row;
     }
 
-    internal static FrameworkElement Card(string title, string detail, FrameworkElement control, string icon = "")
+    internal static FrameworkElement Card(string title, string detail, FrameworkElement control, string icon = "", TextBlock? status = null)
     {
         var content = new Grid { ColumnSpacing = 12 };
         content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -51,6 +51,15 @@ internal static class Controls
         content.Children.Add(labels);
         content.Children.Add(control);
         Grid.SetColumn(control, 1);
+        if (status != null)
+        {
+            content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            content.RowSpacing = 6;
+            Grid.SetRow(status, 1);
+            Grid.SetColumnSpan(status, 2);
+            content.Children.Add(status);
+        }
         var card = new Border
         {
             Child = content, Padding = new Thickness(14, 9, 14, 9), MinHeight = 56,
@@ -103,7 +112,7 @@ internal sealed class OptionEditor
 
     private sealed record Choice(string Label, object Value);
 
-    internal OptionEditor(Field field, Action<object> change)
+    internal OptionEditor(Field field, Action<object> change, TextBlock? status = null)
     {
         this.field = field;
         this.change = change;
@@ -138,7 +147,7 @@ internal sealed class OptionEditor
                 contents = Controls.Row(slider, exact); input = slider;
                 break;
         }
-        View = Controls.Card(field.Title, field.Detail, contents, field.Icon);
+        View = Controls.Card(field.Title, field.Detail, contents, field.Icon, status);
     }
 
     private void Changed(object value)

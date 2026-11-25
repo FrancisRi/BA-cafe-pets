@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(ba_cafe_lite_native VERSION 1.1.15 LANGUAGES C CXX RC)
+project(ba_cafe_lite_native VERSION 1.1.16 LANGUAGES C CXX RC)
 if(NOT WIN32)
     message(FATAL_ERROR "This desktop prototype requires Windows")
 endif()
@@ -40,6 +40,9 @@ else()
         URL https://github.com/BehaviorTree/BehaviorTree.CPP/archive/refs/tags/4.8.0.zip
         URL_HASH SHA256=af0d212cf3c7fe70a484b92edf263d8d21b70df41909cc83d251f5800bad2205)
     FetchContent_MakeAvailable(behaviortree_cpp)
+endif()
+if(EXISTS "${BA_ROOT}/vendor/tomlplusplus-3.4.0/CMakeLists.txt")
+    set(FETCHCONTENT_SOURCE_DIR_TOMLPLUSPLUS "${BA_ROOT}/vendor/tomlplusplus-3.4.0")
 endif()
 FetchContent_Declare(tomlplusplus
     URL https://codeload.github.com/marzer/tomlplusplus/tar.gz/refs/tags/v3.4.0
