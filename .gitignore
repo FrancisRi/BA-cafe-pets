@@ -4,6 +4,8 @@
 *.glb
 !/assets/Shiroko.glb
 /artifacts/
+/winui/bin/
+/winui/obj/
 /dist/
 /*.exe
 **/data/

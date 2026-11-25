@@ -12,7 +12,7 @@
 
 ## 本分支功能
 
-- Windows 11 Fluent Design 风格的快捷菜单、完整设置界面和模型操作菜单，适配深浅主题及 DPI 缩放。
+- WinUI 3 设置窗口、快捷菜单和模型操作，适配深浅主题及 DPI 缩放。
 - 右键桌宠，快速勾选模型显示／隐藏，切换咖啡厅／战斗／列队模式、跟随、散步及视线追踪。
 - 咖啡厅／战斗／列队模式双击沿当前朝向播放 Exs，支持技能中手动旋转；第三次点击可中断技能，按咖啡厅 → 战斗 → 列队 → 咖啡厅循环切换，跳过不支持的模式。
 - 列队模式使用 Formation_Idle，暂停移动、散步和鼠标追踪；支持提起／放下、双击 Exs、三连击切换及全局开关控制的手动旋转。
@@ -38,9 +38,9 @@
 
 也可以按下列步骤从源码构建。
 
-运行要求：Windows 10/11 x64，显卡驱动支持 OpenGL 3.3。运行编译后的程序不需要 Blender、Node.js、Python、WebView2 或开发工具链。
+运行要求：Windows 10 1809 或更新版本、Windows 11 x64，显卡驱动支持 OpenGL 3.3。发行包自带 WinUI 3 和 .NET 运行时。
 
-开发环境需要 C++20 编译器、CMake 3.24+ 和 Ninja。`build.ps1` 使用 MinGW / g++，也支持项目内已有的便携工具；首次构建会下载固定版本的依赖。
+开发环境需要 C++20 编译器、CMake 3.24+、Ninja 和 .NET 8 SDK。`build.ps1` 使用 MinGW / g++，首次构建会下载固定版本的依赖。
 
 ```powershell
 git clone https://github.com/FrancisRi/BA-cafe-pets.git

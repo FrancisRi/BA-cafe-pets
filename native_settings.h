@@ -6,6 +6,7 @@
 #include "native_autostart.h"
 #include "native_codex_hooks.h"
 #include "native_model_name.h"
+#include "native_winui.h"
 #include "native_outline_input.h"
 
 // Both interfaces use the existing host messages; the host remains responsible
@@ -18,6 +19,7 @@ struct NativeSettings {
     std::function<void(bool)> visibility;
     std::function<void(bool)> pauseChanged;
     Json last=Json::object();
+    std::unique_ptr<NativeWinUi> winUi;
     std::filesystem::path defaultsFile;
     std::unique_ptr<NativeHealth::Pause> moveWait;
     struct Field {const char* key;const wchar_t* title;const wchar_t* detail;int kind;const wchar_t* icon;};
@@ -80,9 +82,11 @@ struct NativeSettings {
     ~NativeSettings(){closing=true;editingOutline=false;if(modelMenu)DestroyWindow(modelMenu);if(quickWindow)DestroyWindow(quickWindow);if(window)DestroyWindow(window);}
     int u(int value) const {return ui.px(value);}
     int panelWidth() const {RECT r{};if(panel)GetClientRect(panel,&r);return std::max(320,ui.dip(r.right)-32);}
-    bool visible() const {return (window&&IsWindowVisible(window)&&!IsIconic(window))||(quickWindow&&IsWindowVisible(quickWindow));}
-    bool pausesPets() const {return quickWindow&&IsWindowVisible(quickWindow);}
-    HWND dialogOwner() const {return window&&IsWindowVisible(window)?window:quickWindow;}
+    HWND fullHandle() const {return winUi?winUi->full:window;}
+    HWND quickHandle() const {return winUi?winUi->quick:quickWindow;}
+    bool visible() const {const auto full=fullHandle();return (full&&IsWindowVisible(full)&&!IsIconic(full))||pausesPets();}
+    bool pausesPets() const {const auto quick=quickHandle();return quick&&IsWindowVisible(quick);}
+    HWND dialogOwner() const {const auto full=fullHandle();return full&&IsWindowVisible(full)?full:quickHandle();}
     void notify(){
         const bool shown=visible(),paused=pausesPets();
         const bool shownChanged=shown!=notifiedVisible,pausedChanged=paused!=notifiedPaused;
@@ -125,9 +129,9 @@ struct NativeSettings {
         if(msg==WM_NCDESTROY){RemovePropW(hwnd,L"FluentInputError");RemoveWindowSubclass(hwnd,outlineProc,4);}
         return DefSubclassProc(hwnd,msg,w,l);
     }
-    void hideQuick(){if(quickWindow)ShowWindow(quickWindow,SW_HIDE);notify();}
+    void hideQuick(){if(winUi){winUi->send(R"({"type":"hide","surface":"quick"})");return;}if(quickWindow)ShowWindow(quickWindow,SW_HIDE);notify();}
     void hideModelMenu(){if(modelMenu)ShowWindow(modelMenu,SW_HIDE);}
-    void hide(){hideModelMenu();if(window)ShowWindow(window,SW_HIDE);hideQuick();notify();}
+    void hide(){if(winUi){winUi->send(R"({"type":"hide"})");return;}hideModelMenu();if(window)ShowWindow(window,SW_HIDE);hideQuick();notify();}
     void placeContent(HWND hwnd,int x,int y,int w,int h,bool stretch=false){content.push_back(hwnd);placements.push_back({hwnd,x,y,w,h,stretch});}
     void scrollTo(int value){
         if(!panel)return;RECT r{};GetClientRect(panel,&r);scroll=std::clamp(value,0,std::max(0,u(contentHeight)-int(r.bottom)));
@@ -334,7 +338,11 @@ struct NativeSettings {
         updateModelMenu();syncing=false;
     }
     void sync(){
-        if(!snapshot)return;const auto next=readSnapshot();
+        if(!snapshot||(winUi&&!visible()))return;const auto next=readSnapshot();
+        if(winUi){
+            if(next!=last){last=next;winUi->send(winUiState().dump(),true);}
+            return;
+        }
         const bool capabilitiesChanged=last.value("battleAvailable",false)!=next.value("battleAvailable",false)||last.value("formationAvailable",false)!=next.value("formationAvailable",false);
         const bool rosterChanged=last.value("characters",Json::array()).size()!=next.value("characters",Json::array()).size();
         const auto selected=next.value("selectedId",std::string{});bool known=false;
@@ -344,6 +352,94 @@ struct NativeSettings {
         // selected so the same button can show that model again.
         if(last.value("selectedId",std::string{})!=selected&&!known)highlighted=selected;
         last=next;if(window&&IsWindowVisible(window)&&((capabilitiesChanged&&(page==0||page==2))||(rosterChanged&&page==3))){const int before=scroll;build();scrollTo(before);}else update();
+    }
+    Json winUiState() const {
+        return {{"type","state"},{"state",last},{"status",utf8(statusText())},{"sampling",utf8(samplingText())}};
+    }
+    static Json winUiFields(){
+        Json controls=Json::array();
+        for(size_t ordinal=0;ordinal<std::size(fields);++ordinal){
+            const auto i=ordinal<4?ordinal:ordinal==4?22:ordinal==5?21:ordinal-2;
+            const auto& f=fields[i];
+            double min=1,max=3600;
+            for(size_t n=0;n<std::size(NativePreferences::names);++n)if(std::string_view(f.key)==NativePreferences::names[n]){
+                min=NativePreferences::minimum[n];max=NativePreferences::maximum[n];break;
+            }
+            controls.push_back({{"key",f.key},{"title",utf8(f.title)},{"detail",utf8(f.detail)},{"icon",utf8(f.icon)},
+                {"kind",f.kind},{"page",i>=14&&i<16?1:i>=16&&i<21?2:0},{"min",min},{"max",max}});
+        }
+        return controls;
+    }
+    bool showWinUi(const std::filesystem::path& directory,bool quick,bool toggle){
+        if(winUi&&!winUi->alive()){winUi.reset();notify();}
+        if(!winUi){
+            const auto exe=directory/L"winui/BaCafe.Settings.exe";
+            if(!std::filesystem::is_regular_file(exe))return false;
+            auto client=std::make_unique<NativeWinUi>();
+            if(!client->launch(exe)){
+                nativeMessageBox(nullptr,L"无法打开设置。请重新解压完整发行包后重试。",L"BA Cafe",MB_OK|MB_ICONWARNING);
+                return true;
+            }
+            winUi=std::move(client);
+            winUi->send(Json{{"type","initialize"},{"fields",winUiFields()}}.dump());
+        }
+        defaultsFile=directory/L"defaults.ini";
+        if(snapshot)last=readSnapshot();
+        winUi->send(winUiState().dump(),true);
+        POINT cursor{};GetCursorPos(&cursor);
+        winUi->allowActivation();
+        winUi->send(Json{{"type","show"},{"surface",quick?"quick":"full"},{"toggle",toggle},
+            {"x",cursor.x},{"y",cursor.y}}.dump());
+        return true;
+    }
+    void connectCodex(){
+        try{
+            NativeCodexHooks::connect(NativeCodexHooks::home(),NativeAutostart::launchExecutable());
+            codexHooksConfigured=true;
+            const std::wstring status=L"已写入配置。请在 Codex「设置 → Hooks」中审核并信任桌宠命令。";
+            if(winUi)winUi->send(Json{{"type","codex_result"},{"detail",utf8(status)},{"error",false}}.dump());
+            else SetWindowTextW(GetDlgItem(panel,2218),status.c_str());
+        }catch(const std::exception& e){
+            if(winUi)winUi->send(Json{{"type","codex_result"},{"detail",e.what()},{"error",true}}.dump());
+            else{const auto detail=wide(e.what());nativeMessageBox(window,detail.c_str(),L"无法连接 Codex",MB_OK|MB_ICONWARNING);}
+        }
+    }
+    void resetPreferences(){
+        auto value=last["value"];NativePreferences defaults;const auto ini=defaultsFile.wstring();
+        defaults.load(ini);auto behavior=defaults.json();behavior.erase("bubbleOpacity");behavior.erase("bubbleBlur");
+        value.update(behavior);
+        value.update({{"look",GetPrivateProfileIntW(L"Behavior",L"Tracking",1,ini.c_str())!=0},
+            {"idleSeconds",std::clamp(int(GetPrivateProfileIntW(L"Behavior",L"InputIdleSeconds",60,ini.c_str())),1,3600)},
+            {"activeSeconds",std::clamp(int(GetPrivateProfileIntW(L"Behavior",L"ContinuedInputSeconds",30,ini.c_str())),1,3600)}});
+        sendValue(std::move(value));
+    }
+    void fromWinUi(const Json& message){
+        const auto type=message.value("type",std::string{});
+        if(type=="view"){
+            const auto hwnd=winUi->handle(message.value("hwnd",0ull));
+            if(message.value("surface",std::string{})=="full")winUi->full=hwnd;
+            else winUi->quick=hwnd;
+            notify();sync();return;
+        }
+        if(type=="ui_error"){
+            const auto detail=wide(message.value("detail",std::string{}));
+            nativeMessageBox(dialogOwner(),detail.c_str(),L"WinUI 设置",MB_OK|MB_ICONWARNING);return;
+        }
+        if(type=="connect_codex"){connectCodex();return;}
+        if(type=="reset_preferences"){resetPreferences();return;}
+        if(type=="option"){
+            const auto key=message.value("key",std::string{});
+            if(!last.contains("value")||!last["value"].contains(key)||!message.contains("value")||
+                std::none_of(std::begin(fields),std::end(fields),[&](const auto& field){return key==field.key;}))return;
+            auto value=last["value"];value[key]=message["value"];sendValue(std::move(value));return;
+        }
+        if(!receive)return;
+        if(type=="bubble_settings"){
+            last["value"]["bubbleOpacity"]=message.at("bubbleOpacity");
+            last["value"]["bubbleBlur"]=message.at("bubbleBlur");
+        }
+        receive(message);
+        if(type!="bubble_settings"&&type!="preview_bubble")sync();
     }
     void sendValue(Json value){if(receive)receive({{"type","save"},{"value",std::move(value)}});sync();}
     void save(){
@@ -450,15 +546,7 @@ struct NativeSettings {
         }
         if(id==2210&&code==BN_CLICKED){const auto startup=last.value("startup",Json::object());if(startup.value("available",false)&&receive)receive({{"type","set_autostart"},{"enabled",!startup.value("enabled",false)}});sync();return;}
         if(id==2217&&code==BN_CLICKED&&page==messagesPage){
-            try{
-                NativeCodexHooks::connect(NativeCodexHooks::home(),NativeAutostart::launchExecutable());
-                codexHooksConfigured=true;
-                SetWindowTextW(GetDlgItem(panel,2218),L"已写入配置。请在 Codex「设置 → Hooks」中审核并信任桌宠命令。");
-            }catch(const std::exception& e){
-                const auto detail=wide(e.what());
-                nativeMessageBox(window,detail.c_str(),L"无法连接 Codex",MB_OK|MB_ICONWARNING);
-            }
-            return;
+            connectCodex();return;
         }
         if(id==2214&&code==BN_CLICKED){
             if(receive)receive({{"type","preview_bubble"}});
@@ -474,7 +562,7 @@ struct NativeSettings {
         if(id==2107||id==2108){receive({{"type",id==2107?"change_models_folder":"reset_models_folder"}});return;}
         if((id>=2100&&id<=2102)||id==2109){const int n=int(SendMessageW(list,LB_GETCURSEL,0,0));if(n<0)return;const auto row=last["characters"][n];if(id==2100)toggleRoster(n);else if(id==2101)receive({{"type","roster_select"},{"id",row["id"]}});else if(id==2109)renameModel(row);else removeModel(row);return;}
         if(id==2200){receive({{"type","import"}});return;}
-        if(id==2201){auto value=last["value"];NativePreferences defaults;const auto ini=defaultsFile.wstring();defaults.load(ini);auto behavior=defaults.json();behavior.erase("bubbleOpacity");behavior.erase("bubbleBlur");value.update(behavior);value.update({{"look",GetPrivateProfileIntW(L"Behavior",L"Tracking",1,ini.c_str())!=0},{"idleSeconds",std::clamp(int(GetPrivateProfileIntW(L"Behavior",L"InputIdleSeconds",60,ini.c_str())),1,3600)},{"activeSeconds",std::clamp(int(GetPrivateProfileIntW(L"Behavior",L"ContinuedInputSeconds",30,ini.c_str())),1,3600)}});sendValue(std::move(value));}
+        if(id==2201)resetPreferences();
     }
     void drawRoster(const DRAWITEMSTRUCT& d,bool compact){
         auto& theme=compact?quickUi:ui;const auto rows=last.value("characters",Json::array());if(d.itemID>=rows.size())return;const auto& row=rows[d.itemID];auto r=d.rcItem;const bool active=row.value("active",false),available=row.value("available",false);
@@ -549,6 +637,16 @@ struct NativeSettings {
         if(msg==WM_NCDESTROY)RemoveWindowSubclass(hwnd,listProc,2);return DefSubclassProc(hwnd,msg,w,l);
     }
     bool route(MSG& message){
+        if(message.message==NativeWinUi::wake){
+            if(winUi){
+                for(const auto& line:winUi->take()){
+                    const auto document=Json::parse(line,nullptr,false);
+                    if(document.is_object())fromWinUi(document);
+                }
+                if(!winUi->alive()){winUi.reset();notify();}
+            }
+            return true;
+        }
         HWND root{};if(modelMenu&&IsWindowVisible(modelMenu)&&(message.hwnd==modelMenu||IsChild(modelMenu,message.hwnd)))root=modelMenu;else if(quickWindow&&IsWindowVisible(quickWindow)&&(message.hwnd==quickWindow||IsChild(quickWindow,message.hwnd)))root=quickWindow;else if(window&&IsWindowVisible(window)&&(message.hwnd==window||IsChild(window,message.hwnd)))root=window;
         if((message.message==WM_LBUTTONDOWN||message.message==WM_RBUTTONDOWN)&&modelMenu&&IsWindowVisible(modelMenu)&&root!=modelMenu)hideModelMenu();
         if(message.message==WM_LBUTTONDOWN||message.message==WM_RBUTTONDOWN||message.message==WM_MBUTTONDOWN){if(quickWindow&&IsWindowVisible(quickWindow)&&root!=quickWindow)hideQuick();}if(!root)return false;
@@ -610,6 +708,7 @@ struct NativeSettings {
         h=control(window,L"STATIC",L"",SS_ENDELLIPSIS,2300,258,712,600,34);SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(ui.small),FALSE);SetPropW(h,L"FluentMuted",reinterpret_cast<HANDLE>(1));progress=control(window,L"STATIC",L"",SS_OWNERDRAW,2301,258,760,600,3);
     }
     void show(HWND,const std::filesystem::path& directory){
+        if(showWinUi(directory,false,false))return;
         if(receive)receive({{"type","refresh_models"}});
         defaultsFile=directory/L"defaults.ini";ensureFull();if(snapshot)last=readSnapshot();highlighted=last.value("selectedId",std::string{});build();
         if(!IsWindowVisible(window)){POINT p{};GetCursorPos(&p);MONITORINFO info{sizeof(info)};GetMonitorInfoW(MonitorFromPoint(p,MONITOR_DEFAULTTONEAREST),&info);const auto area=info.rcWork;
@@ -634,6 +733,7 @@ struct NativeSettings {
         for(int id:{3008,3002,3003,3004,3005,3007}){place(id,8,y,328,36);y+=36;}y+=12;for(int id:{3011,3013,3010,3012}){place(id,8,y,328,36);y+=36;}y+=8;place(3102,20,y,304,34);return y+44;
     }
     void showQuick(HWND owner,const std::filesystem::path& directory,bool toggleIfVisible=true){
+        if(showWinUi(directory,true,toggleIfVisible))return;
         hideModelMenu();if(receive)receive({{"type","refresh_models"}});
         defaultsFile=directory/L"defaults.ini";if(quickWindow&&IsWindowVisible(quickWindow)){if(toggleIfVisible)hideQuick();else{SetForegroundWindow(quickWindow);SetFocus(quickList);}return;}if(snapshot)last=readSnapshot();highlighted=last.value("selectedId",std::string{});ensureQuick();
         POINT cursor{};GetCursorPos(&cursor);MONITORINFO info{sizeof(info)};GetMonitorInfoW(MonitorFromPoint(cursor,MONITOR_DEFAULTTONEAREST),&info);SetWindowPos(quickWindow,nullptr,cursor.x,cursor.y,0,0,SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE);

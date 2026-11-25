@@ -2,7 +2,7 @@
 
 ## 工具与构建
 
-目标平台为 Windows 10/11 x64。运行程序需要支持 OpenGL 3.3 的显卡驱动；开发需要 C++20 工具链、CMake 3.24+ 和 Ninja。
+目标平台为 Windows 10 1809 或更新版本、Windows 11 x64。运行程序需要支持 OpenGL 3.3 的显卡驱动。开发需要 C++20 工具链、CMake 3.24+、Ninja 和 .NET 8 SDK。
 
 `build.ps1` 使用 MinGW / g++，优先查找 PATH 中的工具，也支持本地 `.tools/w64devkit`、`.tools/ninja` 和 `.tools/cmake-*`。工具链不随 Git 上传。MSVC 可直接通过 CMake 配置构建。
 
@@ -20,6 +20,12 @@ cmake --build build --target ba_cafe_lite_native -j 4
 ```
 
 CMake 会下载并校验固定版本的 raylib 6.0 与 BehaviorTree.CPP 4.8.0。可将相应源码放入 `vendor/raylib-6.0`、`vendor/BehaviorTree.CPP-4.8.0` 进行本地构建；首次下载需要网络。cgltf 位于 `shared/`。
+
+### WinUI 3 设置与菜单
+
+`build.ps1` 将自包含的 WinUI 3 界面编译到 `build/bin/winui/`。桌宠在首次打开设置或快捷菜单时启动界面进程，通过本地管道传递状态与操作。界面复用已创建的页面，仅在模型列表内容变化时重新绑定列表。模型渲染、Windows 托盘图标、系统文件选择器和消息气泡由原生桌宠处理。
+
+`./build.ps1 -NativeOnly` 用于单独构建原生核心。发行脚本会检查并打包整个 `winui/` 目录。在可交互的 Windows 桌面运行 `python tests/winui_settings.py build/bin/BA-Cafe-Pets.exe` 可验证系统托盘、WinUI 设置、模型重命名和气泡控制。
 
 本分支从 **1.0.0** 开始独立编号，不沿用原作者版本号。`0.2.15` 仅表示源码来源基线。默认源码构建、便携版与单文件版内部程序名统一为 `BA-Cafe-Pets.exe`；CMake 目标标识和持久数据目录保留，以维持构建与数据兼容。对外发行文件使用 `BA-Cafe-Pets-版本号` 命名。
 

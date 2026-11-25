@@ -16,6 +16,8 @@ if(!$SkipBuild){
 }
 $core=Join-Path $base ($CoreExecutableName+'.exe')
 $launcher=Join-Path $base 'ba_cafe_lite_release_launcher.exe'
+$winui=Join-Path $base 'winui'
+if(!(Test-Path -LiteralPath (Join-Path $winui 'BaCafe.Settings.exe'))){throw 'Publish the self-contained WinUI 3 interface into the binary directory first'}
 foreach($binary in @($core,$launcher)){
     $info=(Get-Item -LiteralPath $binary).VersionInfo
     if($info.ProductName -ne 'BA Cafe Pets' -or $info.ProductVersion -ne $version){throw 'Release binaries do not match the current source version'}
@@ -24,9 +26,10 @@ $work=Join-Path $root ('artifacts/native-release-'+$version+'/'+[guid]::NewGuid(
 $stage=Join-Path $work 'stage'
 New-Item -ItemType Directory -Force -Path $stage,$dist | Out-Null
 Copy-Item -LiteralPath $core -Destination (Join-Path $stage 'BA-Cafe-Pets.exe')
+Copy-Item -LiteralPath $winui -Destination (Join-Path $stage 'winui') -Recurse
 $allowed=@('model/Shiroko.glb','defaults.ini','behavior/template.bt.xml','behavior/battle-mode.drawio','behavior/battle-mode.mmd',
     'README.txt','README.md','CHANGELOG.md','CREDITS.md','NOTICE.md','LICENSE.md','docs/LICENSE-SCOPE.md','docs/DEVELOPMENT.md','licenses/GPL-3.0-only.txt','licenses/NOTICE.txt','licenses/raylib.txt','licenses/GLFW.txt','licenses/cgltf.txt',
-    'licenses/BehaviorTree.CPP.txt','licenses/tinyxml2.txt','licenses/minitrace.txt','licenses/minicoro.txt','licenses/lexy.txt',
+    'licenses/BehaviorTree.CPP.txt','licenses/tomlplusplus.txt','licenses/tinyxml2.txt','licenses/minitrace.txt','licenses/minicoro.txt','licenses/lexy.txt',
     'licenses/GCC-GPL3.txt','licenses/GCC-runtime-exception.txt')
 foreach($relative in $allowed){
     $destination=Join-Path $stage $relative

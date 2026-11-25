@@ -103,7 +103,7 @@ struct Scene {
         // Full settings use normal application z-order; only the pet flyout
         // belongs to the topmost display/input chain.
         const auto* menu=leader().nativeSettings.get();
-        if(menu&&menu->quickWindow&&IsWindowVisible(menu->quickWindow))desired.insert(desired.begin(),menu->quickWindow);
+        if(menu&&menu->quickHandle()&&IsWindowVisible(menu->quickHandle()))desired.insert(desired.begin(),menu->quickHandle());
         if(menu&&menu->modelMenu&&IsWindowVisible(menu->modelMenu))desired.insert(desired.begin(),menu->modelMenu);
         if(auto hwnd=bubble.visible())desired.push_back(hwnd);
         for(const auto* a:visible){desired.push_back(a->inputWindow);desired.push_back(a->window);}

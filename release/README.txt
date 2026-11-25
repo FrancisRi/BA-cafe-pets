@@ -74,7 +74,8 @@ BA Cafe Pets 1.1.15 · Windows x64
   默认不写日志；--diagnostics 开启日志、性能统计与挂起诊断，保存在 logs\，不自动上传。
 
 要求与边界
-  Windows 10/11 x64，显卡驱动支持 OpenGL 3.3。
+  Windows 10 1809 或更新版本、Windows 11 x64，显卡驱动支持 OpenGL 3.3。
+  发行包内含 WinUI 3 和 .NET 运行时。便携版请保留 winui 文件夹。
   支持内嵌 PNG/JPEG 的 GLB 2.0；不含 Draco、Meshopt、KTX2 等解码器。
   动作完整性和特殊模型可能需要进一步适配。实际帧率取决于模型及设备。
 

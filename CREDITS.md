@@ -30,6 +30,8 @@ Copyright (C) 2026 FrancisRi。FrancisRi 自有原创新增及修改采用 **GPL
 | GLFW | <https://www.glfw.org/> | zlib；构建时附带许可文本 |
 | BehaviorTree.CPP | <https://github.com/BehaviorTree/BehaviorTree.CPP> | MIT；构建时附带许可文本 |
 | toml++ | <https://github.com/marzer/tomlplusplus> | MIT；构建时附带许可文本 |
+| Windows App SDK / WinUI 3 | <https://github.com/microsoft/WindowsAppSDK> | 见发行包 `winui/licenses/` |
+| .NET | <https://github.com/dotnet/runtime> | 见发行包 `winui/licenses/` |
 | tinyxml2、minitrace、minicoro、lexy | BehaviorTree.CPP 的第三方依赖 | 构建及打包时附带各自许可文本 |
 | GCC libstdc++ / libgcc | GCC | GPLv3 与 GCC Runtime Library Exception；见 `licenses/` |
 | 默认 Shiroko 模型 | <https://github.com/lihaohong6/BlueArchiveModels> | 保留原模型文件；角色与模型权利属于相应权利人 |
