@@ -321,7 +321,7 @@ struct Scene {
         if(type!="import"&&type!="refresh_models")importNotice.clear();
         if(type=="exit"){save();stopping=true;PostQuitMessage(0);return;}
         if(type=="preview_bubble"){
-            messages.push(L"Codex",L"任务开始了哦...");
+            messages.acceptAgent({{"source","BA Cafe Pets"},{"event","message"},{"text","测试消息已送达。"}});
             updateBubble();return;
         }
         if(type=="bubble_settings"){

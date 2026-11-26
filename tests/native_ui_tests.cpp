@@ -130,7 +130,7 @@ static void checkCodexConnection(NativeSettings& menu){
         "command = 'C:/Old/BA-Cafe-Pets.exe --codex-hook' # 保留行内注释\r\n"
         "[hooks.state]\r\n";
     std::ofstream(config,std::ios::binary)<<original;
-    NativeCodexHooks::connect(legacy,launcher);
+    NativeAgentHooks::connect(legacy,launcher);
     const auto migrated=contents(config);
     check(migrated.starts_with("notify = ['other.exe'] # 保留原通知\r\n")&&
         migrated.find("# 保留行内注释\r\n")!=std::string::npos&&
@@ -138,19 +138,61 @@ static void checkCodexConnection(NativeSettings& menu){
         migrated.find("[[hooks.UserPromptSubmit.hooks]]")!=std::string::npos&&
         migrated.find("[[hooks.Interrupt.hooks]]")!=std::string::npos&&
         !fs::exists(legacy/L"hooks.json"),"Connect updates legacy inline hooks without rewriting surrounding TOML");
-    NativeCodexHooks::connect(legacy,launcher);
+    NativeAgentHooks::connect(legacy,launcher);
     check(contents(config)==migrated,"Connecting again leaves migrated inline hooks unchanged");
 
     const auto fresh=root/L"new-install";
-    NativeCodexHooks::connect(fresh,launcher);
+    NativeAgentHooks::connect(fresh,launcher);
     const auto freshHooks=Json::parse(contents(fresh/L"hooks.json")).at("hooks");
     check(freshHooks.size()==3&&freshHooks.at("UserPromptSubmit")[0]["hooks"][0]["command"]==command&&
         !fs::exists(fresh/L"config.toml"),"First-time connection creates a standalone three-event hook file");
 
     std::ofstream(file,std::ios::binary|std::ios::trunc)<<"{invalid";
     bool rejected=false;
-    try{NativeCodexHooks::connect(home,launcher);}catch(const std::exception&){rejected=true;}
+    try{NativeAgentHooks::connect(home,launcher);}catch(const std::exception&){rejected=true;}
     check(rejected&&contents(file)=="{invalid","Malformed user config remains intact");
+}
+static void checkOtherAgentConnections(){
+    namespace fs=std::filesystem;
+    using NativeAgentHooks::Preset;
+    const auto root=fs::current_path()/L"artifacts"/(L"ba-agent-connect-"+std::to_wstring(GetCurrentProcessId()));
+    const auto first=root/L"桌宠's folder"/L"BA-Cafe-Pets.exe",second=root/L"moved"/L"BA-Cafe-Pets.exe";
+    fs::create_directories(first.parent_path());fs::create_directories(second.parent_path());
+    std::ofstream(first).put('\n');std::ofstream(second).put('\n');
+    const auto claude=root/L"claude",cursor=root/L"cursor";
+    fs::create_directories(claude);fs::create_directories(cursor);
+    const Json external={{"type","command"},{"command","other-hook.exe"}};
+    const auto claudeFile=claude/L"settings.json",cursorFile=cursor/L"hooks.json";
+    std::ofstream(claudeFile)<<Json{{"model","existing"},{"hooks",{{"Stop",Json::array({{{"hooks",Json::array({external})}}})}}}}.dump();
+    const Json cursorHook={{"command","./other.ps1"}};
+    std::ofstream(cursorFile)<<Json{{"version",1},{"hooks",{{"stop",Json::array({cursorHook})}}}}.dump();
+    NativeAgentHooks::connect(claude,first,Preset::ClaudeCode);
+    NativeAgentHooks::connect(cursor,first,Preset::Cursor);
+    const auto claudeWritten=contents(claudeFile),cursorWritten=contents(cursorFile);
+    const auto claudeConfig=Json::parse(claudeWritten),cursorConfig=Json::parse(cursorWritten);
+    const auto& claudeHooks=claudeConfig.at("hooks");
+    check(claudeConfig.at("model")=="existing"&&claudeHooks.at("Stop")[0]["hooks"][0]==external&&
+        claudeHooks.at("UserPromptSubmit")[0]["hooks"][0]["args"]==Json::array({"--agent-hook","claude-code"})&&
+        claudeHooks.at("StopFailure").size()==1,"Claude Code preset adds executable hooks and preserves user settings");
+    const auto& cursorHooks=cursorConfig.at("hooks");
+    check(cursorHooks.at("stop")[0]==cursorHook&&cursorHooks.at("stop").size()==2&&
+        cursorHooks.at("afterAgentResponse")[0]["command"].get<std::string>().find("桌宠''s folder")!=std::string::npos,
+        "Cursor preset preserves existing hooks and escapes PowerShell paths");
+    check(NativeAgentHooks::notificationExample(first).find(L"桌宠''s folder")!=std::wstring::npos&&
+        NativeAgentHooks::notificationExample(first).ends_with(L"--notify --stdin"),"The copied example invokes the portable launcher");
+    NativeAgentHooks::connect(claude,first,Preset::ClaudeCode);
+    NativeAgentHooks::connect(cursor,first,Preset::Cursor);
+    check(contents(claudeFile)==claudeWritten&&contents(cursorFile)==cursorWritten,"Agent presets are idempotent");
+    NativeAgentHooks::connect(claude,second,Preset::ClaudeCode);
+    NativeAgentHooks::connect(cursor,second,Preset::Cursor);
+    check(Json::parse(contents(claudeFile))["hooks"]["Stop"].size()==2&&
+        Json::parse(contents(cursorFile))["hooks"]["stop"].size()==2&&
+        contents(claudeFile).find("桌宠") == std::string::npos&&contents(cursorFile).find("桌宠")==std::string::npos,
+        "Reconnecting after moving the executable updates only the existing pet hooks");
+    std::ofstream(cursorFile,std::ios::trunc)<<"{}broken";
+    bool rejected=false;
+    try{NativeAgentHooks::connect(cursor,second,Preset::Cursor);}catch(const std::exception&){rejected=true;}
+    check(rejected&&contents(cursorFile)=="{}broken","Malformed Agent config remains intact");
 }
 struct TestDesktop {
     HDESK previous=GetThreadDesktop(GetCurrentThreadId()),isolated{};
@@ -329,26 +371,36 @@ int main(int argc,char** argv){
         const auto pauseCount=pauses.size();ShowWindow(menu.window,SW_MINIMIZE);pump(menu);ShowWindow(menu.window,SW_RESTORE);pump(menu);
         check(!menu.pausesPets()&&pauses.size()==pauseCount,"Showing, minimizing and restoring full settings never pauses pets");
         SendMessageW(menu.window,WM_CHANGEUISTATE,MAKEWPARAM(UIS_SET,UISF_HIDEFOCUS),0);
-        for(auto button:{GetDlgItem(menu.window,1000),GetDlgItem(menu.window,2200),GetDlgItem(menu.panel,104)}){
+        for(auto button:{GetDlgItem(menu.window,1000),GetDlgItem(menu.window,2200),GetDlgItem(menu.panel,121)}){
             check(drawButton(menu,button,0)==drawButton(menu,button,ODS_FOCUS|ODS_NOFOCUSRECT),"Mouse-clicked buttons must not paint a focus rectangle");
         }
         SendMessageW(menu.window,WM_CHANGEUISTATE,MAKEWPARAM(UIS_CLEAR,UISF_HIDEFOCUS),0);const auto navigation=GetDlgItem(menu.window,1000);check(drawButton(menu,navigation,0)!=drawButton(menu,navigation,ODS_FOCUS),"Keyboard navigation retains a visible Fluent focus cue");
         menu.quickCommand(3013);check(sent.back().at("type")=="open_models_folder","Quick menu opens the persistent model folder");
-        size_t fieldCount=0;for(int p=0;p<3;++p){menu.page=p;menu.build();fieldCount+=menu.controls.size();for(const auto& c:menu.controls)check(IsWindow(c.input),"Every existing setting has a real input control");}
+        size_t fieldCount=0;for(int p=0;p<3;++p){menu.page=p;menu.build();check(!IsWindowVisible(GetDlgItem(menu.window,2200)),"Import is hidden outside the Models page");fieldCount+=menu.controls.size();for(const auto& c:menu.controls)check(IsWindow(c.input),"Every existing setting has a real input control");}
         check(fieldCount==23,"Bubble controls are outside the main settings pages");
         menu.page=0;menu.build();const auto inspectionOptions=state["value"];menu.command(122,BN_CLICKED);
         check(state["value"]["inspectionMode"]==true&&IsWindowEnabled(GetDlgItem(menu.panel,122)),"Full interface enables inspection through its real save path");
         for(const auto& c:menu.controls)if(NativeSettings::inspectionBlocks(c.field->key))check(!IsWindowEnabled(c.input)&&!c.checked,"Full interface blocks overridden behavior without erasing its saved value");
         menu.save();menu.command(122,BN_CLICKED);check(state["value"]==inspectionOptions,"Full interface restores original values after inspection and an intervening save");
-        menu.page=1;menu.build();
-        check(!GetDlgItem(menu.panel,2215)&&!GetDlgItem(menu.panel,2216),"Cafe settings exclude bubble controls");
+        check(!GetDlgItem(menu.panel,114)&&!GetDlgItem(menu.panel,115),"Global settings exclude cafe gaze tracking");
+        SendMessageW(GetDlgItem(menu.window,1001),BM_CLICK,0,0);
+        wchar_t movementTitle[32]{};
+        GetWindowTextW(GetDlgItem(menu.window,1001),movementTitle,int(std::size(movementTitle)));
+        const auto gaze=GetDlgItem(menu.panel,115);
+        check(menu.page==1&&std::wstring_view(movementTitle)==L"移动"&&GetDlgItem(menu.panel,114)&&gaze,
+            "Movement navigation contains the cafe gaze controls");
+        SendMessageW(gaze,CB_SETCURSEL,1,0);menu.command(115,CBN_SELCHANGE);
+        check(state["value"]["cafeLookMode"]=="threshold","Movement saves the cafe gaze mode through its selector");
+        check(!GetDlgItem(menu.panel,2215)&&!GetDlgItem(menu.panel,2216),"Movement settings exclude bubble controls");
         const auto messageTab=GetDlgItem(menu.window,1000+NativeSettings::messagesPage);
         SendMessageW(messageTab,BM_CLICK,0,0);
         const auto opacitySlider=GetDlgItem(menu.panel,2215);
         const auto blurSlider=GetDlgItem(menu.panel,2216);
         check(menu.page==NativeSettings::messagesPage&&IsWindowVisible(opacitySlider)&&IsWindowVisible(blurSlider),
             "The left navigation opens the Codex message page in the main panel");
+        check(!IsWindowVisible(GetDlgItem(menu.window,2200)),"Import is hidden on the Codex page");
         checkCodexConnection(menu);
+        checkOtherAgentConnections();
         SendMessageW(opacitySlider,TBM_SETPOS,TRUE,63);
         SendMessageW(blurSlider,TBM_SETPOS,TRUE,14);
         SendMessageW(menu.panel,WM_HSCROLL,TB_THUMBPOSITION,reinterpret_cast<LPARAM>(blurSlider));
@@ -357,7 +409,9 @@ int main(int argc,char** argv){
         check(sent.back().at("type")=="bubble_settings","The message page saves independently of global settings");
         SendMessageW(GetDlgItem(menu.panel,2214),BM_CLICK,0,0);
         check(sent.back().at("type")=="preview_bubble","The preview button requests a real bubble");
-        menu.page=0;menu.build();checkRepainting(menu);SetWindowTextW(GetDlgItem(menu.panel,108),L"not a number");const auto invalidCount=sent.size();menu.save();check(sent.size()==invalidCount,"Invalid numeric input is not submitted");
+        menu.page=1;menu.build();SetWindowTextW(GetDlgItem(menu.panel,108),L"not a number");const auto invalidCount=sent.size();menu.save();check(sent.size()==invalidCount,"Invalid numeric input is not submitted");
+        SetWindowTextW(GetDlgItem(menu.panel,108),L"45");menu.save();check(state["value"]["idleSeconds"]==45,"Movement still saves edited numeric values");
+        menu.page=0;menu.build();checkRepainting(menu);
         const auto quality=GetDlgItem(menu.panel,101);wchar_t qualityLabel[80]{};SendMessageW(quality,CB_GETLBTEXT,2,reinterpret_cast<LPARAM>(qualityLabel));check(std::wstring(qualityLabel).find(L"4× MSAA")!=std::wstring::npos,"Quality choice explicitly identifies MSAA");
         const auto samplingLabel=GetDlgItem(menu.panel,2111);check(samplingLabel,"Global settings expose actual sampling status");
         const auto samplingText=[&]{wchar_t text[256]{};GetWindowTextW(samplingLabel,text,256);return std::wstring(text);};
@@ -371,11 +425,11 @@ int main(int argc,char** argv){
             auto combo=GetDlgItem(menu.panel,101);RECT bounds{};GetClientRect(combo,&bounds);auto dc=GetDC(combo);auto previous=SelectObject(dc,menu.ui.font);SIZE extent{};GetTextExtentPoint32W(dc,qualityLabel,int(std::wcslen(qualityLabel)),&extent);SelectObject(dc,previous);ReleaseDC(combo,dc);check(extent.cx+menu.u(32)<bounds.right,"MSAA option fits without clipping at every DPI");
         }
         menu.reloadTheme(menu.window,96);
-        SetWindowTextW(GetDlgItem(menu.panel,108),L"45");menu.save();check(state["value"]["idleSeconds"]==45,"Full settings still save edited numeric values");
         SendMessageW(GetDlgItem(menu.panel,101),CB_SETCURSEL,0,0);menu.command(101,CBN_SELCHANGE);check(state["value"]["renderQuality"]==0,"Styled combo preserves native selection commands");
         SendMessageW(GetDlgItem(menu.panel,103),TBM_SETPOS,TRUE,175);SendMessageW(menu.panel,WM_HSCROLL,TB_THUMBPOSITION,reinterpret_cast<LPARAM>(GetDlgItem(menu.panel,103)));check(state["value"]["outlineWidth"]==175,"Styled slider retains native value/drag behavior");
         checkOutlineInput(menu,state,sent);
-        menu.page=3;menu.build();check(SendMessageW(menu.list,LB_GETCOUNT,0,0)==15,"Full roster preserves the entire import history");
+        menu.page=3;menu.build();check(IsWindowVisible(GetDlgItem(menu.window,2200)),"Import is visible on the Models page");
+        check(SendMessageW(menu.list,LB_GETCOUNT,0,0)==15,"Full roster preserves the entire import history");
         const auto lastRowVisible=[&]{RECT row{},client{},viewport{};const auto count=SendMessageW(menu.list,LB_GETCOUNT,0,0);SendMessageW(menu.list,LB_GETITEMRECT,count-1,reinterpret_cast<LPARAM>(&row));GetClientRect(menu.list,&client);if(row.top<0||row.bottom>client.bottom)return false;MapWindowPoints(menu.list,menu.panel,reinterpret_cast<POINT*>(&row),2);GetClientRect(menu.panel,&viewport);return row.top>=0&&row.bottom<=viewport.bottom;};
         for(UINT dpi:{96u,120u,144u,168u,192u}){
             menu.reloadTheme(menu.window,dpi);SetWindowPos(menu.window,nullptr,0,0,menu.u(920),menu.u(680),SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);pump(menu);menu.scrollTo(0);

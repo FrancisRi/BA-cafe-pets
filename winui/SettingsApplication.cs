@@ -100,8 +100,8 @@ public sealed partial class SettingsApplication : Application
                 HideMenus();
                 if (message.String("surface") != "quick") full?.Hide();
                 break;
-            case "codex_result":
-                full?.CodexResult(message.String("detail"), message.Boolean("error"));
+            case "agent_result":
+                full?.AgentResult(message.String("detail"));
                 break;
             case "shutdown":
                 Shutdown();

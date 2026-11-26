@@ -7,14 +7,14 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 
 namespace BaCafe.Settings;
 
-internal enum SettingsPage { Global, Movement, Cafe, Battle, Models, Codex }
+internal enum SettingsPage { Global, Movement, Battle, Models, Agent }
 
 internal sealed class MainWindow : NativeWindow
 {
     private static readonly (string Label, string Icon)[] Pages =
     [
-        ("全局设置", "\uE713"), ("移动", "\uE7C1"), ("咖啡厅", "\uE80F"),
-        ("战斗", "\uE7FC"), ("模型管理", "\uE716"), ("Codex 消息", "\uE8BD")
+        ("全局设置", "\uE713"), ("移动", "\uE7C1"),
+        ("战斗", "\uE7FC"), ("模型管理", "\uE716"), ("Agent 消息", "\uE8BD")
     ];
     private readonly SettingsApplication app;
     private readonly IReadOnlyList<Field> fields;
@@ -26,7 +26,7 @@ internal sealed class MainWindow : NativeWindow
     private readonly TextBlock status = Controls.Text("", 12);
     private readonly TextBlock sampling = Controls.Text("", 12);
     private readonly TextBlock modelPath = Controls.Text("", 12);
-    private readonly TextBlock hookStatus = Controls.Text("连接后，在 Codex 的 Hooks 设置中确认信任。", 12);
+    private readonly TextBlock hookStatus = Controls.Text("选择 Agent，写入当前用户的 Hook 配置。", 12);
     private readonly ScrollViewer scroll = new() { VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
     private readonly ProgressBar progress = new() { Visibility = Visibility.Collapsed };
     private readonly ToggleSwitch startup = new() { OnContent = "", OffContent = "" };
@@ -125,11 +125,12 @@ internal sealed class MainWindow : NativeWindow
         int index = (int)target;
         if (navigation.SelectedIndex != index) navigation.SelectedIndex = index;
         title.Text = Pages[index].Label;
+        import.Visibility = target == SettingsPage.Models ? Visibility.Visible : Visibility.Collapsed;
         if (!views.TryGetValue(target, out var content))
         {
             content = new StackPanel { Spacing = 10, MaxWidth = 820, HorizontalAlignment = HorizontalAlignment.Stretch };
             if (target == SettingsPage.Models) BuildModels(content);
-            else if (target == SettingsPage.Codex) BuildCodex(content);
+            else if (target == SettingsPage.Agent) BuildAgent(content);
             else BuildOptions(content, target);
             views[target] = content;
         }
@@ -139,19 +140,10 @@ internal sealed class MainWindow : NativeWindow
         if (target == SettingsPage.Models) app.Send(new { type = "refresh_models" });
     }
 
-    private static SettingsPage PageFor(Field field) => field.Page switch
-    {
-        1 => SettingsPage.Cafe,
-        2 => SettingsPage.Battle,
-        _ => field.Key is "wandering" or "follow" or "followNear" or "followFar" or "idleSeconds"
-            or "activeSeconds" or "moveInterval" or "moveBodies" or "walkTimeJitter" or "walkDistanceJitter"
-            ? SettingsPage.Movement : SettingsPage.Global
-    };
-
     private void BuildOptions(StackPanel content, SettingsPage target)
     {
         var controls = new List<OptionEditor>();
-        foreach (var field in fields.Where(field => PageFor(field) == target))
+        foreach (var field in fields.Where(field => field.Page == (int)target))
         {
             string? section = field.Key switch
             {
@@ -185,21 +177,22 @@ internal sealed class MainWindow : NativeWindow
         content.Children.Add(roster.View);
     }
 
-    private void BuildCodex(StackPanel content)
+    private void BuildAgent(StackPanel content)
     {
-        content.Children.Add(Controls.Button("连接 Codex", () => app.Send(new { type = "connect_codex" }), true));
+        content.Children.Add(Controls.AdaptiveButtonGrid(
+            Controls.Button("连接 Codex", () => app.Send(new { type = "connect_agent", agent = "codex" })),
+            Controls.Button("连接 Claude Code", () => app.Send(new { type = "connect_agent", agent = "claude-code" })),
+            Controls.Button("连接 Cursor", () => app.Send(new { type = "connect_agent", agent = "cursor" })),
+            Controls.Button("复制通用命令", () => app.Send(new { type = "copy_agent_command" }))));
         content.Children.Add(hookStatus);
         content.Children.Add(Controls.Card("不透明度", "", Controls.Row(opacity, opacityLabel)));
         content.Children.Add(Controls.Card("背景模糊", "", Controls.Row(blur, blurLabel)));
         AutomationProperties.SetName(opacity, "不透明度");
         AutomationProperties.SetName(blur, "背景模糊");
-        content.Children.Add(Controls.Button("预览气泡", () => app.Send(new { type = "preview_bubble" })));
+        content.Children.Add(Controls.Button("发送测试消息", () => app.Send(new { type = "preview_bubble" })));
     }
 
-    internal void CodexResult(string detail, bool error)
-    {
-        hookStatus.Text = error ? "无法连接 Codex。 " + detail : detail;
-    }
+    internal void AgentResult(string detail) => hookStatus.Text = detail;
 
     internal void Apply(JsonElement state, string message, string samples)
     {
@@ -233,7 +226,7 @@ internal sealed class MainWindow : NativeWindow
             resetFolder.IsEnabled = changeFolder.IsEnabled && !state.Boolean("modelsDirectoryDefault");
             roster.Apply(state);
         }
-        else if (current == SettingsPage.Codex)
+        else if (current == SettingsPage.Agent)
         {
             var value = state.Property("value");
             opacity.Value = value.Integer("bubbleOpacity", 88);

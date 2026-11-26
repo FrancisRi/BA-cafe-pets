@@ -44,9 +44,28 @@ cmake --build build-rust-movement --target ba_cafe_lite_crowd_tests ba_cafe_lite
 
 默认构建使用 C++ 实现，可用相同的测试目标对照两种实现。`ba_cafe_lite_movement_tests.exe --trace` 可输出每步位置、朝向及移动状态，便于逐步比较。`BA_RUSTC` 可指定未加入 PATH 的 Rust 编译器路径。
 
-### Codex 消息气泡
+### Agent 消息气泡
 
-设置窗口左侧导航的「Codex 消息」页提供预览、0–100% 的底色不透明度和 0–24 逻辑像素的背景模糊。滑块即时更新画面，停止调节后保存。底色采用中性灰阶，文字由 DirectWrite 按显示器的 DPI 绘制，独立合成到背景上。气泡使用最先启用的当前显示模型的名称，位于角色轮廓上方 8 个逻辑像素处，贴近屏幕顶边时会移入工作区。启用顺序随模型列表保存，旧记录首次加载时使用保存的列表顺序。
+设置窗口左侧导航的「Agent 消息」页可一键连接三种 Agent，并提供「复制通用命令」「发送测试消息」、0–100% 的底色不透明度和 0–24 逻辑像素的背景模糊。气泡使用最先启用的当前显示模型的名称，位于角色轮廓上方 8 个逻辑像素处，贴近屏幕顶边时会移入工作区。启用顺序随模型列表保存。
+
+- **Claude Code** 在 `CLAUDE_CONFIG_DIR/settings.json` 写入 `UserPromptSubmit`、`Stop` 和 `StopFailure`，默认目录为 `%USERPROFILE%/.claude`。可用 `/hooks` 查看。 [Claude Code Hooks](https://code.claude.com/docs/en/hooks)
+- **Cursor** 在 `%USERPROFILE%/.cursor/hooks.json` 写入 `beforeSubmitPrompt`、`afterAgentResponse` 和 `stop`。助手正文来自 `afterAgentResponse` 的 `text` 字段。 [Cursor Hooks](https://cursor.com/docs/hooks)
+
+预设会合并用户级配置。移动 EXE 后，重新点击连接可更新桌宠命令。
+
+#### 通用命令
+
+运行桌宠后，通过标准输入向 `BA-Cafe-Pets.exe --notify --stdin` 发送一个 UTF-8 JSON 对象。PowerShell 示例可从设置页一键复制：
+
+```powershell
+$OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+@{source='自定义'; run_id='task-123'; phase='progress'; text='正在运行测试。'} |
+  ConvertTo-Json -Compress | & '.\BA-Cafe-Pets.exe' --notify --stdin
+```
+
+`phase` 支持 `message`、`start`、`progress`、`end`、`interrupt` 和 `error`。`source` 和 `run_id` 可选。`message` 和 `progress` 需要 `text`，其余阶段可使用默认提示。退出码 `0` 表示本机运行中的桌宠已接收，`1` 表示输入无效或未送达。
+
+#### Codex
 
 点击「连接 Codex」，桌宠会按当前便携版 EXE 或单文件版启动器的路径合并 `UserPromptSubmit`、`Stop`、`Interrupt`。配置位于 `CODEX_HOME`，默认使用 `%USERPROFILE%\.codex`。移动或更换 EXE 后可再次点击以更新路径。然后在 Codex 的「设置 → Hooks」中审核并信任命令。 [Codex Hooks](https://learn.chatgpt.com/docs/hooks)
 
@@ -72,7 +91,7 @@ command = 'F:/ba-cafe-lite/build-rust-movement/bin/BA-Cafe-Pets-RustMovement.exe
 timeout = 3
 ```
 
-发送提示词时显示「任务开始了哦...」。桌宠按 Hook 提供的路径读取当前回合的本地记录，路径缺省时按会话 ID 在 Codex 的 `sessions` 目录定位文件。已写入的 `commentary` 消息按顺序显示。完成或中断时，桌宠会读取当前回合尚未显示的进度，再显示最终提示。旧版 Codex CLI 可用顶层 `notify` 接收完成提示。便携版和单文件版都支持 Hook。
+发送提示词时显示「任务开始了哦...」。桌宠按 Hook 路径和会话 ID 在 Codex 的 `sessions` 目录定位本地记录，并跟踪 Codex Desktop 为会话新建的分页文件。会话文件晚到时，桌宠会分批补读当前回合的 `commentary` 消息。完成或中断时，尚未显示的进度按顺序补齐，再显示最终提示。旧版 Codex CLI 可用顶层 `notify` 接收完成提示。便携版和单文件版都支持 Hook。
 
 ```toml
 notify = ['F:\ba-cafe-lite\build\bin\BA-Cafe-Pets.exe', '--codex-notify']

@@ -4,7 +4,7 @@
 #include <cwchar>
 #include <tuple>
 #include "native_autostart.h"
-#include "native_codex_hooks.h"
+#include "native_agent_hooks.h"
 #include "native_model_name.h"
 #include "native_winui.h"
 #include "native_outline_input.h"
@@ -32,7 +32,7 @@ struct NativeSettings {
     bool syncing=false,closing=false,notifiedVisible=false,notifiedPaused=false;
     bool quickFromTray=false;
     bool editingOutline=false,endingOutline=false;
-    bool codexHooksConfigured=false;
+    std::wstring agentHookStatus=L"选择 Agent，写入当前用户的 Hook 配置。";
     std::string highlighted,contextId;
     static std::wstring modeTitle(const std::string& mode){return mode=="formation"?L"列队":mode=="battle"?L"战斗":L"咖啡厅";}
     std::vector<std::string> modeChoices() const {std::vector<std::string> modes{"cafe"};if(last.value("battleAvailable",false))modes.push_back("battle");if(last.value("formationAvailable",false))modes.push_back("formation");return modes;}
@@ -51,8 +51,8 @@ struct NativeSettings {
         }
         result["characters"]=std::move(imported);return result;
     }
-    inline static constexpr const wchar_t* pages[]={L"全局设置",L"咖啡厅",L"战斗",L"模型管理",L"Codex 消息"};
-    inline static constexpr const wchar_t* pageIcons[]={L"\xE713",L"\xE80F",L"\xE7FC",L"\xE716",L"\xE8BD"};
+    inline static constexpr const wchar_t* pages[]={L"全局设置",L"移动",L"战斗",L"模型管理",L"Agent 消息"};
+    inline static constexpr const wchar_t* pageIcons[]={L"\xE713",L"\xE7C1",L"\xE7FC",L"\xE716",L"\xE8BD"};
     static constexpr int messagesPage=4;
     static constexpr int pageCount=int(std::size(pages));
     inline static constexpr Field fields[]={
@@ -80,6 +80,8 @@ struct NativeSettings {
         {"rightDragRotation",L"右键拖动旋转",L"所有模式与 Exs 中均可手动调整朝向",0,L"\xE7AD"},
         {"inspectionMode",L"观赏模式",L"暂停移动与追踪；右键拖动可水平旋转和上下翻转",0,L"\xE890"}
     };
+    inline static constexpr size_t fieldOrder[]={0,1,2,3,22,21,4,5,6,7,14,15,8,9,10,11,12,13,16,17,18,19,20};
+    static constexpr int fieldPage(size_t index){return index>=4&&index<16?1:index>=16&&index<21?2:0;}
     ~NativeSettings(){closing=true;editingOutline=false;if(modelMenu)DestroyWindow(modelMenu);if(quickWindow)DestroyWindow(quickWindow);if(window)DestroyWindow(window);}
     int u(int value) const {return ui.px(value);}
     int panelWidth() const {RECT r{};if(panel)GetClientRect(panel,&r);return std::max(320,ui.dip(r.right)-32);}
@@ -175,16 +177,21 @@ struct NativeSettings {
     }
     void build(){
         if(!panel)return;syncing=true;editingOutline=false;outlineValue=outlineHost=nullptr;for(auto hwnd:content)DestroyWindow(hwnd);content.clear();placements.clear();controls.clear();list=listEmpty=nullptr;scroll=0;int y=8;
+        ShowWindow(GetDlgItem(window,2200),page==3?SW_SHOWNA:SW_HIDE);
         const auto note=[&](const wchar_t* text,int height=34){auto h=control(panel,L"STATIC",text,0,0,16,y,panelWidth(),height);SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(ui.small),FALSE);placeContent(h,16,y,0,height,true);y+=height+12;};
         const auto section=[&](const wchar_t* text){auto h=control(panel,L"STATIC",text,0,0,16,y,panelWidth(),24);SetPropW(h,L"FluentSection",reinterpret_cast<HANDLE>(1));SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(ui.heading),FALSE);placeContent(h,16,y,0,24,true);y+=34;};
         if(page==messagesPage){
-            auto connect=control(panel,L"BUTTON",L"连接 Codex",BS_OWNERDRAW,2217,16,y,142,36);
-            placeContent(connect,16,y,142,36);y+=44;
-            auto status=control(panel,L"STATIC",codexHooksConfigured?
-                L"已写入配置。请在 Codex「设置 → Hooks」中审核并信任桌宠命令。":
-                L"连接后，在 Codex 的 Hooks 设置中确认信任。",0,2218,16,y,panelWidth(),38);
+            int index=0;
+            for(const auto& [id,text]:{std::pair{2217,L"连接 Codex"},{2219,L"连接 Claude Code"},
+                {2220,L"连接 Cursor"},{2221,L"复制通用命令"}}){
+                const int x=16+index%2*162,top=y+index/2*44;
+                auto button=control(panel,L"BUTTON",text,BS_OWNERDRAW,id,x,top,154,36);
+                placeContent(button,x,top,154,36);++index;
+            }
+            y+=88;
+            auto status=control(panel,L"STATIC",agentHookStatus.c_str(),0,2218,16,y,panelWidth(),44);
             SendMessageW(status,WM_SETFONT,reinterpret_cast<WPARAM>(ui.small),FALSE);
-            placeContent(status,16,y,0,38,true);y+=46;
+            placeContent(status,16,y,0,44,true);y+=52;
             for(auto [labelId,sliderId,maximum,label]:{
                     std::tuple{2212,2215,100,L"不透明度"},std::tuple{2213,2216,24,L"背景模糊"}}){
                 auto heading=control(panel,L"STATIC",label,0,labelId,16,y,panelWidth(),22);
@@ -194,7 +201,7 @@ struct NativeSettings {
                 SendMessageW(slider,TBM_SETTHUMBLENGTH,u(24),0);
                 placeContent(slider,16,y,340,34);y+=58;
             }
-            auto preview=control(panel,L"BUTTON",L"预览气泡",BS_OWNERDRAW,2214,16,y,142,36);
+            auto preview=control(panel,L"BUTTON",L"发送测试消息",BS_OWNERDRAW,2214,16,y,142,36);
             placeContent(preview,16,y,142,36);y+=48;
         }else if(page==3){
             section(L"本地模型库");note(L"可多选导入；模型自动保存副本，之后可移动或删除原文件。",26);
@@ -213,11 +220,10 @@ struct NativeSettings {
             section(L"显示管理");for(auto [id,text]:{std::pair{2103,L"统一角色大小"},{2104,L"隐藏当前角色"}}){const int pos=id==2103?16:190;auto h=control(panel,L"BUTTON",text,BS_OWNERDRAW,id,pos,y,162,36);placeContent(h,pos,y,162,36);}y+=52;
             note(L"白子与其他本地模型均可删除，文件移入回收站并移除记录；隐藏或删除全部角色后，程序仍在托盘运行。",40);
         }else{
-            note(page==0?L"显示与行为参数由所有角色共享，动作模式只应用于当前角色。":page==1?L"日常陪伴、视线与转向。位置跟随距离可在全局设置中调整。":L"保留按键攻击、换弹、EX、点击指挥与走动的原有规则。");
-            for(size_t ordinal=0;ordinal<std::size(fields);++ordinal){
-                // Keep stable control IDs while placing manual rotation near appearance.
-                const size_t i=ordinal<4?ordinal:ordinal==4?22:ordinal==5?21:ordinal-2;
-                if((page==0&&i>=14&&i<21)||(page==1&&(i<14||i>=16))||(page==2&&(i<16||i>=21)))continue;const auto& f=fields[i];
+            note(page==0?L"显示与行为参数由所有角色共享，动作模式只应用于当前角色。":page==1?L"调整散步、位置跟随和咖啡厅视线追踪。":L"保留按键攻击、换弹、EX、点击指挥与走动的原有规则。");
+            for(const auto i:fieldOrder){
+                if(fieldPage(i)!=page)continue;
+                const auto& f=fields[i];
                 if(i==0)section(L"角色与显示");if(i==4)section(L"移动与跟随");if(i==8)section(L"时间与随机变化");if(i==14)section(L"视线追踪");if(i==16)section(L"战斗动作");
                 HWND input{},label{},hint{};
                 if(f.kind==0)input=control(panel,L"BUTTON",f.title,BS_OWNERDRAW,100+int(i),16,y,panelWidth(),68);
@@ -368,15 +374,14 @@ struct NativeSettings {
     }
     static Json winUiFields(){
         Json controls=Json::array();
-        for(size_t ordinal=0;ordinal<std::size(fields);++ordinal){
-            const auto i=ordinal<4?ordinal:ordinal==4?22:ordinal==5?21:ordinal-2;
+        for(const auto i:fieldOrder){
             const auto& f=fields[i];
             double min=1,max=3600;
             for(size_t n=0;n<std::size(NativePreferences::names);++n)if(std::string_view(f.key)==NativePreferences::names[n]){
                 min=NativePreferences::minimum[n];max=NativePreferences::maximum[n];break;
             }
             controls.push_back({{"key",f.key},{"title",utf8(f.title)},{"detail",utf8(f.detail)},{"icon",utf8(f.icon)},
-                {"kind",f.kind},{"page",i>=14&&i<16?1:i>=16&&i<21?2:0},{"min",min},{"max",max}});
+                {"kind",f.kind},{"page",fieldPage(i)},{"min",min},{"max",max}});
         }
         return controls;
     }
@@ -402,16 +407,40 @@ struct NativeSettings {
             {"x",cursor.x},{"y",cursor.y}}.dump());
         return true;
     }
-    void connectCodex(){
+    void agentResult(std::wstring detail){
+        agentHookStatus=std::move(detail);
+        if(winUi)winUi->send(Json{{"type","agent_result"},{"detail",utf8(agentHookStatus)}}.dump());
+        else SetWindowTextW(GetDlgItem(panel,2218),agentHookStatus.c_str());
+    }
+    void connectAgent(NativeAgentHooks::Preset preset){
+        using NativeAgentHooks::Preset;
         try{
-            NativeCodexHooks::connect(NativeCodexHooks::home(),NativeAutostart::launchExecutable());
-            codexHooksConfigured=true;
-            const std::wstring status=L"已写入配置。请在 Codex「设置 → Hooks」中审核并信任桌宠命令。";
-            if(winUi)winUi->send(Json{{"type","codex_result"},{"detail",utf8(status)},{"error",false}}.dump());
-            else SetWindowTextW(GetDlgItem(panel,2218),status.c_str());
+            NativeAgentHooks::connect(NativeAgentHooks::home(preset),NativeAutostart::launchExecutable(),preset);
+            agentResult(preset==Preset::Codex?L"已写入 Codex 配置。请在 Codex「设置 → Hooks」中审核并信任桌宠命令。":
+                preset==Preset::ClaudeCode?L"已写入 Claude Code 配置。可用 /hooks 查看，然后提交新任务。":
+                L"已写入 Cursor 配置。可在 Cursor 的 Hooks 设置查看，然后提交新任务。");
         }catch(const std::exception& e){
-            if(winUi)winUi->send(Json{{"type","codex_result"},{"detail",e.what()},{"error",true}}.dump());
-            else{const auto detail=wide(e.what());nativeMessageBox(window,detail.c_str(),L"无法连接 Codex",MB_OK|MB_ICONWARNING);}
+            agentResult(L"连接失败。"+wide(e.what()));
+        }
+    }
+    void copyAgentCommand(){
+        try{
+            const auto text=NativeAgentHooks::notificationExample(NativeAutostart::launchExecutable());
+            if(!OpenClipboard(dialogOwner())){agentResult(L"剪贴板正被占用，请重试。");return;}
+            const auto data=GlobalAlloc(GMEM_MOVEABLE,(text.size()+1)*sizeof(wchar_t));
+            bool copied=false;
+            if(data){
+                if(auto* target=static_cast<wchar_t*>(GlobalLock(data))){
+                    std::copy_n(text.c_str(),text.size()+1,target);
+                    GlobalUnlock(data);
+                    copied=EmptyClipboard()&&SetClipboardData(CF_UNICODETEXT,data);
+                }
+                if(!copied)GlobalFree(data);
+            }
+            CloseClipboard();
+            agentResult(copied?L"已复制 PowerShell 测试命令。粘贴运行可向桌宠发送消息。":L"无法复制命令，请重试。");
+        }catch(const std::exception& e){
+            agentResult(L"无法复制命令。"+wide(e.what()));
         }
     }
     void resetPreferences(){
@@ -435,7 +464,15 @@ struct NativeSettings {
             const auto detail=wide(message.value("detail",std::string{}));
             nativeMessageBox(dialogOwner(),detail.c_str(),L"WinUI 设置",MB_OK|MB_ICONWARNING);return;
         }
-        if(type=="connect_codex"){connectCodex();return;}
+        if(type=="connect_agent"){
+            using NativeAgentHooks::Preset;
+            const auto agent=message.value("agent",std::string{});
+            if(agent=="codex")connectAgent(Preset::Codex);
+            else if(agent=="claude-code")connectAgent(Preset::ClaudeCode);
+            else if(agent=="cursor")connectAgent(Preset::Cursor);
+            return;
+        }
+        if(type=="copy_agent_command"){copyAgentCommand();return;}
         if(type=="reset_preferences"){resetPreferences();return;}
         if(type=="option"){
             const auto key=message.value("key",std::string{});
@@ -555,8 +592,12 @@ struct NativeSettings {
             return;
         }
         if(id==2210&&code==BN_CLICKED){const auto startup=last.value("startup",Json::object());if(startup.value("available",false)&&receive)receive({{"type","set_autostart"},{"enabled",!startup.value("enabled",false)}});sync();return;}
-        if(id==2217&&code==BN_CLICKED&&page==messagesPage){
-            connectCodex();return;
+        if(code==BN_CLICKED&&page==messagesPage){
+            using NativeAgentHooks::Preset;
+            if(id==2217){connectAgent(Preset::Codex);return;}
+            if(id==2219){connectAgent(Preset::ClaudeCode);return;}
+            if(id==2220){connectAgent(Preset::Cursor);return;}
+            if(id==2221){copyAgentCommand();return;}
         }
         if(id==2214&&code==BN_CLICKED){
             if(receive)receive({{"type","preview_bubble"}});

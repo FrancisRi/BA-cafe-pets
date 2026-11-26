@@ -91,6 +91,11 @@ function Click([string]$Name) {
     $item = Find-Control $Name
     $item.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
 }
+function Check-ImportHidden {
+    $name = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty, '导入模型')
+    $button = $root.FindFirst($tree, $name)
+    if ($null -ne $button -and !$button.Current.IsOffscreen) { throw 'Import is visible outside the Models page' }
+}
 function Model-Check([string]$Name, [string]$State) {
     $item = Find-Control $Name ([Windows.Automation.ControlType]::CheckBox)
     $toggle = $item.GetCurrentPattern([Windows.Automation.TogglePattern]::Pattern)
@@ -195,7 +200,9 @@ def main(binary):
     with tempfile.TemporaryDirectory(prefix="ba-winui-", dir=artifacts) as scratch:
         data = Path(scratch) / "data"
         data.mkdir()
-        env = dict(os.environ, BA_NATIVE_PROGRAM_DIR=scratch)
+        agent_profile = Path(scratch) / "agent-profile"
+        env = dict(os.environ, BA_NATIVE_PROGRAM_DIR=scratch, USERPROFILE=str(agent_profile),
+                   CODEX_HOME=str(agent_profile / ".codex"), CLAUDE_CONFIG_DIR=str(agent_profile / ".claude"))
         pet = subprocess.Popen([binary, "--data-dir", data, "--settings"], env=env,
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -213,16 +220,26 @@ def main(binary):
             automation(full, r"""
                 $nameProperty = [Windows.Automation.AutomationElement]::NameProperty
                 $wandering = [Windows.Automation.PropertyCondition]::new($nameProperty, '允许散步')
+                $cafe = [Windows.Automation.PropertyCondition]::new($nameProperty, '咖啡厅')
+                $navigation = Find-Control '设置导航' ([Windows.Automation.ControlType]::List)
+                if ($null -ne $navigation.FindFirst($tree, $cafe)) { throw 'Cafe is still in settings navigation' }
                 if ($null -ne $root.FindFirst($tree, $wandering)) { throw 'Movement is still on the global page' }
+                Check-ImportHidden
                 Open-Page '移动'
                 $null = Find-Control '允许散步'
                 $null = Find-Control '时间与随机变化'
                 $null = Find-Control '无输入等待'
-                Open-Page '咖啡厅'
                 $null = Find-Control '视线追踪鼠标'
+                $lookMode = Find-Control '视线追踪方式' ([Windows.Automation.ControlType]::ComboBox)
+                $lookMode.GetCurrentPattern([Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+                $threshold = Find-Control '30° 后转向' ([Windows.Automation.ControlType]::ListItem)
+                $threshold.GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Select()
+                Check-ImportHidden
                 Open-Page '战斗'
                 $null = Find-Control '允许战斗走动'
+                Check-ImportHidden
                 Open-Page '模型管理'
+                $null = Action-Bounds @('导入模型')
                 Click '重命名…'
                 $input = Find-Control '模型名称'
                 $input.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).SetValue('测试白子')
@@ -248,24 +265,59 @@ def main(binary):
                 finally:
                     assert user.SetWindowPos(full, None, 0, 0, full_width, full_height, 0x16)
             automation(full, r"""
-                Open-Page 'Codex 消息'
+                Open-Page 'Agent 消息'
+                $null = Action-Bounds @('连接 Codex', '连接 Claude Code', '连接 Cursor', '复制通用命令')
+                Click '连接 Codex'
+                Click '连接 Claude Code'
+                Click '连接 Cursor'
                 $slider = Find-Control '不透明度' ([Windows.Automation.ControlType]::Slider)
+                Check-ImportHidden
                 $slider.GetCurrentPattern([Windows.Automation.RangeValuePattern]::Pattern).SetValue(64)
-                Click '预览气泡'
+                Click '发送测试消息'
             """)
+            for name, filename, event in ((".codex", "hooks.json", "UserPromptSubmit"),
+                                          (".claude", "settings.json", "UserPromptSubmit"),
+                                          (".cursor", "hooks.json", "afterAgentResponse")):
+                config = agent_profile / name / filename
+                wait_for(config.is_file)
+                assert json.loads(config.read_text(encoding="utf-8"))["hooks"][event]
             bubble = wait_for(lambda: window(pet.pid, "BaCafeMessageBubble"))
             text = ctypes.create_unicode_buffer(256)
             user.GetWindowTextW(bubble, text, len(text))
-            assert text.value == "测试白子\n任务开始了哦..."
+            assert text.value == "测试白子\nBA Cafe Pets · 测试消息已送达。"
 
-            def setting(section, key):
+            cursor_hooks = json.loads((agent_profile / ".cursor/hooks.json").read_text(encoding="utf-8"))["hooks"]
+
+            def cursor_hook(event, **payload):
+                command = cursor_hooks[event][0]["command"]
+                result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command],
+                                        input=json.dumps(dict(hook_event_name=event, generation_id="cursor-fixture",
+                                                              **payload), ensure_ascii=False).encode("utf-8"),
+                                        capture_output=True, check=True, timeout=6)
+                assert json.loads(result.stdout) == {}
+
+            def bubble_is(expected):
+                handle = window(pet.pid, "BaCafeMessageBubble")
+                if handle:
+                    user.GetWindowTextW(handle, text, len(text))
+                    return text.value == "测试白子\n" + expected
+                return False
+
+            cursor_hook("beforeSubmitPrompt")
+            wait_for(lambda: bubble_is("Cursor · 任务开始了哦..."), 5)
+            cursor_hook("afterAgentResponse", text="预设命令保留中文。")
+            wait_for(lambda: bubble_is("Cursor · 预设命令保留中文。"), 5)
+
+            def setting(section, key, *, default=-1):
                 cfg = configparser.ConfigParser(strict=False)
                 raw = (data / "settings.ini").read_bytes()
                 cfg.read_string(raw.decode("utf-16" if raw.startswith(b"\xff\xfe") else "utf-8-sig"))
-                return cfg.getint(section, key, fallback=-1)
+                getter = cfg.get if isinstance(default, str) else cfg.getint
+                return getter(section, key, fallback=default)
 
+            wait_for(lambda: setting("Three", "CafeLookMode", default="") == "threshold", 5)
             wait_for(lambda: setting("Messages", "Opacity") == 64, 5)
-            automation(full, "Click '导入模型'")
+            automation(full, "Open-Page '模型管理'; Click '导入模型'")
             picker, _ = wait_for(lambda: top_window(
                 owner=pet.pid, title="导入模型（可按住 Ctrl 或 Shift 多选）"))
             user.PostMessageW(picker, 0x10, 0, 0)
@@ -339,6 +391,7 @@ def main(binary):
             shutil.copyfile(binary.parent / "model" / "Shiroko.glb", extra)
             automation(full, r"""
                 Open-Page '模型管理'
+                Click '刷新模型库'
                 $active = Model-Check '测试白子' 'On'
                 $hidden = Model-Check '测试备用模型' 'Off'
                 $activeBox = $active.Current.BoundingRectangle
@@ -375,15 +428,17 @@ def main(binary):
                 $active.GetCurrentPattern([Windows.Automation.TogglePattern]::Pattern).Toggle()
             """)
             wait_for(lambda: not user.IsWindowVisible(pet_input))
+            automation(full, "Open-Page '全局设置'; Check-ImportHidden")
             menu = open_tray_menu()
             automation(menu, "$null = Find-Control '没有活动模型'; Click '导入模型'")
             picker, _ = wait_for(lambda: top_window(
                 owner=pet.pid, title="导入模型（可按住 Ctrl 或 Shift 多选）"))
             user.PostMessageW(picker, 0x10, 0, 0)
             wait_for(lambda: not user.IsWindowVisible(picker))
+            automation(full, "$null = Find-Control '本地模型库'; $null = Action-Bounds @('导入模型')")
             automation(open_tray_menu(), "Click '退出桌宠'")
             assert pet.wait(timeout=6) == 0
-            print("WinUI 3 quick-menu double-clicks, tray actions, model checkboxes and rename, movement settings, and Codex bubble preview passed.")
+            print("WinUI 3 model and tray controls, three Agent presets, and test message passed.")
         finally:
             if pet.poll() is None:
                 pet.terminate()

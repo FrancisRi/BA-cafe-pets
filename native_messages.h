@@ -12,12 +12,13 @@ struct NativeMessages {
     using Json=nlohmann::json;
     enum class Phase {Other,Start,Progress,End};
     struct Message {std::wstring title,body;std::string turn;Phase phase;};
+    struct CodexTurn {NativeCodexTranscript transcript;std::optional<Message> completion;};
     static constexpr wchar_t endpointClass[]=L"BaCafeNativeMessages.v1";
     static constexpr ULONG_PTR textMessage=0x42414D31;
     static constexpr size_t maxBytes=32768;
     HWND endpoint{};
     std::deque<Message> pending;
-    std::deque<NativeCodexTranscript> transcripts;
+    std::deque<CodexTurn> transcripts;
     ULONGLONG nextPoll=0;
 
     ~NativeMessages(){if(endpoint)DestroyWindow(endpoint);}
@@ -41,10 +42,18 @@ struct NativeMessages {
         pending.push_back({std::move(title),std::move(body),std::move(turn),phase});
         return true;
     }
-    void progress(NativeCodexTranscript& source,bool final=false){
-        const auto result=source.poll(final);
+    void finish(CodexTurn& tracked){
+        if(!tracked.completion)return;
+        auto& message=*tracked.completion;
+        push(std::move(message.title),std::move(message.body),std::move(message.turn),message.phase);
+        tracked.completion.reset();
+    }
+    void progress(CodexTurn& tracked){
+        auto& source=tracked.transcript;
+        const auto result=source.poll(tracked.completion.has_value());
         for(const auto& text:result.commentary)push(L"Codex · 进行中",wide(text),source.turn,Phase::Progress);
-        if(result.ended||final)source.finished=true;
+        if(result.ended||(tracked.completion&&result.caughtUp))source.finished=true;
+        if(source.finished)finish(tracked);
     }
     void pollCodex(){
         const auto now=GetTickCount64();
@@ -52,44 +61,68 @@ struct NativeMessages {
         nextPoll=now+400;
         for(auto it=transcripts.begin();it!=transcripts.end();){
             progress(*it);
-            if(now>it->lastRead+3600000)it=transcripts.erase(it);
+            if(now>it->transcript.lastRead+3600000){finish(*it);it=transcripts.erase(it);}
             else ++it;
         }
     }
-    NativeCodexTranscript* track(std::string_view turn,const Json& value){
+    CodexTurn* track(std::string_view turn,const Json& value,bool atStart=false){
         if(turn.empty())return nullptr;
-        const auto found=std::find_if(transcripts.begin(),transcripts.end(),[&](const auto& t){return t.turn==turn;});
-        if(found!=transcripts.end()&&(!found->path.empty()||found->finished))return &*found;
+        const auto found=std::find_if(transcripts.begin(),transcripts.end(),[&](const auto& t){return t.transcript.turn==turn;});
+        if(found!=transcripts.end()&&(!found->transcript.path.empty()||found->transcript.finished))return &*found;
         auto path=NativeCodexTranscript::sessionPath(std::string(NativeCodexTranscript::field(value,"transcript")));
         auto session=std::string(NativeCodexTranscript::field(value,"session"));
         if(!NativeCodexTranscript::validSession(session))session.clear();
         if(found!=transcripts.end()){
-            found->setPath(std::move(path));
-            if(found->session.empty())found->session=std::move(session);
+            found->transcript.setPath(std::move(path));
+            if(found->transcript.session.empty())found->transcript.session=std::move(session);
             return &*found;
         }
         if(path.empty()&&session.empty())return nullptr;
         if(transcripts.size()==8){
-            const auto done=std::find_if(transcripts.begin(),transcripts.end(),[](const auto& t){return t.finished;});
+            const auto done=std::find_if(transcripts.begin(),transcripts.end(),[](const auto& t){return t.transcript.finished;});
             if(done!=transcripts.end())transcripts.erase(done);
-            else transcripts.pop_front();
+            else{finish(transcripts.front());transcripts.pop_front();}
         }
-        return &transcripts.emplace_back(std::string(turn),std::move(path),std::move(session));
+        return &transcripts.emplace_back(CodexTurn{NativeCodexTranscript(std::string(turn),std::move(path),std::move(session),atStart),{}});
     }
     bool accept(const Json& value){
+        if(NativeCodexTranscript::field(value,"kind")=="agent")return acceptAgent(value);
         const auto title=NativeCodexTranscript::field(value,"title"),body=NativeCodexTranscript::field(value,"body");
         const auto turn=NativeCodexTranscript::field(value,"turn");
         const auto event=NativeCodexTranscript::field(value,"phase");
         if(event=="start"){
-            track(turn,value);
+            track(turn,value,true);
             return push(L"Codex",L"任务开始了哦...",std::string(turn),Phase::Start);
         }
         if(event=="end"||event=="interrupt"){
-            if(auto* source=track(turn,value))progress(*source,true);
-            if(event=="interrupt")return push(L"Codex · 已中断",L"任务已中断。",std::string(turn),Phase::End);
-            return push(L"Codex · 已完成",wide(std::string(body)),std::string(turn),Phase::End);
+            const bool interrupted=event=="interrupt";
+            Message completion{interrupted?L"Codex · 已中断":L"Codex · 已完成",
+                interrupted?L"任务已中断。":wide(std::string(body)),std::string(turn),Phase::End};
+            if(auto* tracked=track(turn,value);tracked&&!tracked->transcript.finished){
+                tracked->completion=std::move(completion);
+                nextPoll=0;
+                return true;
+            }
+            return push(std::move(completion.title),std::move(completion.body),std::move(completion.turn),completion.phase);
         }
         return push(wide(std::string(title)),wide(std::string(body)));
+    }
+    bool acceptAgent(const Json& value){
+        const auto event=NativeCodexTranscript::field(value,"event");
+        auto source=clean(wide(std::string(NativeCodexTranscript::field(value,"source"))),80);
+        auto text=clean(wide(std::string(NativeCodexTranscript::field(value,"text"))),1000);
+        Phase phase=Phase::Other;
+        if(event=="start"){
+            phase=Phase::Start;
+            if(text.empty())text=L"任务开始了哦...";
+        }else if(event=="end"||event=="interrupt"||event=="error"){
+            phase=Phase::End;
+            if(text.empty())text=event=="end"?L"任务已完成。":event=="interrupt"?L"任务已中断。":L"任务执行失败。";
+        }else if(event=="progress")phase=Phase::Progress;
+        else if(event!="message")return false;
+        if(text.empty())return false;
+        if(source.empty())source=L"Agent";
+        return push(source,source+L" · "+text,std::string(NativeCodexTranscript::field(value,"run_id")),phase);
     }
     static LRESULT CALLBACK proc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
         if(msg==WM_NCCREATE){
@@ -144,6 +177,39 @@ struct NativeMessages {
         message["body"]=utf8(clean(wide(std::string(body)),1000));
         return send(std::move(message));
     }
+    static bool notify(std::string_view input){
+        auto value=Json::parse(input,nullptr,false);
+        if(!value.is_object())return false;
+        for(const char* key:{"source","run_id","phase","text"})
+            if(value.contains(key)&&!value[key].is_string())return false;
+        return sendAgent(NativeCodexTranscript::field(value,"source"),NativeCodexTranscript::field(value,"run_id"),
+            NativeCodexTranscript::field(value,"phase"),NativeCodexTranscript::field(value,"text"));
+    }
+    static bool sendAgent(std::string_view source,std::string_view run,std::string_view phase,std::string_view text={}){
+        return send({{"kind","agent"},{"source",utf8(clean(wide(std::string(source)),80))},
+            {"run_id",utf8(clean(wide(std::string(run)),180))},{"event",phase},
+            {"text",utf8(clean(wide(std::string(text)),1000))}});
+    }
+    static void agentHook(std::string_view input,std::wstring_view preset){
+        const auto value=Json::parse(input,nullptr,false);
+        const auto event=NativeCodexTranscript::field(value,"hook_event_name");
+        if(preset==L"claude-code"){
+            const auto run=NativeCodexTranscript::field(value,"session_id");
+            if(event=="UserPromptSubmit")sendAgent("Claude Code",run,"start");
+            else if(event=="Stop")sendAgent("Claude Code",run,"end",NativeCodexTranscript::field(value,"last_assistant_message"));
+            else if(event=="StopFailure")sendAgent("Claude Code",run,"error");
+        }else if(preset==L"cursor"){
+            const auto run=NativeCodexTranscript::field(value,"generation_id");
+            if(event=="beforeSubmitPrompt")sendAgent("Cursor",run,"start");
+            else if(event=="afterAgentResponse")sendAgent("Cursor",run,"progress",NativeCodexTranscript::field(value,"text"));
+            else if(event=="stop"){
+                const auto status=NativeCodexTranscript::field(value,"status");
+                if(status=="completed")sendAgent("Cursor",run,"end");
+                else if(status=="aborted")sendAgent("Cursor",run,"interrupt");
+                else if(status=="error")sendAgent("Cursor",run,"error");
+            }
+        }
+    }
     static std::string hookInput(){
         const HANDLE input=GetStdHandle(STD_INPUT_HANDLE);
         const DWORD type=GetFileType(input);
@@ -161,12 +227,17 @@ struct NativeMessages {
     static std::optional<int> command(int argc,wchar_t* const* argv){
         if(argc<2)return {};
         const std::wstring_view flag=argv[1];
+        if(flag==L"--notify")return argc==3&&std::wstring_view(argv[2])==L"--stdin"&&notify(hookInput())?0:1;
         if(flag==L"--codex-notify")
             return argc==3&&codex(utf8(argv[2]),false)?0:1;
-        if(flag!=L"--codex-hook")return {};
-        if(argc!=2)return 1;
-        codex(hookInput(),true);
-        // A display-only hook has no effect on Codex's decisions.
+        if(flag==L"--codex-hook"){
+            if(argc!=2)return 1;
+            codex(hookInput(),true);
+        }else if(flag==L"--agent-hook"){
+            if(argc!=3||(std::wstring_view(argv[2])!=L"claude-code"&&std::wstring_view(argv[2])!=L"cursor"))return 1;
+            agentHook(hookInput(),argv[2]);
+        }else return {};
+        // Notification hooks return an empty decision even when the receiver is closed.
         static constexpr char response[]="{}\n";
         DWORD written=0;
         WriteFile(GetStdHandle(STD_OUTPUT_HANDLE),response,sizeof(response)-1,&written,nullptr);
